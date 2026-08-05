@@ -49,7 +49,7 @@ needs to change.
 
 Outputs RAW declarations, same as "system"/"defaults" — a bare scalar
 here means the same thing it does everywhere else (targetContainer
-implied "none" once crdkit.resolveToken wraps it into the full struct);
+implied "none" once crdkit.resolveValue.core wraps it into the full struct);
 this block doesn't need to know about the {value, targetContainer}
 shape itself, it's just another source of raw declarations that gets
 merged and resolved uniformly with everything else.

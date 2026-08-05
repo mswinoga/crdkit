@@ -6,49 +6,52 @@ as an explicit param; crdkit never hardcodes another chart's template
 names, so it stays reusable across any number of specific CRD libraries.
 
 Pipeline:
-  0. derive "env" from "target" (crdkit.deriveTargetEnv) — a
-     malformed/missing target records an ERROR and env resolves to
-     "", which simply won't match anything in tier 2 of
-     crdkit.resolveTokenValue, falling through to family/super-tier/
-     default same as any other unrecognized env would.
-  1. resolve tokens (system/default/user merge + recursive @ref@
-     resolution) -> a flat, mutable "resolvedTokens" dict, handed to the
-     chain via ctx.tokens so integrations can branch on already-resolved
-     VALUES immediately if they need to (distinct from marker
-     substitution below, which is deferred).
-  2. run the integration chain against a shared "model" accumulator.
-     crdkit does NOT know this shape, and there's no central place that
-     pre-declares it — model starts as a bare empty dict, and every
-     field on it (including "labels", which crdkit itself reads at step
-     5) is lazily created on first touch via crdkit.ensureDictKey, by
-     whichever integration touches it first. Filters may also mutate
-     ctx.tokens itself (e.g. to contribute a derived token) — see
-     crdkit.integrations.chain and README caveats: visibility is
-     order-dependent, and a token added mid-chain does NOT get another
-     pass through the recursive @ref@ resolver, so it must already be
-     fully resolved when inserted.
-  3. re-assert locked ("system") AND computed (crdkit.builtinTokens,
-     e.g. "ENV") tokens over the (possibly chain-mutated) resolved map,
-     unconditionally — the same "locked always wins" guarantee that
-     applies to user-supplied tokens must also hold against
-     integration-code mutation, otherwise a chain filter could silently
-     defeat it with no diagnostic ever firing. "ENV" is exposed as an
-     ordinary "@ENV@"-substitutable token this same way, alongside
-     being the plain string value tokens.* dicts are looked up by — see
-     crdkit.resolveAllTokens for why user-supplied tokens.ENV is
-     rejected the same way tokens.AT is. Re-assertion re-resolves each
-     raw system/builtin declaration via crdkit.resolveToken rather than
-     merging the raw dicts directly over $resolvedTokens — $resolvedTokens
-     is struct-shaped ({value, targetContainer}) by this point, while
-     $system/$builtinTokensRaw are still raw declarations, so a naive
-     merge would corrupt the shape for exactly the keys being reasserted.
-  4. NOW do marker substitution — a single textual pass over the
-     consumer's raw structure, using the fully-finalized token map. This
-     runs AFTER the chain (not before) so integration-authored "@token@"
-     references get resolved too, not just consumer-authored ones.
-  5. merge in the framework's standard labels + whatever the chain
+  0. derive "env" from "target" (crdkit.deriveTargetEnv), ONCE, purely
+     to seed the built-in "ENV" token (step 1) — a missing target
+     records an ERROR here. This is the only place crdkit.render itself
+     needs "env" as such; every token-resolution call below (steps 2, 5)
+     takes "target" only and derives env itself, on demand, per call —
+     see crdkit's CLAUDE.md for why "env" was dropped as a separate
+     param everywhere else (it's always a pure function of "target").
+  1. merge system/default/user/builtin token declarations
+     (crdkit.mergeTokens) — collision + naming-convention diagnostics
+     happen here, but NOTHING is resolved yet. The merged RAW map IS
+     ctx.tokens — there is no separate "resolved tokens" structure.
+     Resolution is lazy from here on: crdkit.resolveValue resolves (and
+     caches, onto the token's own declaration) one name at a time, only
+     when something actually needs it. See crdkit's CLAUDE.md for why.
+  2. force-resolve every token declaring a targetContainer
+     (crdkit.resolveTargetContainerTokens), for THIS render's target —
+     the one deliberate exception to laziness: a targetContainer-bearing
+     token needs to be valid regardless of whether anything textually
+     references it. ctx (with ctx.tokens now populated) is built just
+     before this step specifically so it can be passed in.
+  3. run the integration chain against a shared "model" accumulator AND
+     ctx.tokens (both live, mutable). crdkit does NOT know model's
+     shape — see crdkit.ensureDictKey. Integrations should add derived
+     tokens via crdkit.addToken rather than hand-rolling ctx.tokens
+     mutation.
+  4. re-assert locked ("system") AND computed (crdkit.builtinTokens)
+     token DECLARATIONS wholesale, unconditionally, after the chain —
+     the same "locked always wins" guarantee that applies to
+     user-supplied tokens must also hold against integration-code
+     mutation, otherwise a chain filter could silently defeat it with
+     no diagnostic ever firing. This resets ctx.tokens[name] back to
+     the ORIGINAL raw declaration (wiping any "_value" cache that might
+     have accumulated under a chain-tampered declaration) rather than
+     re-resolving anything — simple, and correct, because resolution is
+     lazy: whatever needs the value will resolve it fresh, correctly,
+     the next time it's asked for.
+  5. NOW do marker substitution — a single textual pass over the
+     consumer's raw structure (crdkit.substituteTokens resolves each
+     referenced token on demand). This runs AFTER the chain (not
+     before) so integration-authored "@token@" references get resolved
+     too, not just consumer-authored ones.
+  6. merge in the framework's standard labels + whatever the chain
      contributed to model.labels.
-  6. prepend accumulated diagnostics as `# ERROR:`/`# WARNING:` comments.
+  7. prepend accumulated diagnostics as `# ERROR:`/`# WARNING:` comments
+     (crdkit.renderDiagnostics — also deduplicates, since steps 2/5 can
+     each independently re-diagnose the same broken "target").
 
 TODO: only "labels" from the model is wired into the output below —
 that's the one field crdkit itself knows about. How the REST of
@@ -71,8 +74,8 @@ Expects a dict:
                env. Not to be confused with "the CRD this renders"
                below, despite the name collision — this is the env/seq
                identifier, that's apiVersion/kind.
-  system     - resolved system-tokens dict (locked, always wins)
-  defaults   - resolved default-tokens dict (consumer may override)
+  system     - raw system-token declarations dict (locked, always wins)
+  defaults   - raw default-token declarations dict (consumer may override)
   apiVersion - the rendered CRD's apiVersion, e.g. "platform.company.io/v1"
   kind       - the rendered CRD's kind, e.g. "SomeCR"
   chain      - ordered list of fully-qualified integration template
@@ -85,47 +88,51 @@ Expects a dict:
 {{- $target := .target -}}
 
 {{- $builtinTokensRaw := include "crdkit.builtinTokens" (dict "target" $target "diag" $diag) | fromYaml -}}
-{{- $env := $builtinTokensRaw.ENV -}}
 
-{{- $resolvedTokensYaml := include "crdkit.resolveAllTokens" (dict
-      "tokens" .tokens "env" $env "target" $target "diag" $diag
+{{- $tokensYaml := include "crdkit.mergeTokens" (dict
+      "tokens" .tokens "diag" $diag
       "system" $system "defaults" .defaults "builtinTokens" $builtinTokensRaw) -}}
-{{- $resolvedTokens := $resolvedTokensYaml | fromYaml -}}
+{{- $tokens := $tokensYaml | fromYaml -}}
 
 {{/* no pre-declared shape — see crdkit.ensureDictKey. Every field,
      including "labels" below, is created lazily on first touch by
-     whichever integration needs it first. */}}
+     whichever integration needs it first. ctx.target exists so any
+     helper/integration that needs "the target driving this render" has
+     it available — nothing below defaults to it implicitly, though:
+     every crdkit.resolveValue/substituteTokens call still names its
+     target explicitly (see crdkit's CLAUDE.md on why). */}}
 {{- $model := dict -}}
-{{- $ctx := dict "root" $root "diag" $diag "model" $model "tokens" $resolvedTokens -}}
+{{- $ctx := dict "root" $root "diag" $diag "model" $model "tokens" $tokens "target" $target -}}
+
+{{- $_ := include "crdkit.resolveTargetContainerTokens" (list $ctx $target) -}}
+
 {{- include "crdkit.integrations.chain" (dict "chain" .chain "ctx" $ctx) -}}
 
-{{/* re-assert locked + computed tokens unconditionally, even against
-     chain-code mutation — re-resolved individually via crdkit.resolveToken
-     since $resolvedTokens is struct-shaped and $system/$builtinTokensRaw
-     are still raw declarations (see pipeline doc above). */}}
+{{/* re-assert locked + computed token DECLARATIONS unconditionally, even
+     against chain-code mutation — a wholesale reset to the original raw
+     declaration, not a re-resolve, which also wipes any "_value" cache
+     that might have accumulated under a tampered declaration. */}}
 {{- range $name, $raw := $system -}}
-  {{- $resolved := include "crdkit.resolveToken" (dict "raw" $raw "env" $env "target" $target "diag" $diag "fieldName" (printf "system.%s" $name)) | fromYaml -}}
-  {{- $resolvedTokens = set $resolvedTokens $name $resolved -}}
+  {{- $_ := set $tokens $name $raw -}}
 {{- end -}}
 {{- range $name, $raw := $builtinTokensRaw -}}
-  {{- $resolved := include "crdkit.resolveToken" (dict "raw" $raw "env" $env "target" $target "diag" $diag "fieldName" (printf "builtin.%s" $name)) | fromYaml -}}
-  {{- $resolvedTokens = set $resolvedTokens $name $resolved -}}
+  {{- $_ := set $tokens $name $raw -}}
 {{- end -}}
 
 {{- $structureYaml := omit $root.Values "tokens" | toYaml -}}
-{{- $substituted := include "crdkit.substituteTokens" (dict "text" $structureYaml "tokens" $resolvedTokens "applyAt" true) -}}
+{{- $substituted := include "crdkit.substituteTokens" (list $ctx $structureYaml $target) -}}
 {{- $substitutedValues := $substituted | fromYaml -}}
 
 {{/* unresolved-marker check: anything still shaped like @word@ in the final
      substituted text after a full pass is either a typo'd reference to a
-     token that was never defined, or a genuine cycle already caught by
-     crdkit.resolveTokensRecursive above (that case is reported there, with
-     a more specific message naming the token and the cycle — avoid a
+     token that was never declared, or a genuine cycle already caught by
+     crdkit.resolveChainedValue above (that case is reported there, with a
+     more specific message naming the token and the cycle — avoid a
      duplicate/less-informative warning here for those). */}}
 {{- $unresolvedMarkers := regexFindAll "@[A-Za-z0-9_]+@" $substituted -1 -}}
 {{- range $marker := $unresolvedMarkers -}}
   {{- $name := trimSuffix "@" (trimPrefix "@" $marker) -}}
-  {{- if not (hasKey $resolvedTokens $name) -}}
+  {{- if not (hasKey $tokens $name) -}}
     {{- $_ := set $diag "warnings" (append $diag.warnings (printf "'%s' in the rendered structure does not match any known token after resolution — possible typo" $marker)) -}}
   {{- end -}}
 {{- end -}}

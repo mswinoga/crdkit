@@ -6,46 +6,81 @@ by a downstream library) are set directly via .Values here, letting
 tests exercise crdkit's own resolution/collision/diagnostics logic
 without coupling to any product's actual token content.
 
-Two independent sections, each exercised via its own .Values:
-  - token interpolation: .Values.target/tokens/system/defaults drive
-    crdkit.builtinTokens -> crdkit.resolveAllTokens -> (rendered as
-    "tokens"); .Values.structure is a second, separate document that
-    gets crdkit.substituteTokens applied to it using those resolved
-    tokens (rendered as "structure") — mirrors crdkit.render's own
-    pipeline shape without needing apiVersion/kind/model.
-  - model manipulation: .Values.modelOps is a data-driven list of
-    operations {op, path, value} (or {op, key, default} for
-    ensureDictKey) applied in order to a fresh model, letting a test
-    case drive an arbitrary sequence of crdkit.dictMerge/listExtend/
-    ensureDictKey calls purely through values (rendered as "model").
-  - token mutation: .Values.tokenOps is a data-driven list of
-    {name, value, targetContainer} applied via crdkit.addToken AFTER
-    the main token resolution above, mimicking an integration
-    contributing a derived token mid-chain (rendered into "tokens"
-    alongside everything resolveAllTokens produced).
+Mirrors crdkit.render's own pipeline shape (minus apiVersion/kind/model
+output), so it exercises the SAME lazy/cached/target-scoped resolution
+a real render goes through:
+  - crdkit.builtinTokens -> crdkit.mergeTokens produces ctx.tokens (the
+    raw declarations map — NOT resolved yet, see crdkit's CLAUDE.md).
+  - $ctx is built the same shape crdkit.render itself builds (root/diag/
+    model/tokens/target), since every helper below now takes ctx rather
+    than tokens/diag/env separately — see crdkit's CLAUDE.md on why
+    "env" was dropped as a param everywhere in favor of deriving it
+    from "target" on demand.
+  - crdkit.resolveTargetContainerTokens force-resolves anything with a
+    valid targetContainer, for .Values.target specifically.
+  - .Values.tokenOps is a data-driven list of {name, value,
+    targetContainer, target} applied via crdkit.addToken, mimicking an
+    integration contributing a derived token mid-chain. "target" is
+    optional per-op, defaulting to .Values.target — override it to
+    exercise addToken's merge-not-clobber behavior across multiple
+    calls for the same name under DIFFERENT targets in one test case.
+  - .Values.structure is a second, separate document that gets
+    crdkit.substituteTokens applied to it — this is what makes a token
+    "used" and triggers its (lazy) resolution for .Values.target.
+  - .Values.crossTargets is an optional list of target STRINGS (not
+    {env, target} pairs anymore — env is always derived from target
+    now, so there's nothing else to supply): for each, every name in
+    .Values.crossTargetNames gets resolved via crdkit.resolveValue
+    directly, rendered into "crossResolved" — exercises resolving a
+    token for a target OTHER than the one driving this "render" (the
+    whole point of the redesign), and lets a test assert on the
+    resulting "_value" cache shape directly via "tokens".
+  - .Values.modelOps is a data-driven list of operations {op, path,
+    value} (or {op, key, default} for ensureDictKey) applied in order
+    to a fresh model, letting a test case drive an arbitrary sequence
+    of crdkit.dictMerge/listExtend/ensureDictKey calls purely through
+    values (rendered as "model").
+
+"tokens" in the output is the LIVE ctx.tokens map, including whatever
+"_value" caches accumulated from everything above — tests can assert
+directly on cache shape (e.g. `tokens.NAME._value.qap1`) as well as on
+substituted "structure" text.
 */}}
 {{- $diag := dict "errors" (list) "warnings" (list) -}}
+{{- $target := .Values.target | default "" -}}
 
-{{- $builtinTokens := include "crdkit.builtinTokens" (dict "target" (.Values.target | default "") "diag" $diag) | fromYaml -}}
+{{- $builtinTokens := include "crdkit.builtinTokens" (dict "target" $target "diag" $diag) | fromYaml -}}
 {{- $env := $builtinTokens.ENV -}}
 
-{{- $resolved := include "crdkit.resolveAllTokens" (dict
+{{- $tokens := include "crdkit.mergeTokens" (dict
       "tokens" (.Values.tokens | default dict)
-      "env" $env
-      "target" (.Values.target | default "")
       "diag" $diag
       "system" (.Values.system | default dict)
       "defaults" (.Values.defaults | default dict)
       "builtinTokens" $builtinTokens) | fromYaml -}}
 
+{{- $model := dict -}}
+{{- $ctx := dict "root" $ "diag" $diag "model" $model "tokens" $tokens "target" $target -}}
+
+{{- $_ := include "crdkit.resolveTargetContainerTokens" (list $ctx $target) -}}
+
 {{- range $op := .Values.tokenOps | default (list) -}}
-  {{- include "crdkit.addToken" (dict "tokens" $resolved "name" $op.name "value" $op.value "targetContainer" $op.targetContainer "diag" $diag) -}}
+  {{- $_ := include "crdkit.addToken" (list $ctx $op.name $op.value $op.targetContainer ($op.target | default $target)) -}}
 {{- end -}}
 
 {{- $structureYaml := .Values.structure | default dict | toYaml -}}
-{{- $substituted := include "crdkit.substituteTokens" (dict "text" $structureYaml "tokens" $resolved "applyAt" true) | fromYaml -}}
+{{- $substituted := include "crdkit.substituteTokens" (list $ctx $structureYaml $target) | fromYaml -}}
 
-{{- $model := dict -}}
+{{- $crossResolved := dict -}}
+{{- range $t := .Values.crossTargets | default (list) -}}
+  {{- $forThisTarget := dict -}}
+  {{- range $name := $.Values.crossTargetNames | default (list) -}}
+    {{- $r := include "crdkit.resolveValue" (list $ctx $name $t) | fromYaml -}}
+    {{- $forThisTarget = set $forThisTarget $name $r -}}
+  {{- end -}}
+  {{- $crossResolved = set $crossResolved $t $forThisTarget -}}
+{{- end -}}
+
 {{- range $op := .Values.modelOps | default (list) -}}
   {{- if eq $op.op "dictMerge" -}}
     {{- include "crdkit.dictMerge" (concat (list $model) $op.path (list $op.value)) -}}
@@ -58,9 +93,11 @@ Two independent sections, each exercised via its own .Values:
 
 env: {{ $env | quote }}
 tokens:
-{{ $resolved | toYaml | indent 2 }}
+{{ $tokens | toYaml | indent 2 }}
 structure:
 {{ $substituted | toYaml | indent 2 }}
+crossResolved:
+{{ $crossResolved | toYaml | indent 2 }}
 model:
 {{ $model | toYaml | indent 2 }}
 diag:
