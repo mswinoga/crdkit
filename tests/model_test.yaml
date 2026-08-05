@@ -1,0 +1,155 @@
+# NOTE: modelOps is always set as a whole nested YAML list under the
+# "modelOps" key, never as dotted/bracket paths (modelOps[0].op: ...) —
+# helm-unittest's set: dotted-path parser doesn't reliably handle array
+# indices, even though the identical path works fine via plain `helm
+# template --set`. See crdkit's CLAUDE.md testing notes.
+suite: crdkit model manipulation
+templates:
+  - test.yaml
+tests:
+  - it: ensureDictKey sets the default when the key is absent
+    set:
+      modelOps:
+        - op: ensureDictKey
+          key: foo
+          default: ["first"]
+    asserts:
+      - equal:
+          path: model.foo
+          value: ["first"]
+
+  - it: ensureDictKey does NOT overwrite a key that already exists
+    set:
+      modelOps:
+        - op: ensureDictKey
+          key: foo
+          default: ["first"]
+        - op: ensureDictKey
+          key: foo
+          default: ["second"]
+    asserts:
+      - equal:
+          path: model.foo
+          value: ["first"]
+
+  - it: dictMerge creates a single-level field and adds entries to it
+    set:
+      modelOps:
+        - op: dictMerge
+          path: ["labels"]
+          value:
+            a: "1"
+    asserts:
+      - equal:
+          path: model.labels.a
+          value: "1"
+
+  - it: dictMerge preserves existing keys, adds new ones, and lets incoming values win on collision
+    set:
+      modelOps:
+        - op: dictMerge
+          path: ["labels"]
+          value:
+            a: "1"
+            shared: "orig"
+        - op: dictMerge
+          path: ["labels"]
+          value:
+            b: "2"
+            shared: "new"
+    asserts:
+      - equal:
+          path: model.labels.a
+          value: "1"
+      - equal:
+          path: model.labels.b
+          value: "2"
+      - equal:
+          path: model.labels.shared
+          value: "new"
+
+  - it: dictMerge walks a multi-level path, creating each missing level
+    set:
+      modelOps:
+        - op: dictMerge
+          path: ["containers", "my-container", "resources"]
+          value:
+            requested: "100m"
+    asserts:
+      - equal:
+          path: model.containers["my-container"].resources.requested
+          value: "100m"
+
+  - it: dictMerge on the same nested path across calls preserves siblings and merges correctly
+    set:
+      modelOps:
+        - op: dictMerge
+          path: ["containers", "my-container", "resources"]
+          value:
+            requested: "100m"
+        - op: dictMerge
+          path: ["containers", "my-container", "resources"]
+          value:
+            limit: "1"
+        - op: dictMerge
+          path: ["containers", "other-container", "resources"]
+          value:
+            requested: "50m"
+    asserts:
+      - equal:
+          path: model.containers["my-container"].resources.requested
+          value: "100m"
+      - equal:
+          path: model.containers["my-container"].resources.limit
+          value: "1"
+      - equal:
+          path: model.containers["other-container"].resources.requested
+          value: "50m"
+      - notExists:
+          path: model.containers["other-container"].resources.limit
+
+  - it: listExtend creates a single-level list field and appends items to it
+    set:
+      modelOps:
+        - op: listExtend
+          path: ["tags"]
+          value: ["a"]
+        - op: listExtend
+          path: ["tags"]
+          value: ["b", "c"]
+    asserts:
+      - equal:
+          path: model.tags
+          value: ["a", "b", "c"]
+
+  - it: listExtend walks a multi-level path and accumulates across repeated calls
+    set:
+      modelOps:
+        - op: listExtend
+          path: ["containers", "my-container", "env"]
+          value: ["A=1"]
+        - op: listExtend
+          path: ["containers", "my-container", "env"]
+          value: ["B=2"]
+    asserts:
+      - equal:
+          path: model.containers["my-container"].env
+          value: ["A=1", "B=2"]
+
+  - it: dictMerge and listExtend coexist as sibling fields under the same nested parent
+    set:
+      modelOps:
+        - op: dictMerge
+          path: ["containers", "my-container", "resources"]
+          value:
+            requested: "100m"
+        - op: listExtend
+          path: ["containers", "my-container", "env"]
+          value: ["A=1"]
+    asserts:
+      - equal:
+          path: model.containers["my-container"].resources.requested
+          value: "100m"
+      - equal:
+          path: model.containers["my-container"].env
+          value: ["A=1"]

@@ -1,0 +1,67 @@
+{{/*
+Product-agnostic exercise of crdkit's critical internals — deliberately
+does NOT go through a "mycrd.render"-style wrapper. crdkit has no
+specific library of its own, so "system"/"defaults" (normally supplied
+by a downstream library) are set directly via .Values here, letting
+tests exercise crdkit's own resolution/collision/diagnostics logic
+without coupling to any product's actual token content.
+
+Two independent sections, each exercised via its own .Values:
+  - token interpolation: .Values.target/tokens/system/defaults drive
+    crdkit.builtinTokens -> crdkit.resolveAllTokens -> (rendered as
+    "tokens"); .Values.structure is a second, separate document that
+    gets crdkit.substituteTokens applied to it using those resolved
+    tokens (rendered as "structure") — mirrors crdkit.render's own
+    pipeline shape without needing apiVersion/kind/model.
+  - model manipulation: .Values.modelOps is a data-driven list of
+    operations {op, path, value} (or {op, key, default} for
+    ensureDictKey) applied in order to a fresh model, letting a test
+    case drive an arbitrary sequence of crdkit.dictMerge/listExtend/
+    ensureDictKey calls purely through values (rendered as "model").
+  - token mutation: .Values.tokenOps is a data-driven list of
+    {name, value, targetContainer} applied via crdkit.addToken AFTER
+    the main token resolution above, mimicking an integration
+    contributing a derived token mid-chain (rendered into "tokens"
+    alongside everything resolveAllTokens produced).
+*/}}
+{{- $diag := dict "errors" (list) "warnings" (list) -}}
+
+{{- $builtinTokens := include "crdkit.builtinTokens" (dict "target" (.Values.target | default "") "diag" $diag) | fromYaml -}}
+{{- $env := $builtinTokens.ENV -}}
+
+{{- $resolved := include "crdkit.resolveAllTokens" (dict
+      "tokens" (.Values.tokens | default dict)
+      "env" $env
+      "target" (.Values.target | default "")
+      "diag" $diag
+      "system" (.Values.system | default dict)
+      "defaults" (.Values.defaults | default dict)
+      "builtinTokens" $builtinTokens) | fromYaml -}}
+
+{{- range $op := .Values.tokenOps | default (list) -}}
+  {{- include "crdkit.addToken" (dict "tokens" $resolved "name" $op.name "value" $op.value "targetContainer" $op.targetContainer "diag" $diag) -}}
+{{- end -}}
+
+{{- $structureYaml := .Values.structure | default dict | toYaml -}}
+{{- $substituted := include "crdkit.substituteTokens" (dict "text" $structureYaml "tokens" $resolved "applyAt" true) | fromYaml -}}
+
+{{- $model := dict -}}
+{{- range $op := .Values.modelOps | default (list) -}}
+  {{- if eq $op.op "dictMerge" -}}
+    {{- include "crdkit.dictMerge" (concat (list $model) $op.path (list $op.value)) -}}
+  {{- else if eq $op.op "listExtend" -}}
+    {{- include "crdkit.listExtend" (concat (list $model) $op.path (list $op.value)) -}}
+  {{- else if eq $op.op "ensureDictKey" -}}
+    {{- include "crdkit.ensureDictKey" (dict "model" $model "key" $op.key "default" $op.default) -}}
+  {{- end -}}
+{{- end -}}
+
+env: {{ $env | quote }}
+tokens:
+{{ $resolved | toYaml | indent 2 }}
+structure:
+{{ $substituted | toYaml | indent 2 }}
+model:
+{{ $model | toYaml | indent 2 }}
+diag:
+{{ $diag | toYaml | indent 2 }}

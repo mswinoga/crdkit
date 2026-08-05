@@ -1,0 +1,511 @@
+suite: crdkit token interpolation
+templates:
+  - test.yaml
+tests:
+  - it: resolves a simple scalar token
+    set:
+      target: prod-01
+      tokens.GREETING: "hello"
+      structure.message: "@GREETING@"
+    asserts:
+      - equal:
+          path: structure.message
+          value: "hello"
+
+  - it: dict resolves the exact env value when present
+    set:
+      target: prod-01
+      tokens.COLOR.default: "blue"
+      tokens.COLOR.prod: "red"
+      structure.color: "@COLOR@"
+    asserts:
+      - equal:
+          path: structure.color
+          value: "red"
+
+  - it: dict falls back to the family tier when the exact env is unlisted
+    set:
+      target: qap1-01
+      tokens.REGION.QA: "region-qa"
+      tokens.REGION.default: "region-default"
+      structure.region: "@REGION@"
+    asserts:
+      - equal:
+          path: structure.region
+          value: "region-qa"
+
+  - it: dict falls back to the super-tier when neither exact env nor family tier is listed
+    set:
+      target: qap1-01
+      tokens.REGION.NONPROD: "region-nonprod"
+      tokens.REGION.default: "region-default"
+      structure.region: "@REGION@"
+    asserts:
+      - equal:
+          path: structure.region
+          value: "region-nonprod"
+
+  - it: dict falls back to default when nothing more specific matches
+    set:
+      target: staging-01
+      tokens.REGION.default: "region-default"
+      structure.region: "@REGION@"
+    asserts:
+      - equal:
+          path: structure.region
+          value: "region-default"
+
+  - it: dict with no matching env and no default records an ERROR, not a fail
+    set:
+      target: prod-01
+      tokens.BROKEN.dev: "only-dev"
+    asserts:
+      - equal:
+          path: diag.errors[0]
+          value: "no value for env 'prod' and no 'default' defined for 'tokens.BROKEN'"
+
+  - it: match tier wins over env/tier/default, evaluated against the full target string
+    set:
+      target: qam1-05
+      # dotted set: paths can't reliably express array indices (modelOps[0]-
+      # style) or keys containing regex metacharacters, so "tokens" and
+      # "structure" are set as whole nested YAML values here instead of
+      # dotted sub-paths — see crdkit's CLAUDE.md testing notes.
+      tokens:
+        SUBENV:
+          default: "generic"
+          NONPROD: "nonprod-generic"
+          match:
+            - "qa[pm]1-0[0-9]": "canary"
+      structure:
+        subenv: "@SUBENV@"
+    asserts:
+      - equal:
+          path: structure.subenv
+          value: "canary"
+
+  - it: match rule values can reference capture groups from the pattern
+    set:
+      target: qam1-05
+      tokens:
+        PREFIX:
+          match:
+            - "(.+)-[0-9]{2}": "$1"
+      structure:
+        prefix: "@PREFIX@"
+    asserts:
+      - equal:
+          path: structure.prefix
+          value: "qam1"
+
+  - it: a token referencing a chain of 3+ tokens resolves via the iterative fixed-point resolver
+    set:
+      target: prod-01
+      tokens.T1: "one"
+      tokens.T2: "@T1@-two"
+      tokens.T3: "@T2@-three"
+      structure.message: "@T3@"
+    asserts:
+      - equal:
+          path: structure.message
+          value: "one-two-three"
+
+  - it: a direct two-token cycle records an ERROR mentioning a cycle, and does not hang
+    set:
+      target: prod-01
+      tokens.A: "@B@"
+      tokens.B: "@A@"
+    asserts:
+      - matchRegex:
+          path: diag.errors[0]
+          pattern: "cycle"
+
+  - it: "@AT@ resolves to a literal @ character, applied only on the final substitution pass"
+    set:
+      target: prod-01
+      structure.email: "user@AT@example.com"
+    asserts:
+      - equal:
+          path: structure.email
+          value: "user@example.com"
+
+  - it: a locked (system) token collision discards the user value and records a WARNING
+    set:
+      target: prod-01
+      system.API_GROUP: "locked.example.com"
+      tokens.API_GROUP: "hijacked.example.com"
+      structure.group: "@API_GROUP@"
+    asserts:
+      - equal:
+          path: structure.group
+          value: "locked.example.com"
+      - equal:
+          path: diag.warnings[0]
+          value: "token 'API_GROUP' is reserved by the library and was overridden back to the library value"
+
+  - it: a default token can be overridden by the user with no diagnostic
+    set:
+      target: prod-01
+      defaults.LOG_LEVEL: "info"
+      tokens.LOG_LEVEL: "debug"
+      structure.level: "@LOG_LEVEL@"
+    asserts:
+      - equal:
+          path: structure.level
+          value: "debug"
+      - lengthEqual:
+          path: diag.warnings
+          count: 0
+      - lengthEqual:
+          path: diag.errors
+          count: 0
+
+  - it: "'ENV' is a reserved built-in token — user-supplied tokens.ENV is discarded with a WARNING"
+    set:
+      target: prod-01
+      tokens.ENV: "hijacked"
+      structure.env: "@ENV@"
+    asserts:
+      - equal:
+          path: structure.env
+          value: "prod"
+      - equal:
+          path: diag.warnings[0]
+          value: "token 'ENV' is a reserved built-in and cannot be redefined; the user-supplied value was ignored"
+
+  - it: "'AT' is a reserved built-in token name — user-supplied tokens.AT is discarded with a WARNING"
+    set:
+      target: prod-01
+      tokens.AT: "hijacked"
+    asserts:
+      - equal:
+          path: diag.warnings[0]
+          value: "token 'AT' is a reserved built-in and cannot be redefined; the user-supplied value was ignored"
+
+  - it: missing target records an ERROR and env resolves to empty rather than failing
+    set:
+      target: ""
+    asserts:
+      - equal:
+          path: env
+          value: ""
+      - equal:
+          path: diag.errors[0]
+          value: "'target' is required (e.g. 'prod', or 'prod-01' for a sequenced target) but was not set"
+
+  - it: "a plain target with no sequence suffix IS the env directly, no diagnostic (the common case for most CRDs)"
+    set:
+      target: "staging"
+    asserts:
+      - equal:
+          path: env
+          value: "staging"
+      - lengthEqual:
+          path: diag.errors
+          count: 0
+
+  - it: "a target that merely LOOKS unusual but doesn't match <env>-<seq> is still accepted as a literal env, not an error"
+    set:
+      target: "not-a-valid-target"
+    asserts:
+      - equal:
+          path: env
+          value: "not-a-valid-target"
+      - lengthEqual:
+          path: diag.errors
+          count: 0
+
+  - it: a target WITH the sequence suffix still extracts just the env portion
+    set:
+      target: "prod-01"
+    asserts:
+      - equal:
+          path: env
+          value: "prod"
+      - lengthEqual:
+          path: diag.errors
+          count: 0
+
+  - it: a lowercase (or otherwise non-UPPER_SNAKE_CASE) token name records a WARNING but still resolves
+    set:
+      target: prod-01
+      tokens.myToken: "hello"
+      structure.message: "@myToken@"
+    asserts:
+      - equal:
+          path: structure.message
+          value: "hello"
+      - equal:
+          path: diag.warnings[0]
+          value: "token name 'myToken' should be UPPER_SNAKE_CASE for readability"
+
+  - it: a token with no targetContainer declared resolves with targetContainer "none"
+    set:
+      target: prod-01
+      tokens.GREETING: "hello"
+    asserts:
+      - equal:
+          path: tokens.GREETING.targetContainer
+          value: "none"
+
+  - it: a token can declare an explicit valid targetContainer
+    set:
+      target: prod-01
+      tokens.DB_HOST.value: "db.internal"
+      tokens.DB_HOST.targetContainer: "main"
+    asserts:
+      - equal:
+          path: tokens.DB_HOST.value
+          value: "db.internal"
+      - equal:
+          path: tokens.DB_HOST.targetContainer
+          value: "main"
+
+  - it: a token can target the side-car or both containers
+    set:
+      target: prod-01
+      tokens.SIDECAR_VAR.value: "x"
+      tokens.SIDECAR_VAR.targetContainer: "side-car"
+      tokens.SHARED_VAR.value: "y"
+      tokens.SHARED_VAR.targetContainer: "both"
+    asserts:
+      - equal:
+          path: tokens.SIDECAR_VAR.targetContainer
+          value: "side-car"
+      - equal:
+          path: tokens.SHARED_VAR.targetContainer
+          value: "both"
+
+  - it: an invalid targetContainer records an ERROR and falls back to "none", value still resolves
+    set:
+      target: prod-01
+      tokens.BAD_VAR.value: "still-here"
+      tokens.BAD_VAR.targetContainer: "sidecar-typo"
+    asserts:
+      - equal:
+          path: tokens.BAD_VAR.value
+          value: "still-here"
+      - equal:
+          path: tokens.BAD_VAR.targetContainer
+          value: "none"
+      - equal:
+          path: diag.errors[0]
+          value: "invalid targetContainer 'sidecar-typo' for 'tokens.BAD_VAR' — must be one of main/side-car/both (or omitted)"
+
+  - it: crdkit.addToken lets an integration contribute a derived token with a targetContainer
+    set:
+      target: prod-01
+      tokenOps:
+        - name: DERIVED_VAR
+          value: "computed"
+          targetContainer: "main"
+    asserts:
+      - equal:
+          path: tokens.DERIVED_VAR.value
+          value: "computed"
+      - equal:
+          path: tokens.DERIVED_VAR.targetContainer
+          value: "main"
+
+  - it: crdkit.addToken defaults targetContainer to "none" when omitted
+    set:
+      target: prod-01
+      tokenOps:
+        - name: DERIVED_VAR
+          value: "computed"
+    asserts:
+      - equal:
+          path: tokens.DERIVED_VAR.targetContainer
+          value: "none"
+
+  - it: crdkit.addToken warns on a non-conforming name and validates targetContainer the same as any other token
+    set:
+      target: prod-01
+      tokenOps:
+        - name: derivedVar
+          value: "computed"
+          targetContainer: "bogus"
+    asserts:
+      - equal:
+          path: tokens.derivedVar.targetContainer
+          value: "none"
+      - matchRegex:
+          path: diag.warnings[0]
+          pattern: "UPPER_SNAKE_CASE"
+      - matchRegex:
+          path: diag.errors[0]
+          pattern: "invalid targetContainer 'bogus'"
+
+  # --- edge cases ---
+
+  - it: "value can itself be the full env-varying dict, combined with targetContainer"
+    set:
+      target: prod-01
+      tokens:
+        DB_HOST:
+          value:
+            default: "db-nonprod.internal"
+            prod: "db-prod.internal"
+          targetContainer: "main"
+    asserts:
+      - equal:
+          path: tokens.DB_HOST.value
+          value: "db-prod.internal"
+      - equal:
+          path: tokens.DB_HOST.targetContainer
+          value: "main"
+
+  - it: "value alongside other (now-ignored) keys still resolves to 'value', with a WARNING naming what was ignored"
+    set:
+      target: prod-01
+      tokens:
+        WEIRD:
+          value: "explicit"
+          default: "ignored-default"
+          prod: "ignored-prod"
+    asserts:
+      - equal:
+          path: tokens.WEIRD.value
+          value: "explicit"
+      - matchRegex:
+          path: diag.warnings[0]
+          pattern: "declares 'value' alongside other keys"
+
+  - it: "targetContainer declared WITHOUT 'value' records a clear ERROR, not the unrelated 'no value for env' one"
+    set:
+      target: prod-01
+      tokens:
+        BROKEN:
+          targetContainer: "main"
+    asserts:
+      - equal:
+          path: diag.errors[0]
+          value: "'tokens.BROKEN' declares targetContainer without a 'value' key — wrap the actual value as {value: ..., targetContainer: ...}"
+      - equal:
+          path: tokens.BROKEN.value
+          value: ""
+      - equal:
+          path: tokens.BROKEN.targetContainer
+          value: "main"
+
+  - it: an empty-string targetContainer is invalid, same as any other unrecognized value
+    set:
+      target: prod-01
+      tokens.EMPTY_VAR.value: "x"
+      tokens.EMPTY_VAR.targetContainer: ""
+    asserts:
+      - equal:
+          path: tokens.EMPTY_VAR.targetContainer
+          value: "none"
+      - matchRegex:
+          path: diag.errors[0]
+          pattern: "invalid targetContainer ''"
+
+  - it: a token name starting with a digit is non-conforming, same WARNING as any other bad casing
+    set:
+      target: prod-01
+      tokens.1BAD: "x"
+    asserts:
+      - equal:
+          path: diag.warnings[0]
+          value: "token name '1BAD' should be UPPER_SNAKE_CASE for readability"
+
+  - it: a token name starting with an underscore is non-conforming too
+    set:
+      target: prod-01
+      tokens._BAD: "x"
+    asserts:
+      - equal:
+          path: diag.warnings[0]
+          value: "token name '_BAD' should be UPPER_SNAKE_CASE for readability"
+
+  - it: "GOTCHA: a differently-cased near-miss of a locked name is NOT blocked as a collision, only flagged for casing"
+    set:
+      target: prod-01
+      system.API_GROUP: "locked.example.com"
+      tokens.apiGroup: "not-actually-blocked"
+      structure.group: "@apiGroup@"
+    asserts:
+      # the user's "apiGroup" (different casing, different dict key) is a
+      # DISTINCT token from the locked "API_GROUP" — no collision is
+      # detected because the keys don't match, so it resolves normally.
+      # This documents a real, narrow gap in the reserved-name protection:
+      # it's case-sensitive, and the naming-convention check is only ever
+      # a WARNING, so this isn't actually prevented, just flagged.
+      - equal:
+          path: structure.group
+          value: "not-actually-blocked"
+      - matchRegex:
+          path: diag.warnings[0]
+          pattern: "'apiGroup' should be UPPER_SNAKE_CASE"
+
+  - it: a token with targetContainer can still chain off another token's value normally
+    set:
+      target: prod-01
+      tokens.HOST_NAME: "db1"
+      tokens.DB_HOST.value: "@HOST_NAME@.internal"
+      tokens.DB_HOST.targetContainer: "main"
+    asserts:
+      - equal:
+          path: tokens.DB_HOST.value
+          value: "db1.internal"
+      - equal:
+          path: tokens.DB_HOST.targetContainer
+          value: "main"
+
+  - it: "match: first matching rule wins even when a later rule would also match"
+    set:
+      target: prod-01
+      tokens:
+        MULTI:
+          match:
+            - "prod-01": "first-match"
+            - "prod-[0-9]{2}": "second-match-would-also-fit"
+      structure.multi: "@MULTI@"
+    asserts:
+      - equal:
+          path: structure.multi
+          value: "first-match"
+
+  - it: the PROD family tier is used when the exact "prod" env key is absent but "PROD" is present
+    set:
+      target: prod-01
+      tokens.REGION.PROD: "us-east-1"
+      structure.region: "@REGION@"
+    asserts:
+      - equal:
+          path: structure.region
+          value: "us-east-1"
+
+  - it: "crdkit.addToken's value is stored verbatim — an unresolved @ref@ inside it is NOT expanded"
+    set:
+      target: prod-01
+      tokens.GREETING: "hello"
+      tokenOps:
+        - name: DERIVED_VAR
+          value: "prefix-@GREETING@"
+    asserts:
+      # documents the existing caveat (see crdkit's CLAUDE.md/README):
+      # a token added mid-chain does not get another @ref@ resolution
+      # pass, so its value must already be fully resolved when inserted.
+      - equal:
+          path: tokens.DERIVED_VAR.value
+          value: "prefix-@GREETING@"
+
+  - it: "crdkit.addToken can silently overwrite an existing token, including a locked one — no protection, by design"
+    set:
+      target: prod-01
+      system.API_GROUP: "locked.example.com"
+      tokenOps:
+        - name: API_GROUP
+          value: "overwritten-by-integration"
+    asserts:
+      # addToken deliberately skips the reserved-name collision check
+      # (see crdkit's CLAUDE.md: integrations are trusted, unlike
+      # consumer input) — crdkit.render's OWN post-chain reassertion is
+      # what actually protects "system" tokens end-to-end in the real
+      # pipeline; this harness calls addToken directly, without that
+      # reassertion step, so the overwrite is visible here.
+      - equal:
+          path: tokens.API_GROUP.value
+          value: "overwritten-by-integration"
