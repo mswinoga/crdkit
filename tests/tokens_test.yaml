@@ -15,6 +15,53 @@ tests:
           path: structure.message
           value: "hello"
 
+  - it: "a bare scalar declaration is normalized into a dict under the literal 'default' key, so ctx.tokens[NAME] is always a dict"
+    set:
+      target: prod-01
+      tokens.GREETING: "hello"
+    asserts:
+      # raw declaration, post-merge, pre-resolution — no structure/
+      # crossTargets reference, so this is purely what
+      # crdkit.mergeTokens.internal normalized "hello" into.
+      - equal:
+          path: tokens.GREETING
+          value:
+            default: "hello"
+
+  - it: "'default' is a hardcoded crdkit-level fallback, combined with targetContainer, resolving unconditionally for ANY target — no taxonomy needed"
+    set:
+      target: some-unrecognized-target-with-no-taxonomy-hop-at-all
+      tokens.DB_HOST.default: "db.internal"
+      tokens.DB_HOST.targetContainer: "main"
+      crossTargets:
+        - "some-unrecognized-target-with-no-taxonomy-hop-at-all"
+      crossTargetNames:
+        - "DB_HOST"
+    asserts:
+      - equal:
+          path: crossResolved.some-unrecognized-target-with-no-taxonomy-hop-at-all.DB_HOST.value
+          value: "db.internal"
+      - equal:
+          path: crossResolved.some-unrecognized-target-with-no-taxonomy-hop-at-all.DB_HOST.targetContainer
+          value: "main"
+      - lengthEqual:
+          path: diag.errors
+          count: 0
+
+  - it: "'default' is checked AFTER the parentTarget walk, not before — a more specific taxonomy-reached value always wins over it"
+    set:
+      target: prod-01
+      parentTargetMap:
+        prod-01: "PROD"
+      tokens.REGION:
+        default: "generic-region"
+        PROD: "prod-specific-region"
+      structure.region: "@REGION@"
+    asserts:
+      - equal:
+          path: structure.region
+          value: "prod-specific-region"
+
   - it: a token referencing another token (one level) resolves correctly
     set:
       target: prod-01
@@ -331,14 +378,14 @@ tests:
           path: crossResolved.prod.GREETING.targetContainer
           value: "none"
 
-  - it: a token can declare an explicit valid targetContainer
+  - it: a token can declare an explicit valid targetContainer, flat alongside a target entry — no "value" wrapper
     set:
       target: prod-01
-      tokens.DB_HOST.value: "db.internal"
+      tokens.DB_HOST.default: "db.internal"
       tokens.DB_HOST.targetContainer: "main"
     asserts:
       - equal:
-          path: tokens.DB_HOST.value
+          path: tokens.DB_HOST.default
           value: "db.internal"
       - equal:
           path: tokens.DB_HOST.targetContainer
@@ -347,9 +394,9 @@ tests:
   - it: a token can target the side-car or both containers
     set:
       target: prod-01
-      tokens.SIDECAR_VAR.value: "x"
+      tokens.SIDECAR_VAR.default: "x"
       tokens.SIDECAR_VAR.targetContainer: "side-car"
-      tokens.SHARED_VAR.value: "y"
+      tokens.SHARED_VAR.default: "y"
       tokens.SHARED_VAR.targetContainer: "both"
     asserts:
       - equal:
@@ -362,7 +409,7 @@ tests:
   - it: an invalid targetContainer records an ERROR and falls back to "none", value still resolves
     set:
       target: prod
-      tokens.BAD_VAR.value: "still-here"
+      tokens.BAD_VAR.prod: "still-here"
       tokens.BAD_VAR.targetContainer: "sidecar-typo"
       crossTargets:
         - "prod"
@@ -379,15 +426,14 @@ tests:
           path: diag.errors[0]
           value: "invalid targetContainer 'sidecar-typo' for 'BAD_VAR' — must be one of main/side-car/both (or omitted)"
 
-  - it: "value can itself be the full target-keyed dict, combined with targetContainer"
+  - it: "multiple target entries coexist flat alongside targetContainer, each resolving independently"
     set:
       target: prod
       tokens:
         DB_HOST:
-          value:
-            prod: "db-prod.internal"
-            other: "db-other.internal"
           targetContainer: "main"
+          prod: "db-prod.internal"
+          other: "db-other.internal"
       crossTargets:
         - "prod"
       crossTargetNames:
@@ -400,25 +446,23 @@ tests:
           path: crossResolved.prod.DB_HOST.targetContainer
           value: "main"
 
-  - it: "value alongside other (now-ignored) keys still resolves to 'value', with a WARNING naming what was ignored"
+  - it: "token with only default value renders correctly"
     set:
       target: prod-01
+      parentTargetMap:
+        prod-01: "PROD"
+        PROD: default
       tokens:
-        WEIRD:
-          value: "explicit"
-          default: "ignored-default"
-          prod: "ignored-prod"
+        DEFAULT:
+          default: "default value"
       structure:
-        weird: "@WEIRD@"
+        value_of_default: "@DEFAULT@"
     asserts:
       - equal:
-          path: structure.weird
-          value: "explicit"
-      - matchRegex:
-          path: diag.warnings[0]
-          pattern: "declares 'value' alongside other keys"
+          path: structure.value_of_default
+          value: "default value"
 
-  - it: "targetContainer declared WITHOUT 'value' records a clear ERROR, not the unrelated 'no value found' one"
+  - it: "a token declaring ONLY targetContainer, no target entries at all, produces the ordinary 'no value found' error like any other unresolvable token — no dedicated 'declares targetContainer without value' special case anymore"
     set:
       target: prod
       tokens:
@@ -431,7 +475,7 @@ tests:
     asserts:
       - equal:
           path: diag.errors[0]
-          value: "'BROKEN' declares targetContainer without a 'value' key — wrap the actual value as {value: ..., targetContainer: ...}"
+          value: "no value found for 'BROKEN' — target chain exhausted at 'prod' starting from 'prod'"
       - equal:
           path: crossResolved.prod.BROKEN.value
           value: ""
@@ -442,7 +486,7 @@ tests:
   - it: an empty-string targetContainer is invalid, same as any other unrecognized value
     set:
       target: prod
-      tokens.EMPTY_VAR.value: "x"
+      tokens.EMPTY_VAR.default: "x"
       tokens.EMPTY_VAR.targetContainer: ""
       crossTargets:
         - "prod"
@@ -460,7 +504,7 @@ tests:
     set:
       target: prod
       tokens.HOST_NAME: "db1"
-      tokens.DB_HOST.value: "@HOST_NAME@.internal"
+      tokens.DB_HOST.prod: "@HOST_NAME@.internal"
       tokens.DB_HOST.targetContainer: "main"
       crossTargets:
         - "prod"
@@ -569,6 +613,25 @@ tests:
 
   # --- crdkit.addToken ---
 
+  - it: "crdkit.addToken against an existing scalar-normalized token ('default') MERGES a new dedicated attribute in, preserving 'default' as the fallback for every other target"
+    set:
+      target: prod-01
+      tokens.EXISTING: "was-a-plain-scalar"
+      tokenOps:
+        - name: EXISTING
+          value: "now-dedicated-for-prod-01"
+    asserts:
+      # "default" (what "was-a-plain-scalar" got normalized into) is an
+      # ORDINARY target entry, not a reserved key — addToken preserves
+      # it exactly like it would any other existing target entry, no
+      # special-casing needed.
+      - equal:
+          path: tokens.EXISTING
+          value:
+            default: "was-a-plain-scalar"
+            prod-01: "now-dedicated-for-prod-01"
+            targetContainer: "none"
+
   - it: "crdkit.addToken stores 'value' as a DEDICATED ATTRIBUTE (a literal key equal to the exact target) — not resolved at add-time"
     set:
       target: prod-01
@@ -580,10 +643,13 @@ tests:
       # raw declaration right after addToken runs — no structure/crossTargets
       # reference anywhere in this test, so this is purely what addToken
       # itself wrote, still carrying the unresolved "@GREETING@" marker.
+      # targetContainer is always set (defaulting to "none"), flat
+      # alongside the target entry — no "value" wrapper anymore.
       - equal:
-          path: tokens.DERIVED_VAR.value
+          path: tokens.DERIVED_VAR
           value:
             prod-01: "prefix-@GREETING@"
+            targetContainer: "none"
 
   - it: an addToken-added token resolves lazily via its dedicated attribute, exactly like any hand-declared token, once actually referenced
     set:
@@ -625,10 +691,11 @@ tests:
           target: "qa"
     asserts:
       - equal:
-          path: tokens.DERIVED_VAR.value
+          path: tokens.DERIVED_VAR
           value:
             prod-01: "prod-value"
             qa: "qa-value"
+            targetContainer: "none"
 
   - it: "a second crdkit.addToken call for the SAME (name, target) pair overwrites in place"
     set:
@@ -642,9 +709,10 @@ tests:
           target: "prod-01"
     asserts:
       - equal:
-          path: tokens.DERIVED_VAR.value
+          path: tokens.DERIVED_VAR
           value:
             prod-01: "second-value"
+            targetContainer: "none"
 
   - it: "a second crdkit.addToken call that omits targetContainer INHERITS the one set by an earlier call, rather than resetting it to 'none'"
     set:
@@ -695,12 +763,19 @@ tests:
       # what actually protects "system" tokens end-to-end in the real
       # pipeline; this harness calls addToken directly, without that
       # reassertion step, so the overwrite is visible here. API_GROUP's
-      # existing declaration is a bare scalar (not a dedicated-attribute
-      # dict), so addToken can't merge into it — it's replaced outright.
+      # existing bare-scalar declaration was already normalized into
+      # {default: "locked.example.com"} by crdkit.mergeTokens.internal
+      # before addToken ever runs — "default" is an ORDINARY target
+      # entry (not reserved), so addToken merges the new dedicated
+      # attribute in alongside it rather than replacing it outright; a
+      # target OTHER than "prod-01" would still fall back to the
+      # "overwritten" library's original value via "default".
       - equal:
-          path: tokens.API_GROUP.value
+          path: tokens.API_GROUP
           value:
+            default: "locked.example.com"
             prod-01: "overwritten-by-integration"
+            targetContainer: "none"
 
   - it: crdkit.addToken warns on a non-conforming name and validates targetContainer the same as any other token
     set:
