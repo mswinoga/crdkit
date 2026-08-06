@@ -1,0 +1,32 @@
+# Patterns to ignore when building packages (helm package / helm
+# dependency update). Unlike .gitignore, this controls what gets bundled
+# into the .tgz a downstream consumer (my-crd) pulls in via file:// — so
+# it matters for more than repo hygiene: without excluding harness/ here,
+# every downstream `helm dependency update` repackages crdkit's ENTIRE
+# directory tree, including harness/'s own charts/crdkit-0.0.0.tgz (its
+# bundled copy of crdkit, from testing the harness locally) — which
+# itself may contain a stale, even-earlier-nested copy, growing with
+# every local test cycle. This exact recursive bloat once pushed a
+# packaged crdkit past 5MB and broke helm-unittest's file-size limit in
+# my-crd-test. harness/ and tests/ are crdkit's own local dev/test
+# scaffolding — a downstream consumer never needs either.
+harness/
+tests/
+
+# Common VCS dirs
+.git/
+.gitignore
+.helmignore
+
+# Common backup files
+*.swp
+*.bak
+*.tmp
+*.orig
+
+# Various IDEs
+.project
+.idea/
+*.tmproj
+.vscode/
+.DS_Store

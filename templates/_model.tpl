@@ -55,35 +55,52 @@ in place — same reference trick as crdkit.ensureDictKey, verified in
 crdkit's CLAUDE.md); every path segment before it is walked via
 ensureDictKey + reassigning the "current" pointer to descend one level.
 
-Requires at least one path key ([model, key, value] is the minimum
-valid shape) — this is an internal template-authoring contract between
-integrations and crdkit, not consumer-facing input, so an integration
-author passing too short a list gets an ordinary template error, not a
+ZERO path keys is a valid, deliberately supported degenerate case:
+`[model, value]` merges "value" directly into "model" itself — no
+nesting, no `ensureDictKey` walk needed at all. This is the right call
+whenever an integration wants to set several independent TOP-LEVEL
+scalar fields on `ctx.model` in one shot — e.g. `apiVersion`/`kind` (see
+`my-crd`'s `mycrd.integration.preamble`) — rather than reaching for
+`crdkit.ensureDictKey` directly per field. Requires at least `[model,
+value]` (2 elements) — this is an internal template-authoring contract
+between integrations and crdkit, not consumer-facing input, so an
+integration author passing fewer gets an ordinary template error, not a
 diagnostic; see crdkit's CLAUDE.md on where that line is drawn.
 
-Expects a list: [model, key1, ..., keyN, value] (N >= 1)
+Expects a list: [model, key1, ..., keyN, value] (N >= 0)
 */}}
 {{- define "crdkit.dictMerge" -}}
 {{- $args := . -}}
 {{- $model := first $args -}}
 {{- $value := last $args -}}
 {{- $path := initial (rest $args) -}}
-{{- $current := $model -}}
-{{- range $key := initial $path -}}
-  {{- include "crdkit.ensureDictKey" (dict "model" $current "key" $key "default" (dict)) -}}
-  {{- $current = index $current $key -}}
+{{- if not $path -}}
+  {{- $_ := mergeOverwrite $model $value -}}
+{{- else -}}
+  {{- $current := $model -}}
+  {{- range $key := initial $path -}}
+    {{- include "crdkit.ensureDictKey" (dict "model" $current "key" $key "default" (dict)) -}}
+    {{- $current = index $current $key -}}
+  {{- end -}}
+  {{- $finalKey := last $path -}}
+  {{- include "crdkit.ensureDictKey" (dict "model" $current "key" $finalKey "default" (dict)) -}}
+  {{- $_ := mergeOverwrite (index $current $finalKey) $value -}}
 {{- end -}}
-{{- $finalKey := last $path -}}
-{{- include "crdkit.ensureDictKey" (dict "model" $current "key" $finalKey "default" (dict)) -}}
-{{- $_ := mergeOverwrite (index $current $finalKey) $value -}}
 {{- end -}}
 
 {{/*
 Walks a MULTI-LEVEL path from $model exactly like crdkit.dictMerge
-above (same list-argument shape, same dig-inspired reasoning, same
-"at least one path key" contract) — but the FINAL path segment is
-ensured to be a LIST, not a dict, and "value" (itself a list) is
-appended onto the end of it via Sprig's `concat`.
+above (same list-argument shape, same dig-inspired reasoning) — but the
+FINAL path segment is ensured to be a LIST, not a dict, and "value"
+(itself a list) is appended onto the end of it via Sprig's `concat`.
+
+UNLIKE crdkit.dictMerge, this keeps the "at least one path key"
+requirement strictly — there's no zero-key degenerate case here, on
+purpose: `ctx.model` itself is always a dict (`crdkit.render`
+initializes it as a bare `dict`, never a list — see crdkit's CLAUDE.md),
+so "append directly into model" is never a meaningful operation the way
+"merge directly into model" is for crdkit.dictMerge. Always at least one
+path key naming the LIST field being appended to.
 
 Unlike crdkit.dictMerge's final step, this DOES need an explicit `set`
 back onto the second-to-last level: `concat` (like `append`) always

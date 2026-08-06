@@ -9,3 +9,5 @@ modelOps: []
 tokenOps: []
 crossTargets: []
 crossTargetNames: []
+parentTargetMap: {}
+chainSetsApiVersionKind: false

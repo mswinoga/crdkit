@@ -1,159 +1,150 @@
 {{/*
 Generic render engine — the framework's entry point. Every product-
-specific bit (system/default tokens, apiVersion/kind, the integration
-chain) is supplied by the CALLER's own thin wrapper (e.g. mycrd.render)
-as an explicit param; crdkit never hardcodes another chart's template
-names, so it stays reusable across any number of specific CRD libraries.
+specific bit (system/default tokens, the integration chain, the target
+escalation taxonomy) is supplied by the CALLER's own thin wrapper (e.g.
+mycrd.render) as an explicit param; crdkit never hardcodes another
+chart's template names, so it stays reusable across any number of
+specific CRD libraries.
 
-Pipeline:
-  0. derive "env" from "target" (crdkit.deriveTargetEnv), ONCE, purely
-     to seed the built-in "ENV" token (step 1) — a missing target
-     records an ERROR here. This is the only place crdkit.render itself
-     needs "env" as such; every token-resolution call below (steps 2, 5)
-     takes "target" only and derives env itself, on demand, per call —
-     see crdkit's CLAUDE.md for why "env" was dropped as a separate
-     param everywhere else (it's always a pure function of "target").
-  1. merge system/default/user/builtin token declarations
-     (crdkit.mergeTokens) — collision + naming-convention diagnostics
-     happen here, but NOTHING is resolved yet. The merged RAW map IS
-     ctx.tokens — there is no separate "resolved tokens" structure.
-     Resolution is lazy from here on: crdkit.resolveValue resolves (and
-     caches, onto the token's own declaration) one name at a time, only
-     when something actually needs it. See crdkit's CLAUDE.md for why.
-  2. force-resolve every token declaring a targetContainer
-     (crdkit.resolveTargetContainerTokens), for THIS render's target —
-     the one deliberate exception to laziness: a targetContainer-bearing
-     token needs to be valid regardless of whether anything textually
-     references it. ctx (with ctx.tokens now populated) is built just
-     before this step specifically so it can be passed in.
-  3. run the integration chain against a shared "model" accumulator AND
-     ctx.tokens (both live, mutable). crdkit does NOT know model's
-     shape — see crdkit.ensureDictKey. Integrations should add derived
-     tokens via crdkit.addToken rather than hand-rolling ctx.tokens
-     mutation.
-  4. re-assert locked ("system") AND computed (crdkit.builtinTokens)
-     token DECLARATIONS wholesale, unconditionally, after the chain —
-     the same "locked always wins" guarantee that applies to
-     user-supplied tokens must also hold against integration-code
-     mutation, otherwise a chain filter could silently defeat it with
-     no diagnostic ever firing. This resets ctx.tokens[name] back to
-     the ORIGINAL raw declaration (wiping any "_value" cache that might
-     have accumulated under a chain-tampered declaration) rather than
-     re-resolving anything — simple, and correct, because resolution is
-     lazy: whatever needs the value will resolve it fresh, correctly,
-     the next time it's asked for.
-  5. NOW do marker substitution — a single textual pass over the
-     consumer's raw structure (crdkit.substituteTokens resolves each
-     referenced token on demand). This runs AFTER the chain (not
-     before) so integration-authored "@token@" references get resolved
-     too, not just consumer-authored ones.
-  6. merge in the framework's standard labels + whatever the chain
-     contributed to model.labels.
-  7. prepend accumulated diagnostics as `# ERROR:`/`# WARNING:` comments
-     (crdkit.renderDiagnostics — also deduplicates, since steps 2/5 can
-     each independently re-diagnose the same broken "target").
+crdkit.render does NOT know, and does not touch, what the rendered CR
+looks like — no apiVersion/kind, no labels, no metadata.name, no spec.
+It never reads `context.Values` for any of that either. All of it is
+100% the caller's own chain's responsibility, via the ordinary
+crdkit.dictMerge/listExtend/ensureDictKey mutation primitives against
+ctx.model — exactly the same mechanism, with no special case for any
+particular field. crdkit.render's own job is deliberately narrow:
 
-TODO: only "labels" from the model is wired into the output below —
-that's the one field crdkit itself knows about. How the REST of
-"model" (whatever fields integrations chose to populate) maps into
-"spec" is inherently specific-library knowledge crdkit can't have; that
-mapping still needs a design once the real CRD spec shape is known (a
-future hook analogous to the integration chain, most likely — not
-resolved here).
+  1. merge system/default/user token DECLARATIONS (crdkit.mergeTokens.internal) —
+     collision + naming-convention diagnostics happen here, but nothing
+     is resolved yet; the merged raw map IS ctx.tokens. Resolution is
+     lazy from here on (crdkit.resolveValue resolves and caches one name
+     at a time, only when something actually needs it — see crdkit's
+     CLAUDE.md for why).
+  2. build an empty ctx.model and ctx itself — shape owned entirely by
+     the chain (see crdkit.ensureDictKey).
+  3. run the integration chain (crdkit.integrations.chain) against the
+     shared, mutable ctx.model/ctx.tokens. This is the ONLY step that
+     populates ctx.model — a specific library's "preamble" integration
+     (first in `chain`, by convention) is where apiVersion/kind/
+     metadata.name/metadata.labels/spec — anything the final CR needs —
+     get set, typically by pulling whatever the library cares about out
+     of ctx.root.Values itself (see my-crd's mycrd.integration.preamble
+     for a real example: it reads .Values.spec/.Values.metadata.labels
+     directly, since "what does this CR look like" is exactly as much
+     specific-library knowledge as "what's its apiVersion").
+  4. ONE substitution pass (crdkit.substituteTokens) over the ENTIRE
+     model, in place — this is what lets any "@TOKEN@" marker left
+     anywhere in ctx.model by the chain (or by consumer values the chain
+     folded in) resolve, on demand, the same way. Runs AFTER the chain
+     so integration-authored references resolve too, not just ones
+     copied verbatim from consumer values.
+  5. scan the substituted text for any leftover "@word@" marker that
+     doesn't name a known token — recorded as a WARNING (possible typo);
+     a genuine cycle is already diagnosed, with a more specific message,
+     inside crdkit.resolveValue.internal during resolution itself.
+  6. emit the substituted model directly — `{{ model | toYaml }}` — with
+     accumulated diagnostics prepended as `# ERROR:`/`# WARNING:`
+     comments (crdkit.renderDiagnostics.internal — also deduplicates).
+
+crdkit has NO notion of "env"/"family"/"tier", and no proactive "target
+is required" check anywhere in this pipeline — "target" is an opaque
+string, escalated (if at all) via the caller-supplied "parentTarget"
+template (see crdkit.resolveValue.internal in _tokens.tpl for the full
+resolution order this drives). An entirely unset "target" is only ever
+diagnosed lazily, if and when something actually tries to resolve a
+token against it and the walk finds nothing — same philosophy as every
+other "declared but never checked" case in this library. If a specific
+library wants an eager "target must be set" guarantee, or an "@ENV@"-
+style convenience token, it implements that itself (e.g. in its own
+systemTokens, using its own parentTarget template) — crdkit no longer
+has an opinion here at all.
+
+Also has no opinion on whether a rendered CR "needs" an apiVersion/kind,
+or what its standard labels should be, or how consumer Values maps onto
+its body — those used to be enforced/computed here and were deliberately
+removed: enforcing them baked in an assumption about what makes a CR
+"valid" that's really a specific library's call, not crdkit's, and
+computing/merging standard labels here required its own precedence
+logic (standard vs. consumer vs. chain-contributed) that's simpler to
+just not have — the chain already fully controls ctx.model, so a
+library's own preamble decides both WHAT crdkit.standardLabels
+contributes and WHEN (i.e. what wins on collision) by choosing where in
+its chain it calls it. See crdkit's CLAUDE.md for the fuller reasoning
+and the loophole this used to guard against (chain code overriding a
+locked token/label) — dropped for the same reason: chain code is
+trusted, first-party library code, not the untrusted boundary (that's
+consumer-supplied Values, which crdkit.mergeTokens.internal already protects
+tokens against, and which a library's own preamble can protect labels
+against the same way, if it chooses to).
 
 Expects a dict:
-  context    - the consumer's root $ (per spec, always the CONSUMING
-               chart's root — this library is never a normal subchart
-               with values nested under .Values.<name>.*)
-  tokens     - .Values.tokens (raw, may include env-varying dicts)
-  target     - .Values.target — the CLI/release-level value env is
-               derived from; see crdkit.deriveTargetEnv. Usually just
-               "env" directly (e.g. "prod"); optionally "<env>-<seq>"
-               (seq = 2 digits, e.g. "prod-01") for the minority of
-               CRDs needing multiple numbered instances of the same
-               env. Not to be confused with "the CRD this renders"
-               below, despite the name collision — this is the env/seq
-               identifier, that's apiVersion/kind.
-  system     - raw system-token declarations dict (locked, always wins)
-  defaults   - raw default-token declarations dict (consumer may override)
-  apiVersion - the rendered CRD's apiVersion, e.g. "platform.company.io/v1"
-  kind       - the rendered CRD's kind, e.g. "SomeCR"
-  chain      - ordered list of fully-qualified integration template
-               names (head = outermost filter)
+  context              - the consumer's root $ (per spec, always the
+                          CONSUMING chart's root — this library is never
+                          a normal subchart with values nested under
+                          .Values.<name>.*). Passed through to the chain
+                          via ctx.root — crdkit.render itself never
+                          reads .Values off of it.
+  tokens               - .Values.tokens (raw, may include target-keyed dicts)
+  target               - .Values.target — an opaque string identifying
+                          what's being rendered, at whatever granularity
+                          the specific library's own taxonomy calls for
+                          (a sequenced instance, a bare env, a family, a
+                          tier — crdkit doesn't care).
+  system               - raw system-token declarations dict (locked,
+                          always wins against consumer-supplied tokens
+                          — see crdkit.mergeTokens.internal)
+  defaults             - raw default-token declarations dict (consumer
+                          may override)
+  parentTargetTemplate - fully-qualified template name (e.g.
+                          "mycrd.parentTarget") implementing the
+                          caller's own target-escalation taxonomy:
+                          called with `{target: <a rung>, context: <this
+                          same "context" root>}`, returns the next rung
+                          up, or nothing if there is none. Optional —
+                          defaults to crdkit.noParentTarget (no
+                          escalation at all) if omitted. May be shared
+                          across several specific libraries via a common
+                          enterprise wrapper library; crdkit doesn't
+                          care who implements it.
+  chain                - ordered list of fully-qualified integration
+                          template names (head = outermost filter) —
+                          this is the ONLY thing that builds ctx.model;
+                          crdkit.render contributes nothing to it itself.
 */}}
 {{- define "crdkit.render" -}}
 {{- $diag := dict "errors" (list) "warnings" (list) -}}
 {{- $root := .context -}}
 {{- $system := .system | default dict -}}
 {{- $target := .target -}}
+{{- $parentTargetTemplate := .parentTargetTemplate | default "crdkit.noParentTarget" -}}
 
-{{- $builtinTokensRaw := include "crdkit.builtinTokens" (dict "target" $target "diag" $diag) | fromYaml -}}
-
-{{- $tokensYaml := include "crdkit.mergeTokens" (dict
+{{- $tokensYaml := include "crdkit.mergeTokens.internal" (dict
       "tokens" .tokens "diag" $diag
-      "system" $system "defaults" .defaults "builtinTokens" $builtinTokensRaw) -}}
+      "system" $system "defaults" .defaults) -}}
 {{- $tokens := $tokensYaml | fromYaml -}}
 
-{{/* no pre-declared shape — see crdkit.ensureDictKey. Every field,
-     including "labels" below, is created lazily on first touch by
-     whichever integration needs it first. ctx.target exists so any
-     helper/integration that needs "the target driving this render" has
-     it available — nothing below defaults to it implicitly, though:
-     every crdkit.resolveValue/substituteTokens call still names its
-     target explicitly (see crdkit's CLAUDE.md on why). */}}
 {{- $model := dict -}}
-{{- $ctx := dict "root" $root "diag" $diag "model" $model "tokens" $tokens "target" $target -}}
-
-{{- $_ := include "crdkit.resolveTargetContainerTokens" (list $ctx $target) -}}
+{{- $ctx := dict "root" $root "diag" $diag "model" $model "tokens" $tokens "target" $target "parentTargetTemplate" $parentTargetTemplate -}}
 
 {{- include "crdkit.integrations.chain" (dict "chain" .chain "ctx" $ctx) -}}
 
-{{/* re-assert locked + computed token DECLARATIONS unconditionally, even
-     against chain-code mutation — a wholesale reset to the original raw
-     declaration, not a re-resolve, which also wipes any "_value" cache
-     that might have accumulated under a tampered declaration. */}}
-{{- range $name, $raw := $system -}}
-  {{- $_ := set $tokens $name $raw -}}
-{{- end -}}
-{{- range $name, $raw := $builtinTokensRaw -}}
-  {{- $_ := set $tokens $name $raw -}}
-{{- end -}}
-
-{{- $structureYaml := omit $root.Values "tokens" | toYaml -}}
-{{- $substituted := include "crdkit.substituteTokens" (list $ctx $structureYaml $target) -}}
-{{- $substitutedValues := $substituted | fromYaml -}}
+{{- $substitutedText := include "crdkit.substituteTokens" (list $ctx ($model | toYaml) $target) -}}
+{{- $substitutedModel := $substitutedText | fromYaml -}}
 
 {{/* unresolved-marker check: anything still shaped like @word@ in the final
      substituted text after a full pass is either a typo'd reference to a
-     token that was never declared, or a genuine cycle already caught by
-     crdkit.resolveChainedValue above (that case is reported there, with a
-     more specific message naming the token and the cycle — avoid a
-     duplicate/less-informative warning here for those). */}}
-{{- $unresolvedMarkers := regexFindAll "@[A-Za-z0-9_]+@" $substituted -1 -}}
+     token that was never declared, or a genuine cycle already caught, with
+     a more specific message, inside crdkit.resolveValue.internal during
+     resolution itself (avoid a duplicate/less-informative warning here for
+     those). */}}
+{{- $unresolvedMarkers := regexFindAll "@[A-Za-z0-9_]+@" $substitutedText -1 -}}
 {{- range $marker := $unresolvedMarkers -}}
   {{- $name := trimSuffix "@" (trimPrefix "@" $marker) -}}
   {{- if not (hasKey $tokens $name) -}}
-    {{- $_ := set $diag "warnings" (append $diag.warnings (printf "'%s' in the rendered structure does not match any known token after resolution — possible typo" $marker)) -}}
+    {{- $_ := set $diag "warnings" (append $diag.warnings (printf "'%s' in the rendered model does not match any known token after resolution — possible typo" $marker)) -}}
   {{- end -}}
 {{- end -}}
 
-{{/* precedence, earlier wins (plain `merge` semantics): standardLabels is
-     guaranteed present/correct and always wins on collision; consumer
-     labels win over anything the integration chain contributed; model
-     labels only fill in keys nobody else claimed. Swap the order below
-     to change precedence. */}}
-{{- include "crdkit.ensureDictKey" (dict "model" $model "key" "labels" "default" (dict)) -}}
-{{- $standardLabels := include "crdkit.standardLabels" (dict "context" $root) | fromYaml -}}
-{{- $consumerLabels := dig "metadata" "labels" (dict) $substitutedValues -}}
-{{- $finalLabels := merge (dict) $standardLabels $consumerLabels $model.labels -}}
-
-{{- include "crdkit.renderDiagnostics" (dict "diag" $diag) -}}
-apiVersion: {{ .apiVersion }}
-kind: {{ .kind }}
-metadata:
-  name: {{ $root.Release.Name }}
-  labels:
-{{ $finalLabels | toYaml | indent 4 }}
-spec:
-{{ $substitutedValues.spec | toYaml | indent 2 }}
+{{- include "crdkit.renderDiagnostics.internal" (dict "diag" $diag) }}
+{{ $substitutedModel | toYaml }}
 {{- end -}}

@@ -6,18 +6,22 @@ by a downstream library) are set directly via .Values here, letting
 tests exercise crdkit's own resolution/collision/diagnostics logic
 without coupling to any product's actual token content.
 
-Mirrors crdkit.render's own pipeline shape (minus apiVersion/kind/model
+Mirrors crdkit.render's own pipeline shape (minus the chain/model
 output), so it exercises the SAME lazy/cached/target-scoped resolution
 a real render goes through:
-  - crdkit.builtinTokens -> crdkit.mergeTokens produces ctx.tokens (the
-    raw declarations map — NOT resolved yet, see crdkit's CLAUDE.md).
+  - crdkit.mergeTokens.internal produces ctx.tokens (the raw declarations map —
+    NOT resolved yet, see crdkit's CLAUDE.md).
   - $ctx is built the same shape crdkit.render itself builds (root/diag/
-    model/tokens/target), since every helper below now takes ctx rather
-    than tokens/diag/env separately — see crdkit's CLAUDE.md on why
-    "env" was dropped as a param everywhere in favor of deriving it
-    from "target" on demand.
-  - crdkit.resolveTargetContainerTokens force-resolves anything with a
-    valid targetContainer, for .Values.target specifically.
+    model/tokens/target/parentTargetTemplate), since every helper below
+    takes ctx rather than tokens/diag/target separately.
+  - "harness.parentTarget" (defined in _helpers.tpl, this chart) is
+    ALWAYS the parentTargetTemplate passed to ctx — it's a plain, fully
+    data-driven lookup against .Values.parentTargetMap (a flat
+    {rung: nextRung} dict), which lets a test case opt into escalation
+    just by setting values, with no need to define a bespoke template
+    per test. A test that doesn't set parentTargetMap gets an empty
+    map, so the lookup always misses — functionally identical to
+    crdkit.noParentTarget for that test.
   - .Values.tokenOps is a data-driven list of {name, value,
     targetContainer, target} applied via crdkit.addToken, mimicking an
     integration contributing a derived token mid-chain. "target" is
@@ -27,14 +31,12 @@ a real render goes through:
   - .Values.structure is a second, separate document that gets
     crdkit.substituteTokens applied to it — this is what makes a token
     "used" and triggers its (lazy) resolution for .Values.target.
-  - .Values.crossTargets is an optional list of target STRINGS (not
-    {env, target} pairs anymore — env is always derived from target
-    now, so there's nothing else to supply): for each, every name in
-    .Values.crossTargetNames gets resolved via crdkit.resolveValue
-    directly, rendered into "crossResolved" — exercises resolving a
-    token for a target OTHER than the one driving this "render" (the
-    whole point of the redesign), and lets a test assert on the
-    resulting "_value" cache shape directly via "tokens".
+  - .Values.crossTargets is an optional list of target STRINGS: for
+    each, every name in .Values.crossTargetNames gets resolved via
+    crdkit.resolveValue directly, rendered into "crossResolved" —
+    exercises resolving a token for a target OTHER than the one driving
+    this "render" (the whole point of the redesign), and lets a test
+    assert on the resulting "_value" cache shape directly via "tokens".
   - .Values.modelOps is a data-driven list of operations {op, path,
     value} (or {op, key, default} for ensureDictKey) applied in order
     to a fresh model, letting a test case drive an arbitrary sequence
@@ -49,20 +51,14 @@ substituted "structure" text.
 {{- $diag := dict "errors" (list) "warnings" (list) -}}
 {{- $target := .Values.target | default "" -}}
 
-{{- $builtinTokens := include "crdkit.builtinTokens" (dict "target" $target "diag" $diag) | fromYaml -}}
-{{- $env := $builtinTokens.ENV -}}
-
-{{- $tokens := include "crdkit.mergeTokens" (dict
+{{- $tokens := include "crdkit.mergeTokens.internal" (dict
       "tokens" (.Values.tokens | default dict)
       "diag" $diag
       "system" (.Values.system | default dict)
-      "defaults" (.Values.defaults | default dict)
-      "builtinTokens" $builtinTokens) | fromYaml -}}
+      "defaults" (.Values.defaults | default dict)) | fromYaml -}}
 
 {{- $model := dict -}}
-{{- $ctx := dict "root" $ "diag" $diag "model" $model "tokens" $tokens "target" $target -}}
-
-{{- $_ := include "crdkit.resolveTargetContainerTokens" (list $ctx $target) -}}
+{{- $ctx := dict "root" $ "diag" $diag "model" $model "tokens" $tokens "target" $target "parentTargetTemplate" "harness.parentTarget" -}}
 
 {{- range $op := .Values.tokenOps | default (list) -}}
   {{- $_ := include "crdkit.addToken" (list $ctx $op.name $op.value $op.targetContainer ($op.target | default $target)) -}}
@@ -91,7 +87,6 @@ substituted "structure" text.
   {{- end -}}
 {{- end -}}
 
-env: {{ $env | quote }}
 tokens:
 {{ $tokens | toYaml | indent 2 }}
 structure:

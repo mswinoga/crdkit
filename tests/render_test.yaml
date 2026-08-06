@@ -1,0 +1,33 @@
+suite: crdkit.render top-level behavior
+templates:
+  - render_test.yaml
+tests:
+
+  - it: whatever the chain puts on ctx.model is substituted once and emitted verbatim, with no crdkit-side shape opinion
+    set:
+      target: prod
+      chainPopulatesModel: true
+      tokens:
+        GROUP_SUFFIX: "v2"
+    asserts:
+      - equal:
+          path: apiVersion
+          value: "harness.example.com/v2"
+      - equal:
+          path: kind
+          value: "HarnessCR"
+      - equal:
+          path: metadata.labels["harness.example.com/from-model"]
+          value: "v2-label"
+
+  - it: a chain that never touches ctx.model renders an empty document, no error — crdkit no longer enforces any field's presence
+    set:
+      target: prod
+      chainPopulatesModel: false
+    asserts:
+      - notExists:
+          path: apiVersion
+      - notExists:
+          path: kind
+      - notExists:
+          path: metadata

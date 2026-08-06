@@ -2,6 +2,9 @@ suite: crdkit token interpolation
 templates:
   - test.yaml
 tests:
+
+  # --- basic scalar / chained @ref@ resolution (target-agnostic) ---
+
   - it: resolves a simple scalar token
     set:
       target: prod-01
@@ -12,96 +15,18 @@ tests:
           path: structure.message
           value: "hello"
 
-  - it: dict resolves the exact env value when present
+  - it: a token referencing another token (one level) resolves correctly
     set:
       target: prod-01
-      tokens.COLOR.default: "blue"
-      tokens.COLOR.prod: "red"
-      structure.color: "@COLOR@"
+      tokens.A: "foo"
+      tokens.B: "@A@-bar"
+      structure.message: "@B@"
     asserts:
       - equal:
-          path: structure.color
-          value: "red"
+          path: structure.message
+          value: "foo-bar"
 
-  - it: dict falls back to the family tier when the exact env is unlisted
-    set:
-      target: qap1-01
-      tokens.REGION.QA: "region-qa"
-      tokens.REGION.default: "region-default"
-      structure.region: "@REGION@"
-    asserts:
-      - equal:
-          path: structure.region
-          value: "region-qa"
-
-  - it: dict falls back to the super-tier when neither exact env nor family tier is listed
-    set:
-      target: qap1-01
-      tokens.REGION.NONPROD: "region-nonprod"
-      tokens.REGION.default: "region-default"
-      structure.region: "@REGION@"
-    asserts:
-      - equal:
-          path: structure.region
-          value: "region-nonprod"
-
-  - it: dict falls back to default when nothing more specific matches
-    set:
-      target: staging-01
-      tokens.REGION.default: "region-default"
-      structure.region: "@REGION@"
-    asserts:
-      - equal:
-          path: structure.region
-          value: "region-default"
-
-  - it: dict with no matching env and no default records an ERROR, not a fail
-    set:
-      target: prod-01
-      tokens.BROKEN.dev: "only-dev"
-      # a declared-but-unused token is never resolved/diagnosed under the
-      # lazy model — referencing it via "structure" is what makes it "used".
-      structure.x: "@BROKEN@"
-    asserts:
-      - equal:
-          path: diag.errors[0]
-          value: "no value for env 'prod' and no 'default' defined for 'BROKEN'"
-
-  - it: match tier wins over env/tier/default, evaluated against the full target string
-    set:
-      target: qam1-05
-      # dotted set: paths can't reliably express array indices (modelOps[0]-
-      # style) or keys containing regex metacharacters, so "tokens" and
-      # "structure" are set as whole nested YAML values here instead of
-      # dotted sub-paths — see crdkit's CLAUDE.md testing notes.
-      tokens:
-        SUBENV:
-          default: "generic"
-          NONPROD: "nonprod-generic"
-          match:
-            - "qa[pm]1-0[0-9]": "canary"
-      structure:
-        subenv: "@SUBENV@"
-    asserts:
-      - equal:
-          path: structure.subenv
-          value: "canary"
-
-  - it: match rule values can reference capture groups from the pattern
-    set:
-      target: qam1-05
-      tokens:
-        PREFIX:
-          match:
-            - "(.+)-[0-9]{2}": "$1"
-      structure:
-        prefix: "@PREFIX@"
-    asserts:
-      - equal:
-          path: structure.prefix
-          value: "qam1"
-
-  - it: a token referencing a chain of 3+ tokens resolves via the iterative fixed-point resolver
+  - it: a token referencing a chain of 3+ tokens resolves via the iterative resolver
     set:
       target: prod-01
       tokens.T1: "one"
@@ -113,12 +38,11 @@ tests:
           path: structure.message
           value: "one-two-three"
 
-  - it: a direct two-token cycle records an ERROR mentioning a cycle, and does not hang
+  - it: a direct two-token @ref@ cycle records an ERROR mentioning a cycle, and does not hang
     set:
       target: prod-01
       tokens.A: "@B@"
       tokens.B: "@A@"
-      # again, needs a use site to trigger lazy resolution in the first place
       structure.x: "@A@"
     asserts:
       - matchRegex:
@@ -134,124 +58,267 @@ tests:
           path: structure.email
           value: "user@example.com"
 
-  - it: a locked (system) token collision discards the user value and records a WARNING
+  - it: a declared-but-never-used token produces no diagnostic at all, even if it would error if resolved
     set:
       target: prod-01
-      system.API_GROUP: "locked.example.com"
-      tokens.API_GROUP: "hijacked.example.com"
-      structure.group: "@API_GROUP@"
+      tokens.BROKEN: {}
     asserts:
-      - equal:
-          path: structure.group
-          value: "locked.example.com"
-      - equal:
-          path: diag.warnings[0]
-          value: "token 'API_GROUP' is reserved by the library and was overridden back to the library value"
-
-  - it: a default token can be overridden by the user with no diagnostic
-    set:
-      target: prod-01
-      defaults.LOG_LEVEL: "info"
-      tokens.LOG_LEVEL: "debug"
-      structure.level: "@LOG_LEVEL@"
-    asserts:
-      - equal:
-          path: structure.level
-          value: "debug"
+      - lengthEqual:
+          path: diag.errors
+          count: 0
       - lengthEqual:
           path: diag.warnings
           count: 0
-      - lengthEqual:
-          path: diag.errors
-          count: 0
 
-  - it: "'ENV' is a reserved built-in token — user-supplied tokens.ENV is discarded with a WARNING"
-    set:
-      target: prod-01
-      tokens.ENV: "hijacked"
-      structure.env: "@ENV@"
-    asserts:
-      - equal:
-          path: structure.env
-          value: "prod"
-      - equal:
-          path: diag.warnings[0]
-          value: "token 'ENV' is a reserved built-in and cannot be redefined; the user-supplied value was ignored"
-
-  - it: "'AT' is a reserved built-in token name — user-supplied tokens.AT is discarded with a WARNING"
-    set:
-      target: prod-01
-      tokens.AT: "hijacked"
-    asserts:
-      - equal:
-          path: diag.warnings[0]
-          value: "token 'AT' is a reserved built-in and cannot be redefined; the user-supplied value was ignored"
-
-  - it: missing target records an ERROR and env resolves to empty rather than failing
+  - it: an entirely unset target produces NO diagnostic when nothing is ever resolved against it — no proactive check anymore
     set:
       target: ""
+      tokens: {}
     asserts:
-      - equal:
-          path: env
-          value: ""
-      - equal:
-          path: diag.errors[0]
-          value: "'target' is required (e.g. 'prod', or 'prod-01' for a sequenced target) but was not set"
-
-  - it: "a plain target with no sequence suffix IS the env directly, no diagnostic (the common case for most CRDs)"
-    set:
-      target: "staging"
-    asserts:
-      - equal:
-          path: env
-          value: "staging"
       - lengthEqual:
           path: diag.errors
           count: 0
 
-  - it: "a target that merely LOOKS unusual but doesn't match <env>-<seq> is still accepted as a literal env, not an error"
-    set:
-      target: "not-a-valid-target"
-    asserts:
-      - equal:
-          path: env
-          value: "not-a-valid-target"
-      - lengthEqual:
-          path: diag.errors
-          count: 0
-
-  - it: a target WITH the sequence suffix still extracts just the env portion
-    set:
-      target: "prod-01"
-    asserts:
-      - equal:
-          path: env
-          value: "prod"
-      - lengthEqual:
-          path: diag.errors
-          count: 0
-
-  - it: a lowercase (or otherwise non-UPPER_SNAKE_CASE) token name records a WARNING but still resolves
+  - it: resolving a name that was never declared at all (e.g. via crossTargets/resolveValue directly) records an ERROR, not a fail()
     set:
       target: prod-01
-      tokens.myToken: "hello"
-      structure.message: "@myToken@"
+      crossTargets:
+        - "prod-01"
+      crossTargetNames:
+        - "NEVER_DECLARED"
     asserts:
       - equal:
-          path: structure.message
-          value: "hello"
+          path: diag.errors[0]
+          value: "unknown token 'NEVER_DECLARED' referenced"
       - equal:
-          path: diag.warnings[0]
-          value: "token name 'myToken' should be UPPER_SNAKE_CASE for readability"
+          path: crossResolved.prod-01.NEVER_DECLARED.value
+          value: ""
+
+  # --- dedicated attribute: a literal key equal to the exact target ---
+
+  - it: a dedicated attribute (literal key equal to the exact target) resolves directly, at any granularity
+    set:
+      target: prod-01
+      tokens.COLOR:
+        prod-01: "red"
+        blue-thing: "blue"
+      structure.color: "@COLOR@"
+    asserts:
+      - equal:
+          path: structure.color
+          value: "red"
+
+  - it: a dedicated attribute works for a bare, unsequenced target too — crdkit doesn't care about shape
+    set:
+      target: staging
+      tokens.COLOR:
+        staging: "teal"
+      structure.color: "@COLOR@"
+    asserts:
+      - equal:
+          path: structure.color
+          value: "teal"
+
+  - it: no dedicated attribute, no match, no parentTargetMap configured — an honest ERROR, not a silent wrong answer
+    set:
+      target: prod-01
+      tokens.BROKEN:
+        qa-01: "wrong-target-entirely"
+      structure.x: "@BROKEN@"
+    asserts:
+      - equal:
+          path: diag.errors[0]
+          value: "no value found for 'BROKEN' — target chain exhausted at 'prod-01' starting from 'prod-01'"
+
+  # --- match: (regex, tried once, unconditionally, before any escalation) ---
+
+  - it: "match: resolves against the full target string — no shape requirement, works for any target"
+    set:
+      target: canary-thing
+      tokens.SUBENV:
+        match:
+          - "canary-.*": "is-canary"
+      structure.subenv: "@SUBENV@"
+    asserts:
+      - equal:
+          path: structure.subenv
+          value: "is-canary"
+
+  - it: "match: rule values can reference capture groups from the pattern"
+    set:
+      target: qam1-05
+      tokens.PREFIX:
+        match:
+          - "(.+)-[0-9]{2}": "$1"
+      structure.prefix: "@PREFIX@"
+    asserts:
+      - equal:
+          path: structure.prefix
+          value: "qam1"
+
+  - it: "match: first matching rule wins even when a later rule would also match"
+    set:
+      target: prod-01
+      tokens.MULTI:
+        match:
+          - "prod-01": "first-match"
+          - "prod-[0-9]{2}": "second-match-would-also-fit"
+      structure.multi: "@MULTI@"
+    asserts:
+      - equal:
+          path: structure.multi
+          value: "first-match"
+
+  - it: a dedicated attribute wins over a match rule that would also fire — most specific always beats pattern-based
+    set:
+      target: prod-01
+      tokens.HOST:
+        prod-01: "dedicated-wins"
+        match:
+          - "prod-[0-9]{2}": "pattern-would-fire-too"
+      structure.host: "@HOST@"
+    asserts:
+      - equal:
+          path: structure.host
+          value: "dedicated-wins"
+
+  # --- the parent-chain walk (crdkit.render's "parentTargetTemplate", client-supplied) ---
+
+  - it: walks a single escalation hop when the exact target has no dedicated attribute
+    set:
+      target: prod-01
+      tokens.REGION:
+        prod: "us-east-1"
+      structure.region: "@REGION@"
+      parentTargetMap:
+        prod-01: prod
+    asserts:
+      - equal:
+          path: structure.region
+          value: "us-east-1"
+
+  - it: walks multiple escalation hops, caching every rung visited along the way, not just the one where the value was found
+    set:
+      target: qam1-01
+      tokens.REGION2:
+        NONPROD: "region-nonprod"
+      parentTargetMap:
+        qam1-01: qam1
+        qam1: QA
+        QA: NONPROD
+      crossTargets:
+        - "qam1-01"
+      crossTargetNames:
+        - "REGION2"
+    asserts:
+      - equal:
+          path: crossResolved.qam1-01.REGION2.value
+          value: "region-nonprod"
+      - equal:
+          path: tokens.REGION2._value.qam1-01
+          value: "region-nonprod"
+      - equal:
+          path: tokens.REGION2._value.qam1
+          value: "region-nonprod"
+      - equal:
+          path: tokens.REGION2._value.QA
+          value: "region-nonprod"
+      - equal:
+          path: tokens.REGION2._value.NONPROD
+          value: "region-nonprod"
+
+  - it: with no parentTargetMap configured, there is NO escalation at all — same as crdkit.noParentTarget
+    set:
+      target: prod-01
+      tokens.REGION:
+        prod: "us-east-1"
+      structure.region: "@REGION@"
+    asserts:
+      - equal:
+          path: diag.errors[0]
+          value: "no value found for 'REGION' — target chain exhausted at 'prod-01' starting from 'prod-01'"
+
+  - it: a malformed client escalation map that cycles back on itself is caught as an ERROR, not a hang
+    set:
+      target: a
+      tokens.X:
+        unused: "never-reached"
+      structure.x: "@X@"
+      parentTargetMap:
+        a: b
+        b: a
+    asserts:
+      - equal:
+          path: diag.errors[0]
+          value: "target escalation chain for 'X' cycles back to 'a' while resolving from 'a'"
+      - lengthEqual:
+          path: diag.errors
+          count: 1
+
+  - it: "match: is evaluated fresh for the exact target even when a broader rung's cache is already populated from a DIFFERENT target's walk"
+    set:
+      target: prod-01
+      tokens.SPECIAL:
+        NONPROD: "generic-nonprod"
+        match:
+          - "qap1-[0-9]{2}": "special-value"
+      parentTargetMap:
+        qam1-01: qam1
+        qam1: QA
+        QA: NONPROD
+        qap1-02: qap1
+        qap1: QA
+      crossTargets:
+        - "qam1-01"
+        - "qap1-02"
+      crossTargetNames:
+        - "SPECIAL"
+    asserts:
+      - equal:
+          path: crossResolved.qam1-01.SPECIAL.value
+          value: "generic-nonprod"
+      - equal:
+          path: crossResolved.qap1-02.SPECIAL.value
+          value: "special-value"
+      - equal:
+          path: tokens.SPECIAL._value.QA
+          value: "generic-nonprod"
+
+  - it: the walk supports an arbitrary number of named rungs, not a fixed "family/tier" depth — some branches shorter than others
+    set:
+      target: prod-01
+      tokens.REGION3:
+        PROD: "us-east-1"
+      parentTargetMap:
+        prod-01: prod
+        prod: PROD
+      structure.region: "@REGION3@"
+    asserts:
+      - equal:
+          path: structure.region
+          value: "us-east-1"
+
+  - it: "a value found via the walk still gets @ref@-chained normally, same as a dedicated attribute or match result"
+    set:
+      target: qa-01
+      tokens.HOST_NAME: "db1"
+      tokens.DB_HOST:
+        QA: "@HOST_NAME@.internal"
+      parentTargetMap:
+        qa-01: qa
+        qa: QA
+      structure.dbHost: "@DB_HOST@"
+    asserts:
+      - equal:
+          path: structure.dbHost
+          value: "db1.internal"
+
+  # --- targetContainer ---
 
   - it: a token with no targetContainer declared resolves with targetContainer "none"
     set:
       target: prod
       tokens.GREETING: "hello"
-      # a bare-scalar declaration has no targetContainer key to auto-trigger
-      # resolveTargetContainerTokens, and isn't referenced via "structure"
-      # either — crossTargets forces a direct crdkit.resolveValue call so
-      # the resolved {value, targetContainer} struct is observable at all.
       crossTargets:
         - "prod"
       crossTargetNames:
@@ -296,9 +363,6 @@ tests:
     set:
       target: prod
       tokens.BAD_VAR.value: "still-here"
-      # an unrecognized targetContainer is NOT one of main/side-car/both, so
-      # resolveTargetContainerTokens' filter doesn't auto-trigger it either
-      # — crossTargets is needed here too.
       tokens.BAD_VAR.targetContainer: "sidecar-typo"
       crossTargets:
         - "prod"
@@ -315,71 +379,15 @@ tests:
           path: diag.errors[0]
           value: "invalid targetContainer 'sidecar-typo' for 'BAD_VAR' — must be one of main/side-car/both (or omitted)"
 
-  - it: crdkit.addToken lets an integration contribute a derived token with a targetContainer
-    set:
-      target: prod-01
-      tokenOps:
-        - name: DERIVED_VAR
-          value: "computed"
-          targetContainer: "main"
-    asserts:
-      # "value" is stored as a match: rule keyed by the exact target, not
-      # a bare scalar — see crdkit's CLAUDE.md on why (lazy resolution,
-      # not eager, so a value referencing a token added later in the
-      # chain still resolves correctly).
-      - equal:
-          path: tokens.DERIVED_VAR.value
-          value:
-            match:
-              - prod-01: "computed"
-      - equal:
-          path: tokens.DERIVED_VAR.targetContainer
-          value: "main"
-
-  - it: crdkit.addToken defaults targetContainer to "none" when omitted
-    set:
-      target: prod-01
-      tokenOps:
-        - name: DERIVED_VAR
-          value: "computed"
-    asserts:
-      - equal:
-          path: tokens.DERIVED_VAR.targetContainer
-          value: "none"
-
-  - it: crdkit.addToken warns on a non-conforming name and validates targetContainer the same as any other token
-    set:
-      target: prod-01
-      tokenOps:
-        - name: derivedVar
-          value: "computed"
-          targetContainer: "bogus"
-    asserts:
-      - equal:
-          path: tokens.derivedVar.targetContainer
-          value: "none"
-      - matchRegex:
-          path: diag.warnings[0]
-          pattern: "UPPER_SNAKE_CASE"
-      - matchRegex:
-          path: diag.errors[0]
-          pattern: "invalid targetContainer 'bogus'"
-
-  # --- edge cases ---
-
-  - it: "value can itself be the full env-varying dict, combined with targetContainer"
+  - it: "value can itself be the full target-keyed dict, combined with targetContainer"
     set:
       target: prod
       tokens:
         DB_HOST:
           value:
-            default: "db-nonprod.internal"
             prod: "db-prod.internal"
+            other: "db-other.internal"
           targetContainer: "main"
-      # targetContainer: "main" IS valid, so this token auto-resolves via
-      # resolveTargetContainerTokens — but the RESOLVED scalar only lands
-      # in the "_value" cache, never overwriting the raw "value" dict at
-      # tokens.DB_HOST.value, so crossResolved is still needed to observe it.
       crossTargets:
         - "prod"
       crossTargetNames:
@@ -400,8 +408,6 @@ tests:
           value: "explicit"
           default: "ignored-default"
           prod: "ignored-prod"
-      # no targetContainer here, so a "structure" reference is what triggers
-      # resolution (and thus the extra-keys warning check) under the lazy model.
       structure:
         weird: "@WEIRD@"
     asserts:
@@ -412,14 +418,12 @@ tests:
           path: diag.warnings[0]
           pattern: "declares 'value' alongside other keys"
 
-  - it: "targetContainer declared WITHOUT 'value' records a clear ERROR, not the unrelated 'no value for env' one"
+  - it: "targetContainer declared WITHOUT 'value' records a clear ERROR, not the unrelated 'no value found' one"
     set:
       target: prod
       tokens:
         BROKEN:
           targetContainer: "main"
-      # targetContainer: "main" is a valid enum value, so this auto-triggers
-      # via resolveTargetContainerTokens; crossTargets reads back the result.
       crossTargets:
         - "prod"
       crossTargetNames:
@@ -439,9 +443,6 @@ tests:
     set:
       target: prod
       tokens.EMPTY_VAR.value: "x"
-      # an empty string is falsy under Sprig's `default`, so
-      # resolveTargetContainerTokens' `| default "none"` filter treats it
-      # the same as an absent targetContainer — never auto-triggered either.
       tokens.EMPTY_VAR.targetContainer: ""
       crossTargets:
         - "prod"
@@ -454,6 +455,79 @@ tests:
       - matchRegex:
           path: diag.errors[0]
           pattern: "invalid targetContainer ''"
+
+  - it: a token with targetContainer can still chain off another token's value normally
+    set:
+      target: prod
+      tokens.HOST_NAME: "db1"
+      tokens.DB_HOST.value: "@HOST_NAME@.internal"
+      tokens.DB_HOST.targetContainer: "main"
+      crossTargets:
+        - "prod"
+      crossTargetNames:
+        - "DB_HOST"
+    asserts:
+      - equal:
+          path: crossResolved.prod.DB_HOST.value
+          value: "db1.internal"
+      - equal:
+          path: crossResolved.prod.DB_HOST.targetContainer
+          value: "main"
+
+  # --- merge / naming-convention / collision diagnostics ---
+
+  - it: a locked (system) token collision discards the user value and records a WARNING
+    set:
+      target: prod-01
+      system.API_GROUP: "locked.example.com"
+      tokens.API_GROUP: "hijacked.example.com"
+      structure.group: "@API_GROUP@"
+    asserts:
+      - equal:
+          path: structure.group
+          value: "locked.example.com"
+      - equal:
+          path: diag.warnings[0]
+          value: "token 'API_GROUP' is reserved by the library and was overridden back to the library value"
+
+  - it: a default token can be overridden by the user with no diagnostic
+    set:
+      target: prod-01
+      defaults.LOG_LEVEL: "info"
+      tokens.LOG_LEVEL: "debug"
+      structure.level: "@LOG_LEVEL@"
+    asserts:
+      - equal:
+          path: structure.level
+          value: "debug"
+      - lengthEqual:
+          path: diag.warnings
+          count: 0
+      - lengthEqual:
+          path: diag.errors
+          count: 0
+
+  - it: "'AT' is crdkit's one reserved built-in name — user-supplied tokens.AT is discarded with a WARNING"
+    set:
+      target: prod-01
+      tokens.AT: "hijacked"
+    asserts:
+      - equal:
+          path: diag.warnings[0]
+          value: "token 'AT' is a reserved built-in and cannot be redefined; the user-supplied value was ignored"
+
+  - it: a lowercase (or otherwise non-UPPER_SNAKE_CASE) token name records a WARNING but still resolves
+    set:
+      target: prod-01
+      tokens.myToken: "hello"
+      structure.message: "@myToken@"
+    asserts:
+      - equal:
+          path: structure.message
+          value: "hello"
+      - equal:
+          path: diag.warnings[0]
+          value: "token name 'myToken' should be UPPER_SNAKE_CASE for readability"
 
   - it: a token name starting with a digit is non-conforming, same WARNING as any other bad casing
     set:
@@ -493,52 +567,9 @@ tests:
           path: diag.warnings[0]
           pattern: "'apiGroup' should be UPPER_SNAKE_CASE"
 
-  - it: a token with targetContainer can still chain off another token's value normally
-    set:
-      target: prod
-      tokens.HOST_NAME: "db1"
-      tokens.DB_HOST.value: "@HOST_NAME@.internal"
-      # targetContainer: "main" auto-triggers resolution, but the raw
-      # declaration still holds the unresolved "@HOST_NAME@.internal" marker
-      # — crossResolved is needed to see the chained-and-substituted result.
-      tokens.DB_HOST.targetContainer: "main"
-      crossTargets:
-        - "prod"
-      crossTargetNames:
-        - "DB_HOST"
-    asserts:
-      - equal:
-          path: crossResolved.prod.DB_HOST.value
-          value: "db1.internal"
-      - equal:
-          path: crossResolved.prod.DB_HOST.targetContainer
-          value: "main"
+  # --- crdkit.addToken ---
 
-  - it: "match: first matching rule wins even when a later rule would also match"
-    set:
-      target: prod-01
-      tokens:
-        MULTI:
-          match:
-            - "prod-01": "first-match"
-            - "prod-[0-9]{2}": "second-match-would-also-fit"
-      structure.multi: "@MULTI@"
-    asserts:
-      - equal:
-          path: structure.multi
-          value: "first-match"
-
-  - it: the PROD family tier is used when the exact "prod" env key is absent but "PROD" is present
-    set:
-      target: prod-01
-      tokens.REGION.PROD: "us-east-1"
-      structure.region: "@REGION@"
-    asserts:
-      - equal:
-          path: structure.region
-          value: "us-east-1"
-
-  - it: "crdkit.addToken stores 'value' as an unresolved match: rule for the exact target — NOT resolved at add-time"
+  - it: "crdkit.addToken stores 'value' as a DEDICATED ATTRIBUTE (a literal key equal to the exact target) — not resolved at add-time"
     set:
       target: prod-01
       tokens.GREETING: "hello"
@@ -546,21 +577,15 @@ tests:
         - name: DERIVED_VAR
           value: "prefix-@GREETING@"
     asserts:
-      # no structure/crossTargets reference anywhere in this test — this
-      # is purely the RAW declaration right after addToken runs, still
-      # carrying the unresolved "@GREETING@" marker. Resolution (eager,
-      # at addToken's own call site) was tried and deliberately rejected:
-      # an integration's addToken call may reference a token that ANOTHER
-      # integration only adds later in the same chain, and resolving
-      # eagerly against ctx.tokens as it stood at THIS call site would
-      # wrongly error on that (see crdkit's CLAUDE.md).
+      # raw declaration right after addToken runs — no structure/crossTargets
+      # reference anywhere in this test, so this is purely what addToken
+      # itself wrote, still carrying the unresolved "@GREETING@" marker.
       - equal:
           path: tokens.DERIVED_VAR.value
           value:
-            match:
-              - prod-01: "prefix-@GREETING@"
+            prod-01: "prefix-@GREETING@"
 
-  - it: "an addToken-added token resolves lazily via its match: rule, exactly like any hand-declared token, once actually referenced"
+  - it: an addToken-added token resolves lazily via its dedicated attribute, exactly like any hand-declared token, once actually referenced
     set:
       target: prod-01
       tokens.GREETING: "hello"
@@ -573,27 +598,22 @@ tests:
           path: structure.x
           value: "prefix-hello"
 
-  - it: "an addToken-added token has NO fallback for a target it was never given a value for — same honesty as any match-only declaration"
+  - it: an addToken-added token has no fallback for a target it was never given a value for, and no parentTargetMap configured
     set:
       target: prod-01
-      tokens.GREETING: "hello"
       tokenOps:
         - name: DERIVED_VAR
-          value: "prefix-@GREETING@"
-      # DERIVED_VAR only has a match: rule for "prod-01" — no "default",
-      # no env tiers. Asking for a completely different target ("qa") is
-      # a legitimate "no value for env and no default" ERROR, same as any
-      # other token that was only ever declared for specific targets.
+          value: "prefix-value"
       crossTargets:
         - "qa"
       crossTargetNames:
         - "DERIVED_VAR"
     asserts:
-      - matchRegex:
+      - equal:
           path: diag.errors[0]
-          pattern: "no value for env 'qa' and no 'default' defined for 'DERIVED_VAR'"
+          value: "no value found for 'DERIVED_VAR' — target chain exhausted at 'qa' starting from 'qa'"
 
-  - it: "a second crdkit.addToken call for the SAME name but a DIFFERENT target adds another match: rule, preserving the first"
+  - it: "a second crdkit.addToken call for the SAME name but a DIFFERENT target adds another dedicated attribute, preserving the first"
     set:
       target: prod-01
       tokenOps:
@@ -605,12 +625,12 @@ tests:
           target: "qa"
     asserts:
       - equal:
-          path: tokens.DERIVED_VAR.value.match
+          path: tokens.DERIVED_VAR.value
           value:
-            - qa: "qa-value"
-            - prod-01: "prod-value"
+            prod-01: "prod-value"
+            qa: "qa-value"
 
-  - it: "a second crdkit.addToken call for the SAME (name, target) pair overwrites in place — no duplicate/shadowed rule left behind"
+  - it: "a second crdkit.addToken call for the SAME (name, target) pair overwrites in place"
     set:
       target: prod-01
       tokenOps:
@@ -622,12 +642,9 @@ tests:
           target: "prod-01"
     asserts:
       - equal:
-          path: tokens.DERIVED_VAR.value.match
+          path: tokens.DERIVED_VAR.value
           value:
-            - prod-01: "second-value"
-      - lengthEqual:
-          path: tokens.DERIVED_VAR.value.match
-          count: 1
+            prod-01: "second-value"
 
   - it: "a second crdkit.addToken call that omits targetContainer INHERITS the one set by an earlier call, rather than resetting it to 'none'"
     set:
@@ -645,6 +662,25 @@ tests:
           path: tokens.DERIVED_VAR.targetContainer
           value: "main"
 
+  - it: "crdkit.addToken's value chain-resolves against the FINAL state of ctx.tokens — a value referencing a token added by a LATER addToken call still resolves"
+    set:
+      target: prod-01
+      tokenOps:
+        - name: FIRST_VAR
+          value: "uses-@SECOND_VAR@"
+        - name: SECOND_VAR
+          value: "computed-later"
+      structure.x: "@FIRST_VAR@"
+    asserts:
+      # this is the whole reason addToken defers resolution instead of
+      # resolving eagerly at its own call site — FIRST_VAR references a
+      # token that's only added by a SECOND, later addToken call. Both
+      # calls insert raw declarations before anything is resolved, so by
+      # the time "structure.x" actually triggers resolution, both exist.
+      - equal:
+          path: structure.x
+          value: "uses-computed-later"
+
   - it: "crdkit.addToken can silently overwrite an existing token, including a locked one — no protection, by design"
     set:
       target: prod-01
@@ -658,106 +694,28 @@ tests:
       # consumer input) — crdkit.render's OWN post-chain reassertion is
       # what actually protects "system" tokens end-to-end in the real
       # pipeline; this harness calls addToken directly, without that
-      # reassertion step, so the overwrite is visible here.
+      # reassertion step, so the overwrite is visible here. API_GROUP's
+      # existing declaration is a bare scalar (not a dedicated-attribute
+      # dict), so addToken can't merge into it — it's replaced outright.
       - equal:
           path: tokens.API_GROUP.value
           value:
-            match:
-              - prod-01: "overwritten-by-integration"
+            prod-01: "overwritten-by-integration"
 
-  # --- caching / multi-target semantics (the redesign's whole point) ---
-
-  - it: "resolving via a super-tier fallback caches every intermediate tier walked through, not just the exact target"
+  - it: crdkit.addToken warns on a non-conforming name and validates targetContainer the same as any other token
     set:
       target: prod-01
-      tokens:
-        REGION2:
-          NONPROD: "region-nonprod"
-          default: "region-default"
-      # target "qam1-01" -> derived env "qam1" -> family "QA" -> super-tier
-      # "NONPROD"; only "NONPROD" is actually declared, so resolution walks
-      # target -> qam1 -> QA -> NONPROD before finding a value — every one
-      # of those tiers should get cached (each a DISTINCT key from the
-      # exact target here, since target "qam1-01" != derived env "qam1").
-      crossTargets:
-        - "qam1-01"
-      crossTargetNames:
-        - "REGION2"
+      tokenOps:
+        - name: derivedVar
+          value: "computed"
+          targetContainer: "bogus"
     asserts:
       - equal:
-          path: crossResolved.qam1-01.REGION2.value
-          value: "region-nonprod"
-      - equal:
-          path: tokens.REGION2._value.qam1-01
-          value: "region-nonprod"
-      - equal:
-          path: tokens.REGION2._value.qam1
-          value: "region-nonprod"
-      - equal:
-          path: tokens.REGION2._value.QA
-          value: "region-nonprod"
-      - equal:
-          path: tokens.REGION2._value.NONPROD
-          value: "region-nonprod"
-
-  - it: "a target-specific 'match:' rule is evaluated fresh even when a broader family-tier cache entry already exists from a different target"
-    set:
-      target: prod-01
-      tokens:
-        SPECIAL:
-          NONPROD: "generic-nonprod"
-          match:
-            - "qap1-[0-9]{2}": "special-value"
-      # "qam1-01" (env "qam1") and "qap1-02" (env "qap1") share family "QA"
-      # — resolving "qam1-01" first populates the "QA" family-tier cache
-      # with "generic-nonprod". Resolving "qap1-02" second must NOT be
-      # short-circuited by that cache hit: its own "match:" rule fires
-      # fresh (matching the full target string) and must win instead.
-      crossTargets:
-        - "qam1-01"
-        - "qap1-02"
-      crossTargetNames:
-        - "SPECIAL"
-    asserts:
-      - equal:
-          path: crossResolved.qam1-01.SPECIAL.value
-          value: "generic-nonprod"
-      - equal:
-          path: crossResolved.qap1-02.SPECIAL.value
-          value: "special-value"
-      - equal:
-          path: tokens.SPECIAL._value.QA
-          value: "generic-nonprod"
-
-  - it: "cycle detection is scoped to the target being resolved — a token cyclic under one target can resolve cleanly under another"
-    set:
-      target: prod-01
-      tokens:
-        X:
-          default: "x-default"
-          match:
-            - "special": "@Y@"
-        Y:
-          default: "y-default"
-          match:
-            - "special": "@X@"
-      # X and Y only reference each other via a "match:" rule that fires
-      # exclusively for target "special" — under target "normal", neither
-      # match rule fires and X falls straight through to its default, no
-      # cycle at all. Same token, same declarations, different outcome per
-      # target — this is the property the whole redesign exists to enable.
-      crossTargets:
-        - "special"
-        - "normal"
-      crossTargetNames:
-        - "X"
-    asserts:
+          path: tokens.derivedVar.targetContainer
+          value: "none"
+      - matchRegex:
+          path: diag.warnings[0]
+          pattern: "UPPER_SNAKE_CASE"
       - matchRegex:
           path: diag.errors[0]
-          pattern: "cycle"
-      - lengthEqual:
-          path: diag.errors
-          count: 1
-      - equal:
-          path: crossResolved.normal.X.value
-          value: "x-default"
+          pattern: "invalid targetContainer 'bogus'"

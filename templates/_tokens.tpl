@@ -1,10 +1,9 @@
 {{/*
-All generic token/env resolution logic lives in this file. Product-
-specific token content (which keys are locked/defaulted, what values
-they carry) is NEVER referenced here by name — callers pass their own
-"system"/"defaults" dicts in explicitly (see crdkit.mergeTokens), so
-this file has zero knowledge of any specific CRD library that depends
-on crdkit.
+All generic token resolution logic lives in this file. Product-specific
+token content (which keys are locked/defaulted, what values they carry)
+is NEVER referenced here by name — callers pass their own "system"/
+"defaults" dicts in explicitly (see crdkit.mergeTokens.internal), so this file
+has zero knowledge of any specific CRD library that depends on crdkit.
 
 Diagnostics: every helper below that can fail takes a "diag" dict (built
 once by the caller as `dict "errors" (list) "warnings" (list)`) and
@@ -16,10 +15,17 @@ instead.
 
 RESOLUTION IS LAZY, PER-TARGET, AND MEMOIZED — this is a deliberate
 redesign, not the original shape of this library. There is no "resolve
-every declared token up front" pass anymore. A token only gets resolved
-(and only gets diagnosed for being malformed) when something actually
-needs its value — either a "@NAME@" marker referencing it, or it
-declaring a targetContainer (see crdkit.resolveTargetContainerTokens).
+every declared token up front" pass anymore, and no separate eager-
+resolution trigger for anything, including targetContainer-bearing
+tokens (an earlier version of this file force-resolved those regardless
+of textual reference — removed because nothing in crdkit's own output
+ever surfaced a resolved targetContainer anywhere, so eagerly validating
+one bought nothing observable; see crdkit's CLAUDE.md). A token only
+gets resolved (and only gets diagnosed for being malformed) when
+something actually needs its value — a "@NAME@" marker referencing it.
+targetContainer itself is still validated whenever that happens to occur
+(crdkit.resolveValue.internal does this as part of ordinary resolution), just
+never forced ahead of time anymore.
 A DECLARED-BUT-NEVER-USED broken token produces no diagnostic at all.
 That's an intentional trade against this library's earlier "diagnose
 everything declared, whether used or not" guarantee — made because the
@@ -29,38 +35,54 @@ this design exists specifically to enable. See crdkit's CLAUDE.md.
 
 Every RESOLVED token is a struct `{value, targetContainer}`, never a
 bare string — see crdkit.resolveValue (the public, list-based entry
-point: `[ctx, name, target]`) and crdkit.resolveValue.core (the
+point: `[ctx, name, target]`) and crdkit.resolveValue.internal (the
 internal engine it delegates to). A token's DECLARATION may still be a
-bare scalar or the env-varying dict shape (shorthand for `{value:
-<that>}`, targetContainer implied "none") — see crdkit.resolveValue.core
-for the disambiguation rule.
+bare scalar or a dict keyed by arbitrary "target" strings (shorthand for
+`{value: <that>}`, targetContainer implied "none") — see
+crdkit.resolveValue.internal for the disambiguation rule.
 
-ctx.tokens IS the merged raw declarations map (crdkit.mergeTokens'
+ctx.tokens IS the merged raw declarations map (crdkit.mergeTokens.internal's
 output) — not a separate resolved structure. Resolved values get cached
 onto it in place, under a reserved "_value" sub-key per token, as
-they're computed (see crdkit.resolveValue.core). This means
+they're computed (see crdkit.resolveValue.internal). This means
 `ctx.tokens[NAME]` is NOT guaranteed to be a `{value, targetContainer}`
 struct the way it used to be — it's a raw declaration that may or may
 not have been resolved yet. Always go through crdkit.resolveValue to
 get the guaranteed-resolved shape; never read ctx.tokens[NAME].value
 directly.
 
-Every one of these helpers derives "env" from "target" itself
-(crdkit.deriveTargetEnv) rather than taking both as separate params —
-env is always a pure function of target, so asking a caller for both
-was redundant and a source of accidental mismatches. There is no
-"current render's target" implicitly available anywhere in this file;
-every call names the target it wants resolved, which is what makes
-resolving for a target OTHER than the one driving the render (the whole
-point of this design) exactly as easy as the common case.
+CRDKIT HAS NO CONCEPT OF "ENV", "FAMILY", OR "TIER" — it never did more
+than pretend to be generic about this, and now it isn't lying about it.
+"target" is an OPAQUE STRING as far as crdkit is concerned: it might be
+a sequenced instance, a bare environment name, a family, a tier, or
+anything else a specific library's own taxonomy calls for. Escalating
+from one target to a broader one ("qa-01" to "qa", "qa" to "QA", "QA" to
+"NONPROD", whatever a client library wants) is entirely delegated to a
+CLIENT-SUPPLIED template — see "parentTarget" in crdkit.resolveValue.internal
+below. crdkit only provides the WALKING mechanism (call the template
+repeatedly, check a literal key at each rung, cache what it finds,
+detect cycles) — never the taxonomy itself. A specific library (or a
+shared enterprise wrapper library sitting between crdkit and several
+specific libraries) owns that; crdkit.matchRules remains available as a
+reusable regex primitive for such a template to build on (e.g. to
+implement its own "strip a numeric sequence suffix" first hop), but
+crdkit itself no longer has an opinion on what that first hop is, or
+whether there even is one.
+
+Consequence: there's no more "env" token, no more proactive "target is
+required" check anywhere in this file (an unset target is only ever
+diagnosed if something actually tries to resolve a token against it,
+walks nowhere, and errors normally — same lazy philosophy as everything
+else here, not a special case).
 */}}
 
 {{/*
-Regex-based matching, shared by the "match:" tier in
-crdkit.resolveValue.core below AND by env derivation from "target" (see
-crdkit.deriveTargetEnv in _tokens.builtin.tpl) — one primitive, two
-callers, so the target→env parsing isn't bespoke logic living apart
-from the general-purpose mechanism a token author gets via "match:".
+Regex-based matching — a general-purpose primitive, not tied to any
+specific tier concept. Used by the "match:" tier in
+crdkit.resolveValue.internal below, and available for a client library's own
+"parentTarget" template to build on (e.g. to strip a numeric sequence
+suffix as its own first escalation hop) rather than reimplementing
+regex handling from scratch.
 
 Evaluates an ordered list of single-key {pattern: replacement} rules
 against a subject string; the FIRST pattern that matches wins (full-
@@ -108,6 +130,21 @@ value: {{ $result | quote }}
 {{- end -}}
 
 {{/*
+Default "parentTarget" template used when a specific library doesn't
+supply its own (see crdkit.render's "parentTargetTemplate" param) — always
+returns nothing, meaning no escalation beyond the exact target is
+possible. This is the honest, assumption-free default: crdkit does not
+guess at any taxonomy on a client's behalf. A specific library (or a
+shared enterprise wrapper) opts into escalation by supplying its own
+template name instead.
+
+Expects a dict: { "target": <string, the current rung being escalated FROM>, "context": <caller's root context, e.g. for reading .Values> } — same shape every "parentTarget" template receives.
+Returns: the next rung up, or nothing if there is none.
+*/}}
+{{- define "crdkit.noParentTarget" -}}
+{{- end -}}
+
+{{/*
 Merges system/default/user tokens, applies collision + naming-convention
 warnings. Does NOT resolve anything — see the file-level doc comment on
 why resolution is lazy now. This is a pure merge-and-validate step;
@@ -117,41 +154,37 @@ its output (raw declarations only) becomes ctx.tokens.
 library's own render wrapper, e.g. mycrd.render) as already-rendered
 dicts of RAW declarations — crdkit has no template-name knowledge of any
 specific library, by design, so it cannot `include` a "systemTokens"/
-"defaultTokens" define itself. "builtinTokens" (crdkit.builtinTokens) is
-also a dict of raw declarations, same as the others — it doesn't need
-special-case handling here despite being crdkit-owned.
+"defaultTokens" define itself.
 
-Merge order, later wins: defaults -> user tokens -> system -> builtin
-(crdkit.builtinTokens — computed facts like "ENV", most authoritative of
-all). Sprig's plain `merge` gives PRIORITY TO THE FIRST (destination)
-argument on key collisions — i.e. earlier args win, not later ones — so
-it cannot express "later wins" directly; `mergeOverwrite` is used
-instead, which lets each subsequent source overwrite matching keys
-already in the destination.
+Merge order, later wins: defaults -> user tokens -> system (locked,
+most authoritative). Sprig's plain `merge` gives PRIORITY TO THE FIRST
+(destination) argument on key collisions — i.e. earlier args win, not
+later ones — so it cannot express "later wins" directly; `mergeOverwrite`
+is used instead, which lets each subsequent source overwrite matching
+keys already in the destination.
 
-The built-in "AT" token name, plus every key crdkit.builtinTokens
-defines, is reserved and never allowed into the user tokens map, same
+The built-in "AT" token name (the only one crdkit itself reserves — see
+crdkit.substituteTokens) is never allowed into the user tokens map, same
 treatment as a system-token collision.
 
-Every FINAL token name (user + system + defaults + builtin) is checked
-against `^[A-Z][A-Z0-9_]*$` — a non-conforming name records a WARNING
-(not an ERROR: it still resolves and renders normally, this is a
-readability convention, not a hard requirement — see crdkit's CLAUDE.md
-for why it can only ever be a warning given this library's no-fail()
-rule). Applies uniformly to system/builtin token names too, not just
-user-supplied ones — there's no special exemption for library-authored
-tokens; they're expected to already comply.
+Every FINAL token name (user + system + defaults) is checked against
+`^[A-Z][A-Z0-9_]*$` — a non-conforming name records a WARNING (not an
+ERROR: it still resolves and renders normally, this is a readability
+convention, not a hard requirement — see crdkit's CLAUDE.md for why it
+can only ever be a warning given this library's no-fail() rule).
+Applies uniformly to system token names too, not just user-supplied
+ones — there's no special exemption for library-authored tokens; they're
+expected to already comply.
 
-Expects a dict: { "tokens": <raw tokens map, may be nil>, "diag": <dict>, "system": <dict>, "defaults": <dict>, "builtinTokens": <dict> }
+Expects a dict: { "tokens": <raw tokens map, may be nil>, "diag": <dict>, "system": <dict>, "defaults": <dict> }
 Returns YAML: the merged raw declarations map (NOT resolved).
 */}}
-{{- define "crdkit.mergeTokens" -}}
+{{- define "crdkit.mergeTokens.internal" -}}
 {{- $userTokens := .tokens | default dict -}}
 {{- $diag := .diag -}}
 {{- $system := .system | default dict -}}
 {{- $defaults := .defaults | default dict -}}
-{{- $builtinTokens := .builtinTokens | default dict -}}
-{{- $builtins := append (keys $builtinTokens) "AT" -}}
+{{- $builtins := list "AT" -}}
 
 {{- range $name, $_ := $userTokens -}}
   {{- if hasKey $system $name -}}
@@ -166,7 +199,6 @@ Returns YAML: the merged raw declarations map (NOT resolved).
 
 {{- $merged := mergeOverwrite (dict) $defaults $userTokens -}}
 {{- $merged = mergeOverwrite $merged $system -}}
-{{- $merged = mergeOverwrite $merged $builtinTokens -}}
 
 {{- range $name := keys $merged -}}
   {{- if not (regexMatch "^[A-Z][A-Z0-9_]*$" $name) -}}
@@ -179,7 +211,7 @@ Returns YAML: the merged raw declarations map (NOT resolved).
 
 {{/*
 Resolves ONE token, by NAME, out of a LIVE tokens map (ctx.tokens, i.e.
-crdkit.mergeTokens' output) for a specific env/target — the full
+crdkit.mergeTokens.internal's output) for a specific target — the full
 `{value, targetContainer}` struct, never a bare string. Memoized: the
 result is cached back onto the token's own raw declaration under a
 reserved "_value" sub-key, so asking for the SAME (name, target) again
@@ -189,58 +221,87 @@ current render (e.g. resolving "qap1" while the render itself is for
 the redesign, see crdkit's CLAUDE.md.
 
 A declaration may be:
-  - a bare scalar or the env-varying dict (env names, family/super-tier
-    names, "default", "match") — shorthand for `{value: <that>}`,
+  - a bare scalar — same in every target, no ladder at all.
+  - a dict keyed by arbitrary TARGET STRINGS (a literal "prod-01" key,
+    a literal "qa" key, a literal "NONPROD" key — crdkit does not
+    distinguish these by shape or name, only by whether the key
+    LITERALLY equals the rung being checked — see the walk below), plus
+    an optional "match:" list — shorthand for `{value: <that>}`,
     targetContainer implied "none".
-  - a wrapper dict `{value: <scalar-or-env-dict>, targetContainer:
+  - a wrapper dict `{value: <scalar-or-dict-above>, targetContainer:
     <string>}` — used when a token needs to declare targetContainer.
-Disambiguated by `hasKey $raw "value"`: no env-dict special key is ever
-named "value", so this is unambiguous and fully backward compatible.
+Disambiguated by `hasKey $raw "value"`: no target-keyed special key is
+ever literally named "value", so this is unambiguous.
 
 Two author mistakes guarded against explicitly (same as before this
 redesign): `targetContainer` declared WITHOUT `value` records a clear
-ERROR instead of a confusing "no value for env" one; `value` declared
+ERROR instead of a confusing "no value found" one; `value` declared
 ALONGSIDE other now-ignored keys (besides "targetContainer"/"_value")
 records a WARNING naming them.
 
-CACHING AND MATCH: FRESHNESS, PRECISELY. The one rule that keeps this
-safe: "match:" is evaluated FRESH for the specific target being resolved
-on EVERY call that isn't an exact-target cache hit — it is NEVER
-answered from a broader (env/family/super-tier) cache entry populated
-by resolving a DIFFERENT target, because "match:" tests the FULL target
-string and can legitimately distinguish "prod-01" from "prod-02" even
-though both share env "prod". Only once "match:" has been evaluated
-(fresh) for THIS target and ruled out does the env/family/super-
-tier/default ladder apply — and THAT part IS purely a function of env,
-so it's safe to check/populate a shared cache across every target
-sharing an env, family, or super-tier. Concretely, cache lookup/writes
-happen in this order:
-  1. exact target (`_value.<target>`) — always checked first, always
-     safe, covers "match:" results too. A hit here short-circuits
-     everything below, including a fresh "match:" check.
-  2. (cache miss) evaluate "match:" fresh against the target. If it
-     fires, cache ONLY under the exact target (not generalizable to
-     other targets) and return.
-  3. (match ruled out) walk env -> family tier -> super tier ->
-     "default", using a cache hit OR an explicit key in the
-     declaration, whichever comes first. Once found, cache the result
-     under the exact target AND every tier key walked through en route
-     (e.g. resolving "qam1-01" with no "qam1"/"QA" key but an explicit
-     "NONPROD" one caches ALL of target, "qam1", "QA", AND "NONPROD" to
-     that same value — so a LATER "qap1-01" lookup, same family, gets
-     an instant hit at the "QA" cache tier, no re-derivation needed;
-     "match:" still gets evaluated fresh for "qap1-01" first, per the
-     rule above, in case it has its own target-specific rule).
+RESOLUTION ORDER, for a dict-shaped value:
+  1. exact-target cache hit (`_value.<target>`) — always checked first,
+     always safe, covers EVERYTHING below (a "dedicated attribute" hit,
+     a "match:" hit, or a value found by walking the parent chain — see
+     crdkit's CLAUDE.md for why an exact-target cache hit is always
+     safe to trust without redoing any of the checks below it).
+  2. (cache miss) DEDICATED ATTRIBUTE: a literal key in "value" that
+     equals the target string EXACTLY, at whatever granularity that
+     happens to be (a full "prod-01" sequenced instance, a bare "qa"
+     env, a "QA" family, a "NONPROD" tier — crdkit doesn't care, it's
+     just a literal key comparison). Wins over "match:" — most specific
+     always beats pattern-based.
+  3. (still not found) "match:" — an ordered list of regex rules tested
+     against the target string, tried EXACTLY ONCE, right here, for the
+     EXACT target being resolved — never re-tried at any rung reached
+     by escalating (step 4 below is pure literal-key lookups only, no
+     regex). This is deliberately unconditional now — earlier revisions
+     of this library only tried "match:" when the target "looked like"
+     a sequenced instance; crdkit no longer has any notion of what a
+     target is supposed to look like, so there's nothing left to gate
+     on. A token author who never needs "match:" simply never declares
+     one.
+  4. (still not found) WALK THE PARENT CHAIN: repeatedly call the
+     caller-supplied "parentTarget" template (a fully-qualified name,
+     e.g. "mycrd.parentTarget" — see crdkit.render), passing it `{target:
+     <current rung>, context: <the render's root $>}` — the root context
+     is threaded through in case the client's own mapping needs to read
+     `.Values`/`.Chart`/etc. rather than just returning from a hardcoded
+     dict — moving to whatever it returns, checking a literal key (or an
+     already-cached value) at each new rung, until the template returns
+     nothing (chain exhausted — record an ERROR) or a rung repeats
+     (cycle in the client's own map — record a different ERROR; this is
+     a template-authoring bug, not a token-authoring one, but it's
+     still diagnosed rather than left to hang, per this library's
+     philosophy). crdkit ships no default taxonomy: `crdkit.noParentTarget`
+     (used when a caller doesn't supply one at all) always returns
+     nothing, so step 4 becomes a no-op and steps 2-3 are all a token
+     gets. EVERY rung visited during a successful walk gets cached
+     (not just the one where the value was finally found), so a LATER
+     resolution sharing any of those rungs is an instant hit — e.g.
+     walking target "qam1-01" all the way to a value declared under
+     "NONPROD" caches "qam1-01", "qam1", "QA", AND "NONPROD" to that
+     same result, so a later "qap1-01" lookup (same family) hits the
+     "QA" cache entry immediately, without re-walking. This is exactly
+     why "match:" must be checked BEFORE this walk even starts, and
+     ONLY against the exact original target: "qap1-01" might have its
+     OWN "match:" rule that should win over that "QA" cache-tier value
+     — if the walk's cache-hit check ran before an exact-target "match:"
+     check, a different target's cached result could silently steal
+     precedence from a target-specific pattern rule that never got a
+     chance to fire. Getting this backwards was caught and fixed once
+     already during this library's redesign — see
+     tests/tokens_test.yaml's "caching / multi-target semantics" section.
 
 Chained "@ref@" markers within a resolved value are substituted
-recursively (crdkit.resolveChainedValue), for the SAME target being
+recursively (crdkit.resolveChainedValue.internal), for the SAME target being
 resolved (a dependency of a "qap1" resolution is itself resolved under
 "qap1", not under whatever the "current" render target is) — with
 proper cycle detection via an in-progress name stack scoped to this one
-top-level resolution (see crdkit.resolveChainedValue; a cycle under one
+top-level resolution (see crdkit.resolveChainedValue.internal; a cycle under one
 target says nothing about whether the same token is cyclic under
-another, since "match:" can make the dependency graph itself
-target-dependent).
+another, since "match:"/the parent chain can make the dependency graph
+itself target-dependent).
 
 A raw declaration that's a BARE SCALAR (not a map at all) has nowhere
 to attach a "_value" cache — Go template maps are the only mutable
@@ -250,22 +311,20 @@ walk, only the chained-value substitution, which is cheap), and it
 avoids silently rewriting a consumer's plain-string declaration into a
 dict behind their back just to give it somewhere to cache.
 
-This is the internal ENGINE — takes an already-derived "env" rather than
-deriving it itself, so it can be called recursively (crdkit.resolveChainedValue)
-without re-deriving env (and re-diagnosing a missing "target") on every
-step of a chain. Consumers and integration authors should call the
-public `crdkit.resolveValue` (list-based: `[ctx, name, target]`) below
-instead — it derives "env" from "target" once and delegates here.
+This is the internal ENGINE — consumers and integration authors should
+call the public `crdkit.resolveValue` (list-based: `[ctx, name, target]`)
+instead, which pulls "tokens"/"diag"/"parentTargetTemplate" from ctx.
 
-Expects a dict: { "name": <string>, "tokens": <live tokens map>, "env": <string>, "target": <string>, "diag": <dict>, "fieldName": <string, optional>, "resolving": <list, internal use for cycle detection> }
+Expects a dict: { "name": <string>, "tokens": <live tokens map>, "target": <string>, "diag": <dict>, "parentTargetTemplate": <fully-qualified template name>, "root": <caller's root context, passed through to that template>, "fieldName": <string, optional>, "resolving": <list, internal use for cycle detection> }
 Returns YAML: { "value": <resolved string>, "targetContainer": <string> }
 */}}
-{{- define "crdkit.resolveValue.core" -}}
+{{- define "crdkit.resolveValue.internal" -}}
 {{- $tokens := .tokens -}}
 {{- $name := .name -}}
-{{- $env := .env -}}
 {{- $target := .target -}}
 {{- $diag := .diag -}}
+{{- $parentTargetTemplate := .parentTargetTemplate -}}
+{{- $root := .root -}}
 {{- $fieldName := .fieldName | default $name -}}
 {{- $resolving := .resolving | default (list) -}}
 
@@ -315,70 +374,79 @@ targetContainer: "none"
 value: {{ index $cache $target | quote }}
 targetContainer: {{ $targetContainer | quote }}
 {{- else -}}
-  {{- $matchResult := dict "matched" false "value" "" -}}
-  {{- if and (kindIs "map" $valueRaw) (hasKey $valueRaw "match") -}}
-    {{- $matchResult = include "crdkit.matchRules" (dict "subject" $target "rules" $valueRaw.match) | fromYaml -}}
-  {{- end -}}
-  {{- if $matchResult.matched -}}
-    {{- $resolvedValue := include "crdkit.resolveChainedValue" (dict "text" $matchResult.value "tokens" $tokens "env" $env "target" $target "diag" $diag "resolving" (append $resolving $name)) -}}
-    {{- if $cacheable -}}
-      {{- $_ := set $cache $target $resolvedValue -}}
-    {{- end -}}
-value: {{ $resolvedValue | quote }}
-targetContainer: {{ $targetContainer | quote }}
+  {{- $found := false -}}
+  {{- $rawValue := "" -}}
+  {{- $rungsWalked := list $target -}}
+  {{- $current := $target -}}
+
+  {{- if not (kindIs "map" $valueRaw) -}}
+    {{- $rawValue = $valueRaw -}}
+    {{- $found = true -}}
   {{- else -}}
-    {{- $tierKeys := list -}}
-    {{- $matchedTierIndex := -1 -}}
-    {{- $rawValue := "" -}}
-    {{- $found := false -}}
-    {{- if kindIs "map" $valueRaw -}}
-      {{- $envFamily := dict "dev" "DEV" "test" "TEST" "qa" "QA" "qam1" "QA" "qap1" "QA" "prod" "PROD" -}}
-      {{- $familyTier := dict "DEV" "NONPROD" "TEST" "NONPROD" "QA" "NONPROD" "PROD" "PROD" -}}
-      {{- $penv := index $envFamily $env -}}
-      {{- $pnp := "" -}}
-      {{- if $penv -}}
-        {{- $pnp = index $familyTier $penv -}}
+    {{- if hasKey $valueRaw $target -}}
+      {{- $rawValue = index $valueRaw $target -}}
+      {{- $found = true -}}
+    {{- end -}}
+    {{- if and (not $found) (hasKey $valueRaw "match") -}}
+      {{- $matchResult := include "crdkit.matchRules" (dict "subject" $target "rules" $valueRaw.match) | fromYaml -}}
+      {{- if $matchResult.matched -}}
+        {{- $rawValue = $matchResult.value -}}
+        {{- $found = true -}}
       {{- end -}}
-      {{- $tierKeys = append $tierKeys $env -}}
-      {{- if $penv -}}
-        {{- $tierKeys = append $tierKeys $penv -}}
-      {{- end -}}
-      {{- if $pnp -}}
-        {{- $tierKeys = append $tierKeys $pnp -}}
-      {{- end -}}
-      {{- $tierKeys = append $tierKeys "default" -}}
-      {{- range $i, $tk := $tierKeys -}}
-        {{- if not $found -}}
-          {{- if and $cacheable (hasKey $cache $tk) -}}
-            {{- $rawValue = index $cache $tk -}}
-            {{- $found = true -}}
-            {{- $matchedTierIndex = $i -}}
-          {{- else if hasKey $valueRaw $tk -}}
-            {{- $rawValue = index $valueRaw $tk -}}
-            {{- $found = true -}}
-            {{- $matchedTierIndex = $i -}}
+    {{- end -}}
+    {{- if not $found -}}
+      {{- $visited := list $target -}}
+      {{- $stop := false -}}
+      {{- $cycleDetected := false -}}
+      {{- range $i := until 1000 -}}
+        {{- if not $stop -}}
+          {{- $next := "" -}}
+          {{- if $parentTargetTemplate -}}
+            {{- $next = include $parentTargetTemplate (dict "target" $current "context" $root) -}}
+          {{- end -}}
+          {{- if not $next -}}
+            {{- $stop = true -}}
+          {{- else if has $next $visited -}}
+            {{- $_ := set $diag "errors" (append $diag.errors (printf "target escalation chain for '%s' cycles back to '%s' while resolving from '%s'" $fieldName $next $target)) -}}
+            {{- $stop = true -}}
+            {{- $cycleDetected = true -}}
+          {{- else -}}
+            {{- $visited = append $visited $next -}}
+            {{- $rungsWalked = append $rungsWalked $next -}}
+            {{- if and $cacheable (hasKey $cache $next) -}}
+              {{- $rawValue = index $cache $next -}}
+              {{- $found = true -}}
+              {{- $stop = true -}}
+            {{- else if hasKey $valueRaw $next -}}
+              {{- $rawValue = index $valueRaw $next -}}
+              {{- $found = true -}}
+              {{- $stop = true -}}
+            {{- else -}}
+              {{- $current = $next -}}
+            {{- end -}}
           {{- end -}}
         {{- end -}}
       {{- end -}}
-      {{- if not $found -}}
-        {{- $_ := set $diag "errors" (append $diag.errors (printf "no value for env '%s' and no 'default' defined for '%s'" $env $fieldName)) -}}
-      {{- end -}}
-    {{- else -}}
-      {{- $rawValue = $valueRaw -}}
-      {{- $found = true -}}
-    {{- end -}}
-    {{- $resolvedValue := include "crdkit.resolveChainedValue" (dict "text" $rawValue "tokens" $tokens "env" $env "target" $target "diag" $diag "resolving" (append $resolving $name)) -}}
-    {{- if $cacheable -}}
-      {{- $_ := set $cache $target $resolvedValue -}}
-      {{- range $i, $tk := $tierKeys -}}
-        {{- if le $i $matchedTierIndex -}}
-          {{- $_ := set $cache $tk $resolvedValue -}}
-        {{- end -}}
+      {{/* skip the generic "no value found" error once a cycle has
+           already been reported for this same resolution — the cycle
+           message is strictly more informative, same principle as
+           crdkit.render's unresolved-marker check avoiding a duplicate,
+           less-informative warning on top of an already-reported "@ref@"
+           cycle. */}}
+      {{- if and (not $found) (not $cycleDetected) -}}
+        {{- $_ := set $diag "errors" (append $diag.errors (printf "no value found for '%s' — target chain exhausted at '%s' starting from '%s'" $fieldName $current $target)) -}}
       {{- end -}}
     {{- end -}}
+  {{- end -}}
+
+  {{- $resolvedValue := include "crdkit.resolveChainedValue.internal" (dict "text" $rawValue "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" (append $resolving $name)) -}}
+  {{- if $cacheable -}}
+    {{- range $rung := $rungsWalked -}}
+      {{- $_ := set $cache $rung $resolvedValue -}}
+    {{- end -}}
+  {{- end -}}
 value: {{ $resolvedValue | quote }}
 targetContainer: {{ $targetContainer | quote }}
-  {{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -386,12 +454,10 @@ targetContainer: {{ $targetContainer | quote }}
 {{/*
 Public entry point for resolving one token by name, for a given target —
 the only thing most callers (integration authors, consumers referencing
-a token directly rather than through "@NAME@" substitution) need. Derives
-"env" from "target" itself (crdkit.deriveTargetEnv) so callers never
-supply both — env is ALWAYS a pure function of target, so asking for it
-twice was redundant and a source of accidental env/target mismatches.
-Pulls "tokens" and "diag" from ctx rather than taking them as separate
-params, since both are always ctx.tokens/ctx.diag in practice.
+a token directly rather than through "@NAME@" substitution) need. Pulls
+"tokens"/"diag"/"parentTargetTemplate" from ctx rather than taking them
+as separate params, since all three are always ctx.tokens/ctx.diag/
+ctx.parentTargetTemplate in practice.
 
 Takes a LIST, not a dict — `[ctx, name, target]`, all three required.
 This is a deliberate, second exception to crdkit's usual "always a dict
@@ -409,7 +475,7 @@ design — see crdkit's CLAUDE.md) exactly as easy to reach for as the
 common case, never a special path bolted on the side.
 
 Expects a list: [ctx, name, target]
-  ctx    - dict with (at least) "tokens" and "diag" keys
+  ctx    - dict with (at least) "tokens", "diag", and "parentTargetTemplate" keys
   name   - token name to resolve
   target - the target to resolve it for (not necessarily the one
            driving the overall render — see above)
@@ -419,20 +485,16 @@ Returns YAML: { "value": <resolved string>, "targetContainer": <string> }
 {{- $ctx := index . 0 -}}
 {{- $name := index . 1 -}}
 {{- $target := index . 2 -}}
-{{- $env := include "crdkit.deriveTargetEnv" (dict "target" $target "diag" $ctx.diag) -}}
-{{- include "crdkit.resolveValue.core" (dict "name" $name "tokens" $ctx.tokens "env" $env "target" $target "diag" $ctx.diag) -}}
+{{- include "crdkit.resolveValue.internal" (dict "name" $name "tokens" $ctx.tokens "target" $target "diag" $ctx.diag "parentTargetTemplate" $ctx.parentTargetTemplate "root" $ctx.root) -}}
 {{- end -}}
 
 {{/*
 Recursively substitutes "@NAME@" references within a single value
-string, resolving each referenced token (crdkit.resolveValue.core) for
+string, resolving each referenced token (crdkit.resolveValue.internal) for
 the SAME target as the value being substituted into — a dependency of a
 "qap1" resolution is itself resolved under "qap1", not under whatever
 target is driving the overall render (confirmed as the intended
-semantics; this is not incidental). Takes an already-derived "env"
-(same reasoning as crdkit.resolveValue.core above: this runs inside a
-recursion, so re-deriving env — and re-diagnosing a missing "target" —
-on every step would be wrong, not just wasteful).
+semantics; this is not incidental).
 
 Cycle detection: "resolving" is the list of token names currently
 in-progress on THIS top-level resolution's call stack, for THIS target
@@ -440,9 +502,13 @@ only — referencing a name already on it is a cycle, recorded as an
 ERROR (not a fail()), and that one marker is left unexpanded (rather
 than recursing infinitely) so the rest of the value still resolves as
 far as possible. A cycle detected while resolving for one target says
-nothing about another target, since "match:" can make the dependency
-graph itself target-dependent — so this stack is never shared across
-separate top-level resolutions, only within the recursion of one.
+nothing about another target, since "match:"/the parent chain can make
+the dependency graph itself target-dependent — so this stack is never
+shared across separate top-level resolutions, only within the recursion
+of one. (This is a DIFFERENT cycle check from the parent-chain one in
+crdkit.resolveValue.internal — that one guards against a malformed
+"parentTarget" template looping on itself; this one guards against
+tokens referencing each other via "@ref@".)
 
 "@AT@" is deliberately never treated as a token reference here (it's
 handled once, separately, by crdkit.substituteTokens' final pass) —
@@ -450,14 +516,15 @@ skipped explicitly rather than relying on it simply not being a key in
 $tokens, in case a future built-in token is ever literally named "AT"
 by mistake.
 
-Expects a dict: { "text": <string>, "tokens": <live tokens map>, "env": <string>, "target": <string>, "diag": <dict>, "resolving": <list of names in progress, non-empty> }
+Expects a dict: { "text": <string>, "tokens": <live tokens map>, "target": <string>, "diag": <dict>, "parentTargetTemplate": <fully-qualified template name>, "resolving": <list of names in progress, non-empty> }
 */}}
-{{- define "crdkit.resolveChainedValue" -}}
+{{- define "crdkit.resolveChainedValue.internal" -}}
 {{- $text := .text -}}
 {{- $tokens := .tokens -}}
-{{- $env := .env -}}
 {{- $target := .target -}}
 {{- $diag := .diag -}}
+{{- $parentTargetTemplate := .parentTargetTemplate -}}
+{{- $root := .root -}}
 {{- $resolving := .resolving -}}
 {{- $markers := regexFindAll "@[A-Za-z0-9_]+@" $text -1 -}}
 {{- range $marker := $markers -}}
@@ -466,7 +533,7 @@ Expects a dict: { "text": <string>, "tokens": <live tokens map>, "env": <string>
     {{- if has $refName $resolving -}}
       {{- $_ := set $diag "errors" (append $diag.errors (printf "token '%s' references '@%s@', which is already being resolved — cycle (direct or indirect self-reference)" (last $resolving) $refName)) -}}
     {{- else -}}
-      {{- $refResolved := include "crdkit.resolveValue.core" (dict "name" $refName "tokens" $tokens "env" $env "target" $target "diag" $diag "resolving" $resolving) | fromYaml -}}
+      {{- $refResolved := include "crdkit.resolveValue.internal" (dict "name" $refName "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" $resolving) | fromYaml -}}
       {{- $text = $text | replace $marker $refResolved.value -}}
     {{- end -}}
   {{- end -}}
@@ -485,21 +552,12 @@ is left untouched (crdkit.render's caller is responsible for the
 only resolves what it can). Always also replaces the built-in "@AT@"
 marker with a literal '@', as the very last step, after every other
 substitution — so "@AT@" can't be misread as part of another marker
-mid-resolution. (There used to be an "applyAt" opt-out for a
-theoretical non-final pass; every real call site always wanted it on,
-so it was dropped — applying it twice across two passes is harmless
-anyway, since the first pass consumes every "@AT@" there is.)
+mid-resolution.
 
 Takes a LIST — `[ctx, text, target]` — same reasoning as
 crdkit.resolveValue above (a second, deliberate exception to crdkit's
-"always a dict" convention): pulls "tokens"/"diag" from ctx, derives
-"env" from "target" itself. Env derivation is done LAZILY, only if
-"text" actually contains at least one marker — otherwise a no-op call
-(e.g. substituting into an empty/marker-free structure) would still
-unconditionally re-diagnose a missing "target", duplicating the ONE
-diagnostic crdkit.render's own upfront crdkit.builtinTokens call already
-records for that. See crdkit.renderDiagnostics for the other half of
-this defense (deduping identical diagnostic lines regardless of cause).
+"always a dict" convention): pulls "tokens"/"diag"/"parentTargetTemplate"
+from ctx.
 
 Expects a list: [ctx, text, target]
 */}}
@@ -509,15 +567,13 @@ Expects a list: [ctx, text, target]
 {{- $target := index . 2 -}}
 {{- $tokens := $ctx.tokens -}}
 {{- $diag := $ctx.diag -}}
+{{- $parentTargetTemplate := $ctx.parentTargetTemplate -}}
 {{- $markers := regexFindAll "@[A-Za-z0-9_]+@" $text -1 -}}
-{{- if $markers -}}
-  {{- $env := include "crdkit.deriveTargetEnv" (dict "target" $target "diag" $diag) -}}
-  {{- range $marker := $markers -}}
-    {{- $name := trimSuffix "@" (trimPrefix "@" $marker) -}}
-    {{- if and (ne $name "AT") (hasKey $tokens $name) -}}
-      {{- $resolved := include "crdkit.resolveValue.core" (dict "name" $name "tokens" $tokens "env" $env "target" $target "diag" $diag) | fromYaml -}}
-      {{- $text = $text | replace $marker $resolved.value -}}
-    {{- end -}}
+{{- range $marker := $markers -}}
+  {{- $name := trimSuffix "@" (trimPrefix "@" $marker) -}}
+  {{- if and (ne $name "AT") (hasKey $tokens $name) -}}
+    {{- $resolved := include "crdkit.resolveValue.internal" (dict "name" $name "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $ctx.root) | fromYaml -}}
+    {{- $text = $text | replace $marker $resolved.value -}}
   {{- end -}}
 {{- end -}}
 {{- $text = $text | replace "@AT@" "@" -}}
@@ -531,45 +587,41 @@ tokens: an integration contributing a derived token (e.g. computed from
 something in ctx.model) calls this instead of hand-rolling the raw
 declaration itself.
 
-"value" is stored as a "match:" rule keyed by the EXACT "target" string
-given — `{value: {match: [{"<target>": "<value>"}, ...]}, ...}` — NOT
-resolved at add-time. This is a deliberate choice (on request, after
-first trying and rejecting eager resolution — see below): it means an
+"value" is stored as a DEDICATED ATTRIBUTE — a literal key equal to the
+exact "target" string given, merged into (not replacing) whatever
+target-keyed entries the token's value-dict already has — NOT resolved
+at add-time. This is a deliberate choice (on request, after first
+trying and rejecting eager resolution — see below): it means an
 addToken-inserted token is not special at all, and goes through the
-exact same lazy ladder/match/chain resolution as any hand-declared
-token, the first time something actually references it, same as ever.
+exact same lazy resolution as any hand-declared token (dedicated
+attribute is literally step 2 of crdkit.resolveValue.internal's own
+resolution order), the first time something actually references it.
 
-Why "match:" specifically, rather than just storing "value" as a bare
-scalar: crdkit.render's chain runs integrations in a fixed order, and
-one integration's addToken call may produce a value that references a
-token ANOTHER integration adds later in the same chain (e.g. "several
-related tokens set one after another" — token A's value refers to
-token B, but B is only added by an integration further down the
-chain). Resolving eagerly at addToken's own call site — an earlier
-version of this helper did exactly that, via crdkit.substituteTokens —
-would resolve "value" against whatever ctx.tokens looked like AT THAT
-POINT in the chain, which may not yet include B, producing a spurious
-"unknown token" error for a reference that would have resolved fine
-had it stayed lazy. Storing it as a "match:" rule instead defers
-resolution to whenever it's ACTUALLY needed (a "@NAME@" marker,
-crossTargets, or a targetContainer trigger), by which point the full
-chain (and everything every integration contributed) has already run —
-exactly the same "resolve only when needed, against the FINAL state of
-ctx.tokens" guarantee every other token already gets.
+Why lazy rather than resolving "value" right here: crdkit.render's chain
+runs integrations in a fixed order, and one integration's addToken call
+may produce a value that references a token ANOTHER integration adds
+later in the same chain (e.g. "several related tokens set one after
+another" — token A's value refers to token B, but B is only added by an
+integration further down the chain). Resolving eagerly at addToken's
+own call site — an earlier version of this helper did exactly that, via
+crdkit.substituteTokens — would resolve "value" against whatever
+ctx.tokens looked like AT THAT POINT in the chain, which may not yet
+include B, producing a spurious "unknown token" error for a reference
+that would have resolved fine had it stayed lazy. Deferring resolution
+means it happens against the FINAL state of ctx.tokens, after the whole
+chain has run — the same guarantee every other token already gets.
 
 A SECOND addToken call for a name that already exists (e.g. the same
 integration — or a different one — contributing a value for a
 DIFFERENT target than a previous call did) MERGES into the existing
-"match:" list rather than clobbering it: any prior rule for the exact
-same target is replaced (never left as an unreachable, shadowed
-duplicate), every rule for a DIFFERENT target is preserved. A repeat
-call for the SAME (name, target) pair silently overwrites the earlier
-value — same "no protection, by design" precedent as everything else
-addToken does (see the reserved-name-collision paragraph below). If the
-existing declaration ISN'T itself an addToken-produced match-list shape
-(e.g. a consumer's own hand-declared token, or anything else), it's
-replaced outright rather than merged into — addToken has no way to
-safely merge into an arbitrary existing shape it doesn't recognize.
+value-dict: the new target's entry is added/overwritten, every OTHER
+target's entry (and "match:", if present) is left untouched, since
+setting one key on the existing dict is all that's needed — there's no
+list to filter or de-duplicate the way an earlier, match:-list-based
+version of this helper needed to. If the existing declaration ISN'T
+itself a compatible dict shape (e.g. a bare scalar, or a wrapper whose
+"value" isn't a dict), it's replaced outright rather than merged into —
+addToken has no way to safely merge into a shape it doesn't recognize.
 
 "targetContainer" is preserved the same way: a repeat call that OMITS
 it (the common case — most calls after the first one just want to add
@@ -581,30 +633,25 @@ can't otherwise distinguish "caller didn't pass one" from "caller
 wants none" — both look like a missing/falsy list element — so
 "missing" is deliberately interpreted as "inherit," not "reset."
 
-The "target" string is used DIRECTLY as a "match:" regex pattern, not
-escaped — safe for this library's conventional target strings (env
-names, optionally with a "-NN" sequence suffix — alphanumeric and
-hyphens only, no regex metacharacters), but not literally guaranteed
-safe for an arbitrary string. Not treated as worth solving with regex-
-escaping machinery this library doesn't otherwise have a need for;
-worth knowing if "target" ever becomes less constrained.
-
 Applies the same invariants every other token gets: name-casing WARNING
-(^[A-Z][A-Z0-9_]*$, same rule as crdkit.mergeTokens) and
+(^[A-Z][A-Z0-9_]*$, same rule as crdkit.mergeTokens.internal) and
 targetContainer enum validation (ERROR + falls back to "none" if
-invalid, same as crdkit.resolveValue.core — pre-validated here so a bad
+invalid, same as crdkit.resolveValue.internal — pre-validated here so a bad
 value is caught at the point it's added, not silently deferred to
 whenever something happens to reference it). Deliberately does NOT run
-the reserved-name collision check crdkit.mergeTokens does — that's
+the reserved-name collision check crdkit.mergeTokens.internal does — that's
 specifically about protecting against untrusted CONSUMER input at the
 initial merge; an integration calling this is trusted library-author
-code, not something to defend against the same way.
+code, a different trust boundary entirely.
 
 Mutates ctx.tokens in place (same reference-passing trick as
 crdkit.ensureDictKey — see crdkit's CLAUDE.md) — no return value.
 
 Takes a LIST — `[ctx, name, value, targetContainer, target]` — same
-convention as crdkit.resolveValue/substituteTokens above.
+convention as crdkit.resolveValue/substituteTokens above. "target" is
+the EXACT target string "value" applies to — it can be at ANY
+granularity (a full sequenced instance, a bare env, a family, a tier —
+addToken doesn't care, same as crdkit.resolveValue.internal doesn't).
 
 Expects a list: [ctx, name, value, targetContainer, target]
   ctx             - dict with (at least) "tokens" and "diag" keys
@@ -613,8 +660,7 @@ Expects a list: [ctx, name, value, targetContainer, target]
                     may contain "@ref@" markers, resolved lazily (see
                     above), same as any hand-declared token's value
   targetContainer - one of main/side-car/both/none, optional (default "none")
-  target          - the EXACT target string "value" applies to (used as
-                    a "match:" pattern — see above)
+  target          - the EXACT target string "value" applies to
 */}}
 {{- define "crdkit.addToken" -}}
 {{- $ctx := index . 0 -}}
@@ -628,20 +674,12 @@ Expects a list: [ctx, name, value, targetContainer, target]
   {{- $_ := set $diag "warnings" (append $diag.warnings (printf "token name '%s' should be UPPER_SNAKE_CASE for readability" $name)) -}}
 {{- end -}}
 
-{{/* merge into whatever's already there for THIS name, touching only the
-     match rule for THIS target — never overwrite the rest of an existing
-     declaration (other targets' rules, or an already-set targetContainer
-     this call doesn't mention) wholesale. */}}
-{{- $existingMatch := list -}}
+{{- $valueDict := dict -}}
 {{- $existingTargetContainer := "" -}}
 {{- if hasKey $tokens $name -}}
   {{- $existing := index $tokens $name -}}
-  {{- if and (kindIs "map" $existing) (hasKey $existing "value") (kindIs "map" $existing.value) (hasKey $existing.value "match") -}}
-    {{- range $rule := $existing.value.match -}}
-      {{- if not (hasKey $rule $target) -}}
-        {{- $existingMatch = append $existingMatch $rule -}}
-      {{- end -}}
-    {{- end -}}
+  {{- if and (kindIs "map" $existing) (hasKey $existing "value") (kindIs "map" $existing.value) -}}
+    {{- $valueDict = $existing.value -}}
   {{- end -}}
   {{- if and (kindIs "map" $existing) (hasKey $existing "targetContainer") -}}
     {{- $existingTargetContainer = $existing.targetContainer -}}
@@ -655,43 +693,24 @@ Expects a list: [ctx, name, value, targetContainer, target]
   {{- $targetContainer = "none" -}}
 {{- end -}}
 
-{{- $newMatch := prepend $existingMatch (dict $target $value) -}}
-{{- $_ := set $tokens $name (dict "value" (dict "match" $newMatch) "targetContainer" $targetContainer) -}}
+{{- $_ := set $valueDict $target $value -}}
+{{- $_ := set $tokens $name (dict "value" $valueDict "targetContainer" $targetContainer) -}}
 {{- end -}}
 
 {{/*
-Forces resolution (and caching, and diagnosis) of every token declaring
-a valid targetContainer (main/side-car/both), for the given target —
-the ONE deliberate exception to "only used tokens get resolved" (see
-the file-level doc comment). A targetContainer-bearing token needs to
-be valid and available for the downstream k8s controller to read
-regardless of whether anything ALSO textually references it via
-"@NAME@" — this is a separate, explicit, non-lazy trigger, kept apart
-from crdkit.substituteTokens' marker-driven laziness on purpose rather
-than folded into it, since the two triggers are genuinely different
-things (textual usage vs. "this needs to exist for the controller").
-
-Return value is ALWAYS empty by design — the point is entirely the
-caching side-effect (crdkit.resolveValue writes its result onto the
-token's own "_value" cache), not this call's own output. The internal
-include's own return is explicitly captured into `$_` and discarded —
-a bare `{{- include ... -}}` with nothing to receive it would otherwise
-inject the included template's rendered YAML fragment directly into
-whatever this define's caller is building, corrupting it. This bit
-real output once already (crdkit.render's own call site, before this
-comment existed) — don't drop the `$_ :=` when touching this again.
-
-Takes a LIST — `[ctx, target]` — reuses the public crdkit.resolveValue
-per matching token name rather than reimplementing resolution here.
-
-Expects a list: [ctx, target]
+REMOVED (was crdkit.resolveTargetContainerTokens): used to force
+resolution of every token declaring a valid targetContainer, regardless
+of whether anything textually referenced it — on the theory that a
+downstream controller needs it valid "just in case." Deleted because
+nothing in crdkit's output has ever actually surfaced a resolved
+targetContainer for a controller to read (that wiring was never built),
+so the eager forcing validated something with no observable effect
+either way — speculative complexity for an unbuilt feature. If a real
+"expose targetContainer-bearing tokens to a controller" mechanism gets
+built later, it'll be the thing that reads those tokens and writes them
+into ctx.model — resolution (and diagnosis) happens as a natural side
+effect of that write, exactly like any other token reference, with no
+separate forcing step needed. targetContainer's enum validation itself
+is untouched — still lives in crdkit.resolveValue.internal and still fires
+on any resolution, lazy or not.
 */}}
-{{- define "crdkit.resolveTargetContainerTokens" -}}
-{{- $ctx := index . 0 -}}
-{{- $target := index . 1 -}}
-{{- range $name, $raw := $ctx.tokens -}}
-  {{- if and (kindIs "map" $raw) (has ($raw.targetContainer | default "none") (list "main" "side-car" "both")) -}}
-    {{- $_ := include "crdkit.resolveValue" (list $ctx $name $target) -}}
-  {{- end -}}
-{{- end -}}
-{{- end -}}

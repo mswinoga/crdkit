@@ -32,6 +32,48 @@ tests:
           path: model.foo
           value: ["first"]
 
+  - it: "dictMerge with an EMPTY path merges directly into model itself — no nesting"
+    set:
+      modelOps:
+        - op: dictMerge
+          path: []
+          value:
+            apiVersion: "platform.company.io/v1"
+            kind: "SomeCR"
+    asserts:
+      - equal:
+          path: model.apiVersion
+          value: "platform.company.io/v1"
+      - equal:
+          path: model.kind
+          value: "SomeCR"
+
+  - it: "dictMerge with an empty path preserves other top-level model fields and lets incoming values win on collision"
+    set:
+      modelOps:
+        - op: ensureDictKey
+          key: untouched
+          default: "stays"
+        - op: dictMerge
+          path: []
+          value:
+            apiVersion: "first"
+        - op: dictMerge
+          path: []
+          value:
+            apiVersion: "second"
+            kind: "SomeCR"
+    asserts:
+      - equal:
+          path: model.untouched
+          value: "stays"
+      - equal:
+          path: model.apiVersion
+          value: "second"
+      - equal:
+          path: model.kind
+          value: "SomeCR"
+
   - it: dictMerge creates a single-level field and adds entries to it
     set:
       modelOps:

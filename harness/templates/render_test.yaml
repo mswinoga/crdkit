@@ -1,0 +1,27 @@
+{{/*
+Unlike test.yaml (which deliberately exercises crdkit's helpers
+directly, never crdkit.render itself — see its own doc comment), THIS
+template exists specifically to exercise crdkit.render's own top-level
+behavior: it no longer knows or cares about apiVersion/kind/labels/spec
+at all — whatever the chain puts on ctx.model is substituted once and
+emitted VERBATIM as `{{ model | toYaml }}`, nothing more. A minimal
+stand-in integration, driven by .Values.chainPopulatesModel (bool), lets
+a test case toggle whether anything runs at all — crdkit has no
+specific library of its own to borrow a real preamble integration from,
+so this harness defines its own minimal one to prove the mechanism.
+*/}}
+{{- define "harness.integration.maybePopulateModel" -}}
+{{- if .ctx.root.Values.chainPopulatesModel -}}
+  {{- include "crdkit.dictMerge" (list .ctx.model (dict "apiVersion" "harness.example.com/@GROUP_SUFFIX@" "kind" "HarnessCR")) -}}
+  {{- include "crdkit.dictMerge" (list .ctx.model "metadata" "labels" (dict "harness.example.com/from-model" "@GROUP_SUFFIX@-label")) -}}
+{{- end -}}
+{{- include "crdkit.integrations.chain" . -}}
+{{- end -}}
+{{- include "crdkit.render" (dict
+      "context" $
+      "tokens" (.Values.tokens | default dict)
+      "target" (.Values.target | default "prod")
+      "system" (.Values.system | default dict)
+      "defaults" (.Values.defaults | default dict)
+      "chain" (list "harness.integration.maybePopulateModel")
+    ) -}}
