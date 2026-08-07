@@ -116,19 +116,27 @@ the token's own declaration, so resolving the same token for a
 ## Resolving/substituting tokens directly
 
 ```gotemplate
-{{/* resolve one token by name, for a given target */}}
-{{- $resolved := include "crdkit.resolveValue" (list $ctx "DB_HOST" $target) | fromYaml -}}
+{{/* resolve one REAL token by name, for a given target */}}
+{{- $resolved := include "crdkit.resolveTokenValue" (list $ctx "DB_HOST" $target) | fromYaml -}}
 {{/* $resolved is {value: "...", targetContainer: "..."} */}}
+
+{{/* resolve an arbitrary structure sourced from consumer Values —
+     not registered under a name in ctx.tokens — using the exact
+     same escalation rules as a real token */}}
+{{- $def := dict "default" "generic" "prod" "special-@DB_HOST@" -}}
+{{- $resolved := include "crdkit.resolveTokenDefinition" (list $ctx "myField" $def $target) | fromYaml -}}
+{{/* any "@ref@" inside $def is still looked up in the REAL ctx.tokens,
+     never in $def itself */}}
 
 {{/* substitute every "@NAME@" marker in a text blob, for a given target */}}
 {{- $substituted := include "crdkit.substituteTokens" (list $ctx "@DB_HOST@ is up" $target) -}}
 ```
 
-Both take `ctx` first, `target` last — nothing defaults from
-`ctx.target`, so resolving for a target other than the current render's
-is no different from the common case. `crdkit.addToken` follows the
-same convention: `(list $ctx "DERIVED_VAR" "computed-value" "main"
-$target)`.
+All three take `ctx` first, `target` last and OPTIONAL — omit it (or
+pass `""`) to resolve for the current render's own `ctx.target`; pass
+it explicitly only to resolve for a target other than the one driving
+the render. `crdkit.addToken` follows the same convention: `(list $ctx
+"DERIVED_VAR" "computed-value" "main" $target)`.
 
 ## Target escalation
 
@@ -170,7 +178,7 @@ above).
   a dict. Reserved dict keys: `targetContainer`, `_value` (memoization
   cache, internal), `match`. Every other key, including `default`, IS a
   target entry.
-- Resolving a token (`crdkit.resolveValue`) returns a separate shape,
+- Resolving a token (`crdkit.resolveTokenValue`) returns a separate shape,
   `{value, targetContainer}` — the interpolated result for one
   name+target pair.
 

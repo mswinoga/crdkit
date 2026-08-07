@@ -33,7 +33,7 @@ a real render goes through:
     "used" and triggers its (lazy) resolution for .Values.target.
   - .Values.crossTargets is an optional list of target STRINGS: for
     each, every name in .Values.crossTargetNames gets resolved via
-    crdkit.resolveValue directly, rendered into "crossResolved" —
+    crdkit.resolveTokenValue directly, rendered into "crossResolved" —
     exercises resolving a token for a target OTHER than the one driving
     this "render" (the whole point of the redesign), and lets a test
     assert on the resulting "_value" cache shape directly via "tokens".
@@ -71,7 +71,7 @@ substituted "structure" text.
 {{- range $t := .Values.crossTargets | default (list) -}}
   {{- $forThisTarget := dict -}}
   {{- range $name := $.Values.crossTargetNames | default (list) -}}
-    {{- $r := include "crdkit.resolveValue" (list $ctx $name $t) | fromYaml -}}
+    {{- $r := include "crdkit.resolveTokenValue" (list $ctx $name $t) | fromYaml -}}
     {{- $forThisTarget = set $forThisTarget $name $r -}}
   {{- end -}}
   {{- $crossResolved = set $crossResolved $t $forThisTarget -}}
