@@ -8,7 +8,7 @@ Interface:
 - Standard labels computed from Helm's own context — not called
   automatically by crdkit.render; a specific library merges the result
   into its own `ctx.model.metadata.labels` from within its chain (see
-  my-crd's `mycrd.integration.preamble`).
+  my-crd's `mycrd.integrations.preamble`).
 
 Implementation notes:
 - Uses the CONSUMING chart's `.Chart.Name`/`.Version` (standard Helm

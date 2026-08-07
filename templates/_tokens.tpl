@@ -188,6 +188,9 @@ Implementation notes:
 - A raw declaration that's a bare scalar (not a dict) has nowhere to
   attach a `_value` cache, so it's resolved fresh every call — cheap,
   since there's no ladder to walk.
+- A declared value may be any scalar type (string/bool/int/float/...) —
+  coerced to its string representation before substitution, since
+  markers are substituted into text.
 - Chained `@ref@` markers in a resolved value are substituted
   recursively (crdkit.resolveChainedValue.internal), for the SAME
   target — with cycle detection scoped to this one resolution.
@@ -301,7 +304,7 @@ targetContainer: {{ $targetContainer | quote }}
     {{- end -}}
   {{- end -}}
 
-  {{- $resolvedValue := include "crdkit.resolveChainedValue.internal" (dict "text" $rawValue "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" (append $resolving $name)) -}}
+  {{- $resolvedValue := include "crdkit.resolveChainedValue.internal" (dict "text" (toString $rawValue) "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" (append $resolving $name)) -}}
   {{- if $cacheable -}}
     {{- range $rung := $rungsWalked -}}
       {{- $_ := set $cache $rung $resolvedValue -}}

@@ -66,7 +66,7 @@ again — the chain populates it entirely, via
 crdkit's concern.
 
 ```gotemplate
-{{- define "mycrd.integration.preamble" -}}
+{{- define "mycrd.integrations.preamble" -}}
 {{- include "crdkit.dictMerge" (list .ctx.model (dict "apiVersion" "@API_GROUP@/v1" "kind" "SomeCR")) -}}
 {{- include "crdkit.dictMerge" (list .ctx.model "metadata" (dict "name" .ctx.root.Release.Name)) -}}
 {{- include "crdkit.dictMerge" (list .ctx.model "metadata" "labels" (dig "metadata" "labels" (dict) .ctx.root.Values)) -}}

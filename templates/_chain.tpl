@@ -15,7 +15,7 @@ Implementation notes:
 - `ctx` is a shared, mutate-in-place accumulator (same discipline as
   `$diag`) — never rebuilt or copied here.
 - Chain entry names are the caller's own naming (e.g.
-  `"mycrd.integration.database"`) — crdkit never needs to know another
+  `"mycrd.integrations.database"`) — crdkit never needs to know another
   chart's convention.
 */}}
 {{- define "crdkit.integrations.chain" -}}
