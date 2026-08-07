@@ -185,11 +185,12 @@ tokens:
   directly regardless of taxonomy, even under `crdkit.noParentTarget`.
   A token with no `default` key that can't resolve for a target
   produces the ordinary "no value found" diagnostic, lazily.
-- crdkit doesn't create the env var itself, and doesn't currently
-  surface a resolved `targetContainer` into the output — a specific
-  library wanting that would build an integration that reads such
-  tokens (via `crdkit.resolveValue`) and writes them into `ctx.model`
-  itself.
+- crdkit doesn't create the env var itself. A resolved value reaches
+  `ctx.model` for free — an integration can write e.g. `variables: {DB_HOST:
+  "@DB_HOST@"}`, and it resolves in crdkit.render's single substitution
+  pass, same as any other model field. `targetContainer` isn't part of
+  that substitution; a library wanting it downstream reads it directly
+  off the token's declaration (`ctx.tokens.DB_HOST.targetContainer`).
 - An invalid `targetContainer` records an `# ERROR:` and falls back to
   `"none"`; the token's value still resolves.
 - Token names are expected to be `UPPER_SNAKE_CASE` — non-conforming
