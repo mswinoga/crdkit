@@ -3,7 +3,7 @@ All token resolution logic — scope (public/internal) is declared per
 template below, not uniformly for the file. Product-specific token
 content (locked/default keys, values) is never referenced by name —
 callers pass "system"/"defaults" dicts explicitly
-(crdkit.mergeTokens.internal).
+(crdkit.tokens.merge.internal).
 
 Diagnostics: every helper that can fail takes a "diag" dict
 (`{errors, warnings}`, both lists) and appends to it instead of calling
@@ -18,29 +18,68 @@ Resolution is lazy, per-target, and memoized:
 
 Token declaration shape (what a consumer/integration writes/reads on
 `ctx.tokens[NAME]`):
-- A bare scalar (same value for every target) — crdkit.mergeTokens.internal
+- A bare scalar (same value for every target) — crdkit.tokens.merge.internal
   normalizes it into `{default: <that>}` right after merging, so
   `ctx.tokens[NAME]` is ALWAYS a dict.
 - Reserved dict keys: "targetContainer", "_value" (memoization cache),
   "match" (regex rules). "default" is NOT reserved — it's an ordinary
   target entry that crdkit ALSO treats as a hardcoded fallback (see
-  crdkit.resolveValue.internal). Every other key IS a target entry.
+  crdkit.resolveEntry.internal). Every other key IS a target entry.
+- `targetContainer`, if declared, is validated once, eagerly, at merge
+  time (crdkit.tokens.merge.internal) — resolution never touches it.
 
-Resolution RESULT shape (what crdkit.resolveTokenValue /
-crdkit.resolveTokenDefinition / .internal RETURN, distinct from a
-token's own declaration above): `{value, targetContainer}` — "value"
-only exists here, as the interpolated string for one resolution. Never
-read `ctx.tokens[NAME].value` — that field doesn't exist on the
-declaration; always go through crdkit.resolveTokenValue.
+A resolved VALUE can itself be structural, not just a scalar: once the
+target-escalation ladder selects an entry, every STRING LEAF within it
+is recursively substituted for "@ref@" markers
+(crdkit.substituteStructure.internal) — a dict/list value comes back
+with the same shape, markers replaced throughout. Non-string scalars
+(bool/int/float) pass through unchanged.
+
+Resolution RESULT shape: every public entry point below returns YAML
+`{value: <resolved thing>}` — a single-key wrapper that exists ONLY
+because Helm's `fromYaml`/`fromJson` cannot decode a bare top-level
+scalar or list (verified empirically: it silently returns an error
+dict instead of erroring loudly). Never read `ctx.tokens[NAME].value`
+directly — that key doesn't exist on the declaration; always go
+through crdkit.token.value.
 
 Target model: "target" is an opaque string — could be a sequenced
 instance, env, family, or tier; crdkit never inspects its shape.
 Escalating to a broader target is delegated to a caller-supplied
-"parentTarget" template (see crdkit.resolveValue.internal) — crdkit
+"parentTarget" template (see crdkit.resolveEntry.internal) — crdkit
 only walks it, never defines the taxonomy. crdkit.matchRules is
 available for such a template to build pattern-based hops on. No
 proactive "target is required" check — an unset target is only
 diagnosed if something actually tries to resolve against it.
+
+Dependency graph (who calls whom):
+
+  crdkit.tokens.substitute (public)
+    -> crdkit.token.value (public)
+         -> crdkit.resolveEntry.internal
+              -> crdkit.matchRules
+              -> <parentTargetTemplate>            (caller-supplied hook)
+              -> crdkit.substituteStructure.internal
+                   -> crdkit.substituteText.internal
+                        -> crdkit.resolveEntry.internal   (cycle, per "@ref@" —
+                                                            bounded by "resolving")
+                   -> (self, recursing into nested map/list values)
+    -> crdkit.stringify.internal                     (coerce for splicing into text)
+
+  crdkit.token.string / crdkit.tokenDef.string (public)
+    -> crdkit.token.value / crdkit.tokenDef.value (public)
+         -> crdkit.resolveEntry.internal (as above)
+    -> crdkit.stringify.internal
+
+  crdkit.token.add (public) -- stores raw declarations only, no engine dependency
+
+Three public "shapes": crdkit.token.* resolves a REAL, named token;
+crdkit.tokenDef.* resolves an arbitrary structure (e.g. sourced from
+consumer Values) using the same rules WITHOUT registering it in
+ctx.tokens; crdkit.tokens.* operates on the whole registry (building it,
+or substituting across an entire text blob). crdkit.resolveEntry.internal
+is shared engine code used directly by BOTH crdkit.token.value and
+crdkit.tokenDef.value — it deliberately isn't namespaced under either.
 */}}
 
 {{/*
@@ -103,7 +142,8 @@ Interface:
   <dict>, "system": <dict>, "defaults": <dict> }
 - Returns YAML: merged raw declarations map (not resolved).
 - Merges system/default/user token declarations; applies collision +
-  naming-convention diagnostics. Output becomes ctx.tokens.
+  naming-convention + targetContainer diagnostics. Output becomes
+  ctx.tokens.
 
 Implementation notes:
 - Merge order, later wins: defaults -> user -> system (locked).
@@ -116,8 +156,15 @@ Implementation notes:
 - Every final token name is checked against `^[A-Z][A-Z0-9_]*$` — a
   WARNING (not ERROR) on mismatch, applied uniformly including
   system/default names.
+- `targetContainer`, if declared, is validated here — eagerly, for
+  EVERY token regardless of whether it's ever resolved (a deliberate
+  exception to "only diagnose what's used", matching the naming check
+  above). An invalid value records an ERROR and is corrected to "none"
+  in place. crdkit.token.add-added entries are NOT covered by this
+  check (added after this runs) — crdkit.token.add trusts its caller
+  instead.
 */}}
-{{- define "crdkit.mergeTokens.internal" -}}
+{{- define "crdkit.tokens.merge.internal" -}}
 {{- $userTokens := .tokens | default dict -}}
 {{- $diag := .diag -}}
 {{- $system := .system | default dict -}}
@@ -152,6 +199,16 @@ Implementation notes:
   {{- end -}}
 {{- end -}}
 
+{{- $validContainers := list "main" "side-car" "both" "none" -}}
+{{- range $name, $raw := $merged -}}
+  {{- if hasKey $raw "targetContainer" -}}
+    {{- if not (has $raw.targetContainer $validContainers) -}}
+      {{- $_ := set $diag "errors" (append $diag.errors (printf "invalid targetContainer '%s' for '%s' — must be one of main/side-car/both (or omitted)" $raw.targetContainer $name)) -}}
+      {{- $_ := set $raw "targetContainer" "none" -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+
 {{- $merged | toYaml -}}
 {{- end -}}
 
@@ -165,14 +222,15 @@ Interface:
   "parentTargetTemplate": <fully-qualified template name>, "root":
   <caller's root context>, "resolving": <list, internal cycle
   detection> }
-- Returns YAML: { "value": <resolved string>, "targetContainer":
-  <string> }
-- Resolves one declaration ("def"), for one target — the engine behind
-  both crdkit.resolveTokenValue (a real, named token) and
-  crdkit.resolveTokenDefinition (an arbitrary structure, resolved by
-  the same rules without being registered in ctx.tokens). "fieldId" is
-  used only to label diagnostics. Memoized onto "def" itself under
-  "_value", keyed by target.
+- Returns YAML: { "value": <resolved string, or a dict/list with every
+  string leaf's markers resolved> }
+- Runs the target-escalation ladder against "def", selects one entry,
+  then recursively substitutes "@ref@" markers throughout it
+  (crdkit.substituteStructure.internal). The engine behind both
+  crdkit.token.value (a real, named token) and crdkit.tokenDef.value
+  (an arbitrary structure, resolved by the same rules without being
+  registered in ctx.tokens). "fieldId" labels diagnostics only.
+  Memoized onto "def" itself under "_value", keyed by target.
 
 Implementation notes:
 - Resolution order:
@@ -193,21 +251,14 @@ Implementation notes:
 - A "def" that's a bare scalar (not a dict) has nowhere to attach a
   `_value` cache, so it's resolved fresh every call — cheap, since
   there's no ladder to walk.
-- A declared value may be any scalar type (string/bool/int/float/...) —
-  coerced to its string representation before substitution, since
-  markers are substituted into text.
-- Any `@ref@` marker in a resolved value is ALWAYS looked up in
-  "tokens" (the real token registry) — never in "def" itself, even when
-  resolving an anonymous structure via crdkit.resolveTokenDefinition.
-  Substituted recursively (crdkit.resolveChainedValue.internal), for
-  the SAME target — with cycle detection scoped to this one resolution.
-- Guards one author mistake: invalid `targetContainer` — ERROR, falls
-  back to "none" (the value still resolves). "Unknown token referenced"
-  is the caller's concern (see crdkit.resolveTokenValue) — "def" is
-  handed over already resolved-to-exist, there's no name left to be
-  "unknown" here.
+- `targetContainer` is never inspected here — validated eagerly at
+  merge time instead (crdkit.tokens.merge.internal); resolution doesn't
+  care about it at all.
+- Guards one author mistake: no value found for the target — ERROR.
+  "Unknown token referenced" is the caller's concern (see
+  crdkit.token.value) — "def" is handed over already resolved-to-exist.
 */}}
-{{- define "crdkit.resolveValue.internal" -}}
+{{- define "crdkit.resolveEntry.internal" -}}
 {{- $fieldId := .fieldId -}}
 {{- $raw := .def -}}
 {{- $tokens := .tokens -}}
@@ -219,15 +270,6 @@ Implementation notes:
 {{- $reservedKeys := list "targetContainer" "_value" "match" -}}
 
 {{- $isDict := kindIs "map" $raw -}}
-{{- $targetContainer := "none" -}}
-{{- if and $isDict (hasKey $raw "targetContainer") -}}
-  {{- $targetContainer = $raw.targetContainer -}}
-{{- end -}}
-{{- $validContainers := list "main" "side-car" "both" "none" -}}
-{{- if not (has $targetContainer $validContainers) -}}
-  {{- $_ := set $diag "errors" (append $diag.errors (printf "invalid targetContainer '%s' for '%s' — must be one of main/side-car/both (or omitted)" $targetContainer $fieldId)) -}}
-  {{- $targetContainer = "none" -}}
-{{- end -}}
 
 {{- $cacheable := $isDict -}}
 {{- $cache := dict -}}
@@ -239,8 +281,7 @@ Implementation notes:
 {{- end -}}
 
 {{- if and $cacheable (hasKey $cache $target) -}}
-value: {{ index $cache $target | quote }}
-targetContainer: {{ $targetContainer | quote }}
+value: {{ index $cache $target | toYaml | nindent 2 }}
 {{- else -}}
   {{- $found := false -}}
   {{- $rawValue := "" -}}
@@ -306,90 +347,71 @@ targetContainer: {{ $targetContainer | quote }}
     {{- end -}}
   {{- end -}}
 
-  {{- $resolvedValue := include "crdkit.resolveChainedValue.internal" (dict "text" (toString $rawValue) "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" (append $resolving $fieldId)) -}}
+  {{- $substituted := include "crdkit.substituteStructure.internal" (dict "value" $rawValue "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" (append $resolving $fieldId)) | fromYaml -}}
+  {{- $resolvedValue := $substituted.value -}}
   {{- if $cacheable -}}
     {{- range $rung := $rungsWalked -}}
       {{- $_ := set $cache $rung $resolvedValue -}}
     {{- end -}}
   {{- end -}}
-value: {{ $resolvedValue | quote }}
-targetContainer: {{ $targetContainer | quote }}
+value: {{ $resolvedValue | toYaml | nindent 2 }}
 {{- end -}}
 {{- end -}}
 
 {{/*
-Scope: public
+Scope: internal
 
 Interface:
-- Params (list): [ctx, name, target?]
-  - ctx: dict with "tokens"/"diag"/"parentTargetTemplate"/"target" keys
-  - name: token name to resolve
-  - target: optional — target to resolve for, defaults to ctx.target;
-    pass explicitly only to resolve for a target OTHER than the
-    render's own
-- Returns YAML: { "value": <resolved string>, "targetContainer":
-  <string> }
-- Resolves a REAL token, registered under "name" in ctx.tokens.
+- Params (dict): { "value": <any>, "tokens": <live tokens map>,
+  "target": <string>, "diag": <dict>, "parentTargetTemplate":
+  <fully-qualified template name>, "root": <caller's root context>,
+  "resolving": <list of names in progress> }
+- Returns YAML: { "value": <"value", with every string leaf's "@ref@"
+  markers substituted> }
+- Recursively walks "value": a string is substituted via
+  crdkit.substituteText.internal; a map/list is walked entry-by-entry
+  (same recursion, one level down); any other scalar passes through
+  unchanged.
 
 Implementation notes:
-- List-based (not dict) — deliberate exception for this frequently-
-  called, fixed-shape entry point (see crdkit.dictMerge/listExtend for
-  the other).
-- "unknown token '%s' referenced" is diagnosed HERE, not in
-  crdkit.resolveValue.internal — this is the one caller that does a
-  name-based lookup, so it's the one that can tell "unknown" apart from
-  "declared but unresolvable."
+- This is what lets a token's (or crdkit.tokenDef.value's "def") value
+  be an arbitrary structure, not just a scalar — reserved keys
+  ("targetContainer"/"_value"/"match") only mean anything at the OUTER
+  declaration level inspected by crdkit.resolveEntry.internal; once a
+  value is selected and handed here, every key is ordinary data.
+- No cycle risk from the structural recursion itself — it's finite
+  literal YAML/JSON, not a graph with back-edges. Cycle detection
+  ("resolving") only matters for named "@ref@" cross-references, which
+  crdkit.substituteText.internal already guards.
 */}}
-{{- define "crdkit.resolveTokenValue" -}}
-{{- $ctx := index . 0 -}}
-{{- $name := index . 1 -}}
-{{- $target := $ctx.target -}}
-{{- if and (gt (len .) 2) (index . 2) -}}
-  {{- $target = index . 2 -}}
-{{- end -}}
-{{- if not (hasKey $ctx.tokens $name) -}}
-{{- $_ := set $ctx.diag "errors" (append $ctx.diag.errors (printf "unknown token '%s' referenced" $name)) -}}
-value: ""
-targetContainer: "none"
+{{- define "crdkit.substituteStructure.internal" -}}
+{{- $value := .value -}}
+{{- $tokens := .tokens -}}
+{{- $target := .target -}}
+{{- $diag := .diag -}}
+{{- $parentTargetTemplate := .parentTargetTemplate -}}
+{{- $root := .root -}}
+{{- $resolving := .resolving -}}
+{{- if kindIs "string" $value -}}
+  {{- $substituted := include "crdkit.substituteText.internal" (dict "text" $value "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" $resolving) -}}
+value: {{ $substituted | toYaml | nindent 2 }}
+{{- else if kindIs "map" $value -}}
+  {{- $result := dict -}}
+  {{- range $k, $v := $value -}}
+    {{- $sub := include "crdkit.substituteStructure.internal" (dict "value" $v "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" $resolving) | fromYaml -}}
+    {{- $_ := set $result $k $sub.value -}}
+  {{- end -}}
+value: {{ $result | toYaml | nindent 2 }}
+{{- else if kindIs "slice" $value -}}
+  {{- $result := list -}}
+  {{- range $item := $value -}}
+    {{- $sub := include "crdkit.substituteStructure.internal" (dict "value" $item "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" $resolving) | fromYaml -}}
+    {{- $result = append $result $sub.value -}}
+  {{- end -}}
+value: {{ $result | toYaml | nindent 2 }}
 {{- else -}}
-{{- include "crdkit.resolveValue.internal" (dict "fieldId" $name "def" (index $ctx.tokens $name) "tokens" $ctx.tokens "target" $target "diag" $ctx.diag "parentTargetTemplate" $ctx.parentTargetTemplate "root" $ctx.root) -}}
+value: {{ $value | toYaml | nindent 2 }}
 {{- end -}}
-{{- end -}}
-
-{{/*
-Scope: public
-
-Interface:
-- Params (list): [ctx, fieldId, def, target?]
-  - ctx: dict with "tokens"/"diag"/"parentTargetTemplate"/"target" keys
-  - fieldId: label used in diagnostics — required, since "def" has no
-    name of its own
-  - def: a structure sourced from consumer Values, shaped like a token
-    declaration (scalar, or dict with default/target-keys/match/
-    targetContainer) — NOT registered in ctx.tokens
-  - target: optional — defaults to ctx.target
-- Returns YAML: { "value": <resolved string>, "targetContainer":
-  <string> }
-- Resolves an arbitrary structure using the exact same target-
-  escalation rules as a real token, without requiring it to be
-  registered under a name in ctx.tokens.
-
-Implementation notes:
-- Any `@ref@` marker in the resolved value is still looked up in the
-  REAL ctx.tokens — "def" is never itself a token namespace.
-- "targetContainer" is still extracted/validated as an incidental part
-  of the shared algorithm; a caller that doesn't care about it (the
-  common case for this entry point) simply ignores it in the return.
-*/}}
-{{- define "crdkit.resolveTokenDefinition" -}}
-{{- $ctx := index . 0 -}}
-{{- $fieldId := index . 1 -}}
-{{- $def := index . 2 -}}
-{{- $target := $ctx.target -}}
-{{- if and (gt (len .) 3) (index . 3) -}}
-  {{- $target = index . 3 -}}
-{{- end -}}
-{{- include "crdkit.resolveValue.internal" (dict "fieldId" $fieldId "def" $def "tokens" $ctx.tokens "target" $target "diag" $ctx.diag "parentTargetTemplate" $ctx.parentTargetTemplate "root" $ctx.root) -}}
 {{- end -}}
 
 {{/*
@@ -401,8 +423,8 @@ Interface:
   <fully-qualified template name>, "root": <caller's root context>,
   "resolving": <list of names in progress, non-empty> }
 - Returns: text with every "@NAME@" reference substituted.
-- Recursively substitutes "@ref@" markers within a single value
-  string, for the SAME target as the value being substituted into.
+- Substitutes "@ref@" markers within a single string leaf, for the
+  SAME target as the value being substituted into.
 
 Implementation notes:
 - Cycle detection: "resolving" is the in-progress name stack for THIS
@@ -410,12 +432,12 @@ Implementation notes:
   records an ERROR and leaves that one marker unexpanded (rather than
   recursing infinitely), so the rest of the value still resolves.
 - "@AT@" is never treated as a token reference here — handled once,
-  separately, by crdkit.substituteTokens' final pass.
-- A `@ref@` always names a REAL token in "tokens" — this is the one
-  place markers get resolved, whether the enclosing value came from a
-  named token or from crdkit.resolveTokenDefinition's "def".
+  separately, by crdkit.tokens.substitute's final pass.
+- A referenced token resolving to a STRUCTURE (not a scalar) can't be
+  spliced into this text — crdkit.stringify.internal records an ERROR
+  and the marker is left unexpanded.
 */}}
-{{- define "crdkit.resolveChainedValue.internal" -}}
+{{- define "crdkit.substituteText.internal" -}}
 {{- $text := .text -}}
 {{- $tokens := .tokens -}}
 {{- $target := .target -}}
@@ -430,12 +452,172 @@ Implementation notes:
     {{- if has $refName $resolving -}}
       {{- $_ := set $diag "errors" (append $diag.errors (printf "token '%s' references '@%s@', which is already being resolved — cycle (direct or indirect self-reference)" (last $resolving) $refName)) -}}
     {{- else -}}
-      {{- $refResolved := include "crdkit.resolveValue.internal" (dict "fieldId" $refName "def" (index $tokens $refName) "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" $resolving) | fromYaml -}}
-      {{- $text = $text | replace $marker $refResolved.value -}}
+      {{- $refResolved := include "crdkit.resolveEntry.internal" (dict "fieldId" $refName "def" (index $tokens $refName) "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" $resolving) | fromYaml -}}
+      {{- $coerced := include "crdkit.stringify.internal" (dict "resolved" $refResolved "fieldId" $refName "diag" $diag) | fromYaml -}}
+      {{- if $coerced.ok -}}
+        {{- $text = $text | replace $marker $coerced.text -}}
+      {{- end -}}
     {{- end -}}
   {{- end -}}
 {{- end -}}
 {{- $text -}}
+{{- end -}}
+
+{{/*
+Scope: internal
+
+Interface:
+- Params (dict): { "resolved": <already-decoded {value: <any>} dict>,
+  "fieldId": <string>, "diag": <dict> }
+- Returns YAML: { "text": <string>, "ok": <bool> }
+- Coerces an already-resolved value for embedding into a text blob (a
+  "@NAME@" marker's replacement, or a direct *.string entry point): a
+  string passes through as-is; a bool/int/float is stringified
+  (`toString`); a map/list records an ERROR and comes back as
+  `{text: "", ok: false}` — the caller decides what "not ok" means
+  (leave a marker unexpanded, or return an empty string).
+
+Implementation notes:
+- Shared by crdkit.token.string, crdkit.tokenDef.string,
+  crdkit.tokens.substitute, and crdkit.substituteText.internal — one
+  place decides what "give me this as text" means.
+*/}}
+{{- define "crdkit.stringify.internal" -}}
+{{- $v := .resolved.value -}}
+{{- $fieldId := .fieldId -}}
+{{- $diag := .diag -}}
+{{- if kindIs "string" $v -}}
+text: {{ $v | quote }}
+ok: true
+{{- else if or (kindIs "map" $v) (kindIs "slice" $v) -}}
+{{- $_ := set $diag "errors" (append $diag.errors (printf "'%s' resolves to a structured value and cannot be used as text" $fieldId)) -}}
+text: ""
+ok: false
+{{- else -}}
+text: {{ $v | toString | quote }}
+ok: true
+{{- end -}}
+{{- end -}}
+
+{{/*
+Scope: public
+
+Interface:
+- Params (list): [ctx, name, target?]
+  - ctx: dict with "tokens"/"diag"/"parentTargetTemplate"/"target" keys
+  - name: token name to resolve
+  - target: optional — defaults to ctx.target; pass explicitly only to
+    resolve for a target OTHER than the render's own
+- Returns YAML: { "value": <resolved string, or a dict/list with every
+  string leaf's markers resolved> }
+- Resolves a REAL token, registered under "name" in ctx.tokens.
+
+Implementation notes:
+- List-based (not dict) — deliberate exception for this frequently-
+  called, fixed-shape entry point (see crdkit.dictMerge/listExtend for
+  the other).
+- "unknown token '%s' referenced" is diagnosed HERE, not in
+  crdkit.resolveEntry.internal — this is the one caller that does a
+  name-based lookup, so it's the one that can tell "unknown" apart from
+  "declared but unresolvable."
+*/}}
+{{- define "crdkit.token.value" -}}
+{{- $ctx := index . 0 -}}
+{{- $name := index . 1 -}}
+{{- $target := $ctx.target -}}
+{{- if and (gt (len .) 2) (index . 2) -}}
+  {{- $target = index . 2 -}}
+{{- end -}}
+{{- if not (hasKey $ctx.tokens $name) -}}
+{{- $_ := set $ctx.diag "errors" (append $ctx.diag.errors (printf "unknown token '%s' referenced" $name)) -}}
+value: ""
+{{- else -}}
+{{- include "crdkit.resolveEntry.internal" (dict "fieldId" $name "def" (index $ctx.tokens $name) "tokens" $ctx.tokens "target" $target "diag" $ctx.diag "parentTargetTemplate" $ctx.parentTargetTemplate "root" $ctx.root) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Scope: public
+
+Interface:
+- Params (list): [ctx, name, target?] — same as crdkit.token.value
+- Returns: plain string.
+- Resolves a REAL token and coerces the result to text (see
+  crdkit.stringify.internal) — for use outside the usual "@NAME@"
+  marker mechanism, when the caller wants the value directly.
+
+Implementation notes:
+- A structured result records an ERROR (via crdkit.stringify.internal)
+  and comes back as an empty string.
+*/}}
+{{- define "crdkit.token.string" -}}
+{{- $ctx := index . 0 -}}
+{{- $name := index . 1 -}}
+{{- $target := "" -}}
+{{- if gt (len .) 2 -}}
+  {{- $target = index . 2 -}}
+{{- end -}}
+{{- $resolved := include "crdkit.token.value" (list $ctx $name $target) | fromYaml -}}
+{{- (include "crdkit.stringify.internal" (dict "resolved" $resolved "fieldId" $name "diag" $ctx.diag) | fromYaml).text -}}
+{{- end -}}
+
+{{/*
+Scope: public
+
+Interface:
+- Params (list): [ctx, fieldId, def, target?]
+  - ctx: dict with "tokens"/"diag"/"parentTargetTemplate"/"target" keys
+  - fieldId: label used in diagnostics — required, since "def" has no
+    name of its own
+  - def: a structure sourced from consumer Values, shaped like a token
+    declaration (scalar, or dict with default/target-keys/match) — NOT
+    registered in ctx.tokens
+  - target: optional — defaults to ctx.target
+- Returns YAML: { "value": <resolved string, or a dict/list with every
+  string leaf's markers resolved> }
+- Resolves an arbitrary structure using the exact same target-
+  escalation rules as a real token, without requiring it to be
+  registered under a name in ctx.tokens.
+
+Implementation notes:
+- Any `@ref@` marker in the resolved value is still looked up in the
+  REAL ctx.tokens — "def" is never itself a token namespace.
+*/}}
+{{- define "crdkit.tokenDef.value" -}}
+{{- $ctx := index . 0 -}}
+{{- $fieldId := index . 1 -}}
+{{- $def := index . 2 -}}
+{{- $target := $ctx.target -}}
+{{- if and (gt (len .) 3) (index . 3) -}}
+  {{- $target = index . 3 -}}
+{{- end -}}
+{{- include "crdkit.resolveEntry.internal" (dict "fieldId" $fieldId "def" $def "tokens" $ctx.tokens "target" $target "diag" $ctx.diag "parentTargetTemplate" $ctx.parentTargetTemplate "root" $ctx.root) -}}
+{{- end -}}
+
+{{/*
+Scope: public
+
+Interface:
+- Params (list): [ctx, fieldId, def, target?] — same as
+  crdkit.tokenDef.value
+- Returns: plain string.
+- Resolves an arbitrary structure and coerces the result to text (see
+  crdkit.stringify.internal).
+
+Implementation notes:
+- A structured result records an ERROR (via crdkit.stringify.internal)
+  and comes back as an empty string.
+*/}}
+{{- define "crdkit.tokenDef.string" -}}
+{{- $ctx := index . 0 -}}
+{{- $fieldId := index . 1 -}}
+{{- $def := index . 2 -}}
+{{- $target := "" -}}
+{{- if gt (len .) 3 -}}
+  {{- $target = index . 3 -}}
+{{- end -}}
+{{- $resolved := include "crdkit.tokenDef.value" (list $ctx $fieldId $def $target) | fromYaml -}}
+{{- (include "crdkit.stringify.internal" (dict "resolved" $resolved "fieldId" $fieldId "diag" $ctx.diag) | fromYaml).text -}}
 {{- end -}}
 
 {{/*
@@ -453,10 +635,12 @@ Implementation notes:
 - A marker naming something that isn't a known token is left
   untouched — the caller is responsible for a "possible typo"
   diagnostic against whatever's left over.
+- A marker naming a token that resolves to a STRUCTURE (not a scalar)
+  is also left untouched — crdkit.stringify.internal records the ERROR.
 - "@AT@" is replaced last, after every other substitution, so it can't
   be misread as part of another marker mid-resolution.
 */}}
-{{- define "crdkit.substituteTokens" -}}
+{{- define "crdkit.tokens.substitute" -}}
 {{- $ctx := index . 0 -}}
 {{- $text := index . 1 -}}
 {{- $target := $ctx.target -}}
@@ -465,13 +649,15 @@ Implementation notes:
 {{- end -}}
 {{- $tokens := $ctx.tokens -}}
 {{- $diag := $ctx.diag -}}
-{{- $parentTargetTemplate := $ctx.parentTargetTemplate -}}
 {{- $markers := regexFindAll "@[A-Za-z0-9_]+@" $text -1 -}}
 {{- range $marker := $markers -}}
   {{- $name := trimSuffix "@" (trimPrefix "@" $marker) -}}
   {{- if and (ne $name "AT") (hasKey $tokens $name) -}}
-    {{- $resolved := include "crdkit.resolveValue.internal" (dict "fieldId" $name "def" (index $tokens $name) "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $ctx.root) | fromYaml -}}
-    {{- $text = $text | replace $marker $resolved.value -}}
+    {{- $resolved := include "crdkit.token.value" (list $ctx $name $target) | fromYaml -}}
+    {{- $coerced := include "crdkit.stringify.internal" (dict "resolved" $resolved "fieldId" $name "diag" $diag) | fromYaml -}}
+    {{- if $coerced.ok -}}
+      {{- $text = $text | replace $marker $coerced.text -}}
+    {{- end -}}
   {{- end -}}
 {{- end -}}
 {{- $text = $text | replace "@AT@" "@" -}}
@@ -485,13 +671,16 @@ Interface:
 - Params (list): [ctx, name, value, targetContainer, target?]
   - ctx: dict with "tokens"/"diag"/"target" keys
   - name: token name to add
-  - value: raw value text for this exact target (may contain "@ref@"
-    markers, resolved lazily)
+  - value: raw value for this exact target (may contain "@ref@"
+    markers, or be a structure — resolved lazily like any other value)
   - targetContainer: main/side-car/both/none, optional (default "none")
+    — NOT validated here, unlike a hand-declared token (see
+    crdkit.tokens.merge.internal); crdkit.token.add callers are
+    trusted, first-party library code
   - target: exact target string "value" applies to — optional, defaults
     to ctx.target
 - Returns: nothing (mutates ctx.tokens in place).
-- Injects one derived token into a live tokens map — the addToken
+- Injects one derived token into a live tokens map — the crdkit.token.add
   counterpart to crdkit.dictMerge/listExtend for ctx.model.
 
 Implementation notes:
@@ -505,10 +694,11 @@ Implementation notes:
   dict, it's replaced outright.
 - Any existing "_value" cache is always dropped on write.
 - Skips the reserved-name collision check
-  (crdkit.mergeTokens.internal's) — that protects against untrusted
-  consumer input; addToken callers are trusted, first-party code.
+  (crdkit.tokens.merge.internal's) — that protects against untrusted
+  consumer input; crdkit.token.add callers are trusted, first-party
+  code.
 */}}
-{{- define "crdkit.addToken" -}}
+{{- define "crdkit.token.add" -}}
 {{- $ctx := index . 0 -}}
 {{- $name := index . 1 -}}
 {{- $value := index . 2 -}}
@@ -536,11 +726,6 @@ Implementation notes:
 {{- end -}}
 
 {{- $targetContainer := $rawTargetContainer | default $existingTargetContainer | default "none" -}}
-{{- $validContainers := list "main" "side-car" "both" "none" -}}
-{{- if not (has $targetContainer $validContainers) -}}
-  {{- $_ := set $diag "errors" (append $diag.errors (printf "invalid targetContainer '%s' for token '%s' — must be one of main/side-car/both (or omitted)" $targetContainer $name)) -}}
-  {{- $targetContainer = "none" -}}
-{{- end -}}
 
 {{- $_ := set $decl $target $value -}}
 {{- $_ := set $decl "targetContainer" $targetContainer -}}

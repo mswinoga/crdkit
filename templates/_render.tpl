@@ -8,7 +8,7 @@ Interface:
   - target: .Values.target — opaque string, whatever granularity the
     caller's taxonomy uses
   - system: raw locked-token declarations (always wins over consumer
-    tokens — see crdkit.mergeTokens.internal)
+    tokens — see crdkit.tokens.merge.internal)
   - defaults: raw default-token declarations (consumer may override)
   - parentTargetTemplate: fully-qualified template name implementing
     the caller's target-escalation taxonomy — optional, defaults to
@@ -40,7 +40,7 @@ Implementation notes:
 {{- $target := .target -}}
 {{- $parentTargetTemplate := .parentTargetTemplate | default "crdkit.noParentTarget" -}}
 
-{{- $tokensYaml := include "crdkit.mergeTokens.internal" (dict
+{{- $tokensYaml := include "crdkit.tokens.merge.internal" (dict
       "tokens" .tokens "diag" $diag
       "system" $system "defaults" .defaults) -}}
 {{- $tokens := $tokensYaml | fromYaml -}}
@@ -50,7 +50,7 @@ Implementation notes:
 
 {{- include "crdkit.integrations.chain" (dict "chain" .chain "ctx" $ctx) -}}
 
-{{- $substitutedText := include "crdkit.substituteTokens" (list $ctx ($model | toYaml) $target) -}}
+{{- $substitutedText := include "crdkit.tokens.substitute" (list $ctx ($model | toYaml) $target) -}}
 {{- $substitutedModel := $substitutedText | fromYaml -}}
 
 {{/* leftover "@word@" after substitution = possible typo; a genuine cycle is already reported elsewhere with a more specific message. */}}

@@ -48,13 +48,13 @@ Integrations receive a shared `ctx` (`root`/`diag`/`model`/`tokens`/
 - Visibility is order-dependent: a token/model field set partway
   through the chain is only visible to code running after that point
   (onion/middleware ordering).
-- A token added mid-chain via `crdkit.addToken` is stored as a
+- A token added mid-chain via `crdkit.token.add` is stored as a
   dedicated attribute (literal key = exact target) and resolved
   lazily, the same as a hand-declared token — not resolved at
   add-time, so it can reference a token another integration adds later
   in the chain.
 - Locked tokens are protected against a consumer's own `tokens:` map
-  (merged last in `crdkit.mergeTokens.internal`) — not against the
+  (merged last in `crdkit.tokens.merge.internal`) — not against the
   chain, which is trusted, first-party code.
 
 ## Building ctx.model
@@ -86,17 +86,17 @@ crdkit's concern.
 - `ctx.model` values can contain `"@TOKEN@"` markers — substituted in
   the same pass as everything else (see "Substitution" below).
 - Every integration must be side-effect only — `dictMerge`/`listExtend`/
-  `ensureDictKey`/`addToken` all return `""`, so a bare, uncaptured
+  `ensureDictKey`/`token.add` all return `""`, so a bare, uncaptured
   `{{- include ... -}}` is safe. Don't print literal YAML from inside
   an integration.
 
 ## Substitution
 
-One `toYaml`/`substituteTokens`/`fromYaml` round-trip, over `ctx.model`
+One `toYaml`/`tokens.substitute`/`fromYaml` round-trip, over `ctx.model`
 as a whole, after the chain finishes:
 
 ```gotemplate
-{{- $substitutedText := include "crdkit.substituteTokens" (list $ctx ($model | toYaml) $target) -}}
+{{- $substitutedText := include "crdkit.tokens.substitute" (list $ctx ($model | toYaml) $target) -}}
 {{- $substitutedModel := $substitutedText | fromYaml -}}
 ```
 
@@ -113,30 +113,51 @@ Declared-but-unused tokens produce no diagnostic. Results cache onto
 the token's own declaration, so resolving the same token for a
 *different* target (e.g. `qap1` while rendering `qa`) is cheap.
 
+A resolved value isn't limited to a scalar: it can be a dict/list too,
+with every string leaf recursively `@ref@`-substituted (non-string
+scalars pass through as their native type). `crdkit.token.*` resolves a
+real, named token; `crdkit.tokenDef.*` resolves an arbitrary structure
+(e.g. sourced from consumer `Values`) by the same rules without
+registering it in `ctx.tokens`; `crdkit.tokens.*` operates on the whole
+registry:
+
+```
+crdkit.tokens.substitute
+  └─ crdkit.token.value
+       └─ crdkit.resolveEntry.internal        (shared by token.* and tokenDef.*)
+            └─ crdkit.substituteStructure.internal
+                 └─ crdkit.substituteText.internal → crdkit.resolveEntry.internal (per "@ref@")
+  └─ crdkit.stringify.internal                 (coerce for splicing into text)
+```
+
 ## Resolving/substituting tokens directly
 
 ```gotemplate
 {{/* resolve one REAL token by name, for a given target */}}
-{{- $resolved := include "crdkit.resolveTokenValue" (list $ctx "DB_HOST" $target) | fromYaml -}}
-{{/* $resolved is {value: "...", targetContainer: "..."} */}}
+{{- $resolved := include "crdkit.token.value" (list $ctx "DB_HOST" $target) | fromYaml -}}
+{{/* $resolved is {value: "..."} — a string, or a dict/list if the
+     token's entry for this target is itself structural */}}
+
+{{/* same thing, but always as a string (errors + "" if structural) */}}
+{{- $asString := include "crdkit.token.string" (list $ctx "DB_HOST" $target) -}}
 
 {{/* resolve an arbitrary structure sourced from consumer Values —
      not registered under a name in ctx.tokens — using the exact
      same escalation rules as a real token */}}
 {{- $def := dict "default" "generic" "prod" "special-@DB_HOST@" -}}
-{{- $resolved := include "crdkit.resolveTokenDefinition" (list $ctx "myField" $def $target) | fromYaml -}}
+{{- $resolved := include "crdkit.tokenDef.value" (list $ctx "myField" $def $target) | fromYaml -}}
 {{/* any "@ref@" inside $def is still looked up in the REAL ctx.tokens,
      never in $def itself */}}
 
 {{/* substitute every "@NAME@" marker in a text blob, for a given target */}}
-{{- $substituted := include "crdkit.substituteTokens" (list $ctx "@DB_HOST@ is up" $target) -}}
+{{- $substituted := include "crdkit.tokens.substitute" (list $ctx "@DB_HOST@ is up" $target) -}}
 ```
 
-All three take `ctx` first, `target` last and OPTIONAL — omit it (or
-pass `""`) to resolve for the current render's own `ctx.target`; pass
-it explicitly only to resolve for a target other than the one driving
-the render. `crdkit.addToken` follows the same convention: `(list $ctx
-"DERIVED_VAR" "computed-value" "main" $target)`.
+All entry points take `ctx` first, `target` last and OPTIONAL — omit it
+(or pass `""`) to resolve for the current render's own `ctx.target`;
+pass it explicitly only to resolve for a target other than the one
+driving the render. `crdkit.token.add` follows the same convention:
+`(list $ctx "DERIVED_VAR" "computed-value" "main" $target)`.
 
 ## Target escalation
 
@@ -178,9 +199,9 @@ above).
   a dict. Reserved dict keys: `targetContainer`, `_value` (memoization
   cache, internal), `match`. Every other key, including `default`, IS a
   target entry.
-- Resolving a token (`crdkit.resolveTokenValue`) returns a separate shape,
-  `{value, targetContainer}` — the interpolated result for one
-  name+target pair.
+- Resolving a token (`crdkit.token.value`) returns a separate shape,
+  `{value}` — the interpolated result for one name+target pair (a
+  string, or a structure if the selected entry is itself one).
 
 ```yaml
 tokens:
@@ -199,8 +220,11 @@ tokens:
   pass, same as any other model field. `targetContainer` isn't part of
   that substitution; a library wanting it downstream reads it directly
   off the token's declaration (`ctx.tokens.DB_HOST.targetContainer`).
-- An invalid `targetContainer` records an `# ERROR:` and falls back to
-  `"none"`; the token's value still resolves.
+- `targetContainer` is validated eagerly, once, at merge time — for
+  EVERY token that declares one, regardless of whether it's ever
+  resolved. An invalid value records an `# ERROR:` and is corrected to
+  `"none"` in place; the token's value still resolves normally.
+  Resolution itself never looks at `targetContainer` at all.
 - Token names are expected to be `UPPER_SNAKE_CASE` — non-conforming
   names still work, but record a `# WARNING:`.
 

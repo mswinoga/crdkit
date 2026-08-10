@@ -18,7 +18,7 @@ literal 10-character text "<no value>" — NOT an empty string — when
 invoked through `include`. Verified empirically (a hex dump of the
 "empty" result showed the ASCII bytes for "<no value>", not zero
 bytes) after this exact mistake produced a real bug here: crdkit's own
-walk (crdkit.resolveValue.internal) treated that string as a genuine next
+walk (crdkit.resolveEntry.internal) treated that string as a genuine next
 rung, walked to it, got "<no value>" AGAIN next iteration, and tripped
 its own cycle detector — a real diagnostic, not a hang, but a
 confusing one, for what should have been "no escalation configured."

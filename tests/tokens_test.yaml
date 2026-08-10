@@ -22,13 +22,13 @@ tests:
     asserts:
       # raw declaration, post-merge, pre-resolution — no structure/
       # crossTargets reference, so this is purely what
-      # crdkit.mergeTokens.internal normalized "hello" into.
+      # crdkit.tokens.merge.internal normalized "hello" into.
       - equal:
           path: tokens.GREETING
           value:
             default: "hello"
 
-  - it: "'default' is a hardcoded crdkit-level fallback, combined with targetContainer, resolving unconditionally for ANY target — no taxonomy needed"
+  - it: "'default' is a hardcoded crdkit-level fallback, resolving unconditionally for ANY target — no taxonomy needed"
     set:
       target: some-unrecognized-target-with-no-taxonomy-hop-at-all
       tokens.DB_HOST.default: "db.internal"
@@ -41,9 +41,6 @@ tests:
       - equal:
           path: crossResolved.some-unrecognized-target-with-no-taxonomy-hop-at-all.DB_HOST.value
           value: "db.internal"
-      - equal:
-          path: crossResolved.some-unrecognized-target-with-no-taxonomy-hop-at-all.DB_HOST.targetContainer
-          value: "main"
       - lengthEqual:
           path: diag.errors
           count: 0
@@ -126,7 +123,7 @@ tests:
           path: diag.errors
           count: 0
 
-  - it: resolving a name that was never declared at all (e.g. via crossTargets/resolveValue directly) records an ERROR, not a fail()
+  - it: resolving a name that was never declared at all (e.g. via crossTargets/crdkit.token.value directly) records an ERROR, not a fail()
     set:
       target: prod-01
       crossTargets:
@@ -360,23 +357,193 @@ tests:
           path: structure.dbHost
           value: "db1.internal"
 
-  # --- targetContainer ---
+  # --- structural values: a resolved entry can be a dict/list, not just a scalar ---
 
-  - it: a token with no targetContainer declared resolves with targetContainer "none"
+  - it: "a dict-shaped resolved value comes back as a dict, with every string leaf's @ref@ markers substituted"
     set:
       target: prod
-      tokens.GREETING: "hello"
+      tokens.DB_HOST: "db.internal"
+      tokens.CONFIG.default:
+        host: "@DB_HOST@"
+        port: 5432
       crossTargets:
         - "prod"
       crossTargetNames:
-        - "GREETING"
+        - "CONFIG"
     asserts:
       - equal:
-          path: crossResolved.prod.GREETING.value
-          value: "hello"
+          path: crossResolved.prod.CONFIG.value
+          value:
+            host: "db.internal"
+            port: 5432
+
+  - it: "a list-shaped resolved value comes back as a list, with every string element's @ref@ markers substituted"
+    set:
+      target: prod
+      tokens.DB_HOST: "db.internal"
+      tokens.HOSTS.default:
+        - "@DB_HOST@"
+        - "static-host"
+      crossTargets:
+        - "prod"
+      crossTargetNames:
+        - "HOSTS"
+    asserts:
       - equal:
-          path: crossResolved.prod.GREETING.targetContainer
-          value: "none"
+          path: crossResolved.prod.HOSTS.value
+          value:
+            - "db.internal"
+            - "static-host"
+
+  - it: "a non-string scalar value (bool/int/float) resolves to its NATIVE type, not a stringified copy"
+    set:
+      target: prod
+      tokens.ENABLED: true
+      tokens.PORT: 5432
+      crossTargets:
+        - "prod"
+      crossTargetNames:
+        - "ENABLED"
+        - "PORT"
+    asserts:
+      - equal:
+          path: crossResolved.prod.ENABLED.value
+          value: true
+      - equal:
+          path: crossResolved.prod.PORT.value
+          value: 5432
+
+  - it: "a structured value can still reference a token added later via crdkit.token.add — same lazy-resolution guarantee as a scalar"
+    set:
+      target: prod
+      tokens.CONFIG.default:
+        host: "@DERIVED_HOST@"
+      tokenOps:
+        - name: DERIVED_HOST
+          value: "computed.internal"
+      crossTargets:
+        - "prod"
+      crossTargetNames:
+        - "CONFIG"
+    asserts:
+      - equal:
+          path: crossResolved.prod.CONFIG.value
+          value:
+            host: "computed.internal"
+
+  # --- crdkit.token.string / crdkit.tokenDef.string ---
+
+  - it: "crdkit.token.string stringifies a non-string scalar for text embedding"
+    set:
+      target: prod
+      tokens.ENABLED: true
+      stringOps:
+        - name: ENABLED
+          target: "prod"
+    asserts:
+      - equal:
+          path: stringResolved[0]
+          value: "true"
+
+  - it: "crdkit.token.string on a structural value records an ERROR and returns an empty string"
+    set:
+      target: prod
+      tokens.CONFIG.default:
+        host: "x"
+      stringOps:
+        - name: CONFIG
+          target: "prod"
+    asserts:
+      - equal:
+          path: stringResolved[0]
+          value: ""
+      - equal:
+          path: diag.errors[0]
+          value: "'CONFIG' resolves to a structured value and cannot be used as text"
+
+  - it: "a @NAME@ marker referencing a token that resolves to a structure is left unexpanded, with an ERROR recorded"
+    set:
+      target: prod
+      tokens.CONFIG.default:
+        host: "x"
+      structure.x: "prefix-@CONFIG@-suffix"
+    asserts:
+      - equal:
+          path: structure.x
+          value: "prefix-@CONFIG@-suffix"
+      - equal:
+          path: diag.errors[0]
+          value: "'CONFIG' resolves to a structured value and cannot be used as text"
+
+  # --- crdkit.tokenDef.value / crdkit.tokenDef.string: resolving an arbitrary structure, not registered in ctx.tokens ---
+
+  - it: "crdkit.tokenDef.value resolves an ad-hoc structure using the same escalation rules as a real token, without registering it"
+    set:
+      target: prod
+      tokens.DB_HOST: "db.internal"
+      tokenDefOps:
+        - fieldId: "myField"
+          def:
+            default: "generic-@DB_HOST@"
+            prod: "special-@DB_HOST@"
+    asserts:
+      - equal:
+          path: tokenDefResolved[0].value
+          value: "special-db.internal"
+      - equal:
+          path: tokenDefResolved[0].string
+          value: "special-db.internal"
+      # never registered under its own name — it isn't a real token
+      - exists:
+          path: tokens.myField
+        not: true
+
+  - it: "crdkit.tokenDef.value falls back to the ad-hoc structure's own 'default' entry when the target doesn't match"
+    set:
+      target: qa
+      tokenDefOps:
+        - fieldId: "myField"
+          def:
+            default: "fallback-value"
+            prod: "prod-only-value"
+    asserts:
+      - equal:
+          path: tokenDefResolved[0].value
+          value: "fallback-value"
+
+  - it: "crdkit.tokenDef.value returns a structural result unchanged, same recursive substitution as a real token"
+    set:
+      target: prod
+      tokens.DB_HOST: "db.internal"
+      tokenDefOps:
+        - fieldId: "myField"
+          def:
+            default:
+              host: "@DB_HOST@"
+              port: 5432
+    asserts:
+      - equal:
+          path: tokenDefResolved[0].value
+          value:
+            host: "db.internal"
+            port: 5432
+      - equal:
+          path: tokenDefResolved[0].string
+          value: ""
+
+  - it: "crdkit.tokenDef.value records a 'no value found' error using the caller-supplied fieldId, same diagnostic shape as a real token"
+    set:
+      target: unrecognized
+      tokenDefOps:
+        - fieldId: "myField"
+          def:
+            prod: "only-for-prod"
+    asserts:
+      - equal:
+          path: diag.errors[0]
+          value: "no value found for 'myField' — target chain exhausted at 'unrecognized' starting from 'unrecognized'"
+
+  # --- targetContainer: validated eagerly at merge time, not during resolution ---
 
   - it: a token can declare an explicit valid targetContainer, flat alongside a target entry — no "value" wrapper
     set:
@@ -406,25 +573,63 @@ tests:
           path: tokens.SHARED_VAR.targetContainer
           value: "both"
 
-  - it: an invalid targetContainer records an ERROR and falls back to "none", value still resolves
+  - it: "an invalid targetContainer is validated eagerly at merge time, falls back to 'none', but the token's value still resolves normally"
     set:
       target: prod
       tokens.BAD_VAR.prod: "still-here"
       tokens.BAD_VAR.targetContainer: "sidecar-typo"
-      crossTargets:
-        - "prod"
-      crossTargetNames:
-        - "BAD_VAR"
+      structure.x: "@BAD_VAR@"
     asserts:
       - equal:
-          path: crossResolved.prod.BAD_VAR.value
-          value: "still-here"
-      - equal:
-          path: crossResolved.prod.BAD_VAR.targetContainer
+          path: tokens.BAD_VAR.targetContainer
           value: "none"
+      - equal:
+          path: structure.x
+          value: "still-here"
       - equal:
           path: diag.errors[0]
           value: "invalid targetContainer 'sidecar-typo' for 'BAD_VAR' — must be one of main/side-car/both (or omitted)"
+      - lengthEqual:
+          path: diag.errors
+          count: 1
+
+  - it: "an invalid targetContainer is diagnosed even when the token is never referenced anywhere — a deliberate exception to 'only diagnose what's used'"
+    set:
+      target: prod
+      tokens.UNUSED_BAD.default: "x"
+      tokens.UNUSED_BAD.targetContainer: "bogus"
+    asserts:
+      - equal:
+          path: diag.errors[0]
+          value: "invalid targetContainer 'bogus' for 'UNUSED_BAD' — must be one of main/side-car/both (or omitted)"
+
+  - it: "the eager targetContainer check applies to a system (locked) token exactly like a user-declared one"
+    set:
+      target: prod
+      system.LOCKED_VAR:
+        default: "x"
+        targetContainer: "bogus"
+    asserts:
+      - equal:
+          path: tokens.LOCKED_VAR.targetContainer
+          value: "none"
+      - equal:
+          path: diag.errors[0]
+          value: "invalid targetContainer 'bogus' for 'LOCKED_VAR' — must be one of main/side-car/both (or omitted)"
+
+  - it: "the eager targetContainer check applies to a default token exactly like a user-declared one"
+    set:
+      target: prod
+      defaults.DEFAULT_VAR:
+        default: "x"
+        targetContainer: "bogus"
+    asserts:
+      - equal:
+          path: tokens.DEFAULT_VAR.targetContainer
+          value: "none"
+      - equal:
+          path: diag.errors[0]
+          value: "invalid targetContainer 'bogus' for 'DEFAULT_VAR' — must be one of main/side-car/both (or omitted)"
 
   - it: "multiple target entries coexist flat alongside targetContainer, each resolving independently"
     set:
@@ -443,7 +648,7 @@ tests:
           path: crossResolved.prod.DB_HOST.value
           value: "db-prod.internal"
       - equal:
-          path: crossResolved.prod.DB_HOST.targetContainer
+          path: tokens.DB_HOST.targetContainer
           value: "main"
 
   - it: "token with only default value renders correctly"
@@ -480,7 +685,7 @@ tests:
           path: crossResolved.prod.BROKEN.value
           value: ""
       - equal:
-          path: crossResolved.prod.BROKEN.targetContainer
+          path: tokens.BROKEN.targetContainer
           value: "main"
 
   - it: an empty-string targetContainer is invalid, same as any other unrecognized value
@@ -488,13 +693,9 @@ tests:
       target: prod
       tokens.EMPTY_VAR.default: "x"
       tokens.EMPTY_VAR.targetContainer: ""
-      crossTargets:
-        - "prod"
-      crossTargetNames:
-        - "EMPTY_VAR"
     asserts:
       - equal:
-          path: crossResolved.prod.EMPTY_VAR.targetContainer
+          path: tokens.EMPTY_VAR.targetContainer
           value: "none"
       - matchRegex:
           path: diag.errors[0]
@@ -515,7 +716,7 @@ tests:
           path: crossResolved.prod.DB_HOST.value
           value: "db1.internal"
       - equal:
-          path: crossResolved.prod.DB_HOST.targetContainer
+          path: tokens.DB_HOST.targetContainer
           value: "main"
 
   # --- merge / naming-convention / collision diagnostics ---
@@ -534,6 +735,31 @@ tests:
           path: diag.warnings[0]
           value: "token 'API_GROUP' is reserved by the library and was overridden back to the library value"
 
+  - it: "a system (locked) token can declare a structural value — same recursive substitution as any token, and it still can't be overridden by the user"
+    set:
+      target: prod
+      tokens.DB_HOST: "db.internal"
+      system.CONFIG:
+        default:
+          host: "@DB_HOST@"
+          locked: true
+      tokens.CONFIG:
+        default:
+          host: "hijacked"
+      crossTargets:
+        - "prod"
+      crossTargetNames:
+        - "CONFIG"
+    asserts:
+      - equal:
+          path: crossResolved.prod.CONFIG.value
+          value:
+            host: "db.internal"
+            locked: true
+      - equal:
+          path: diag.warnings[0]
+          value: "token 'CONFIG' is reserved by the library and was overridden back to the library value"
+
   - it: a default token can be overridden by the user with no diagnostic
     set:
       target: prod-01
@@ -544,6 +770,31 @@ tests:
       - equal:
           path: structure.level
           value: "debug"
+      - lengthEqual:
+          path: diag.warnings
+          count: 0
+      - lengthEqual:
+          path: diag.errors
+          count: 0
+
+  - it: "a default token's structural value can be overridden by the user's own structural value, with no diagnostic"
+    set:
+      target: prod
+      defaults.CONFIG:
+        default:
+          host: "default-host"
+      tokens.CONFIG:
+        default:
+          host: "user-host"
+      crossTargets:
+        - "prod"
+      crossTargetNames:
+        - "CONFIG"
+    asserts:
+      - equal:
+          path: crossResolved.prod.CONFIG.value
+          value:
+            host: "user-host"
       - lengthEqual:
           path: diag.warnings
           count: 0
@@ -611,9 +862,9 @@ tests:
           path: diag.warnings[0]
           pattern: "'apiGroup' should be UPPER_SNAKE_CASE"
 
-  # --- crdkit.addToken ---
+  # --- crdkit.token.add ---
 
-  - it: "crdkit.addToken against an existing scalar-normalized token ('default') MERGES a new dedicated attribute in, preserving 'default' as the fallback for every other target"
+  - it: "crdkit.token.add against an existing scalar-normalized token ('default') MERGES a new dedicated attribute in, preserving 'default' as the fallback for every other target"
     set:
       target: prod-01
       tokens.EXISTING: "was-a-plain-scalar"
@@ -622,7 +873,7 @@ tests:
           value: "now-dedicated-for-prod-01"
     asserts:
       # "default" (what "was-a-plain-scalar" got normalized into) is an
-      # ORDINARY target entry, not a reserved key — addToken preserves
+      # ORDINARY target entry, not a reserved key — token.add preserves
       # it exactly like it would any other existing target entry, no
       # special-casing needed.
       - equal:
@@ -632,7 +883,7 @@ tests:
             prod-01: "now-dedicated-for-prod-01"
             targetContainer: "none"
 
-  - it: "crdkit.addToken stores 'value' as a DEDICATED ATTRIBUTE (a literal key equal to the exact target) — not resolved at add-time"
+  - it: "crdkit.token.add stores 'value' as a DEDICATED ATTRIBUTE (a literal key equal to the exact target) — not resolved at add-time"
     set:
       target: prod-01
       tokens.GREETING: "hello"
@@ -640,8 +891,8 @@ tests:
         - name: DERIVED_VAR
           value: "prefix-@GREETING@"
     asserts:
-      # raw declaration right after addToken runs — no structure/crossTargets
-      # reference anywhere in this test, so this is purely what addToken
+      # raw declaration right after token.add runs — no structure/crossTargets
+      # reference anywhere in this test, so this is purely what token.add
       # itself wrote, still carrying the unresolved "@GREETING@" marker.
       # targetContainer is always set (defaulting to "none"), flat
       # alongside the target entry — no "value" wrapper anymore.
@@ -651,7 +902,7 @@ tests:
             prod-01: "prefix-@GREETING@"
             targetContainer: "none"
 
-  - it: an addToken-added token resolves lazily via its dedicated attribute, exactly like any hand-declared token, once actually referenced
+  - it: a token.add-added token resolves lazily via its dedicated attribute, exactly like any hand-declared token, once actually referenced
     set:
       target: prod-01
       tokens.GREETING: "hello"
@@ -664,7 +915,7 @@ tests:
           path: structure.x
           value: "prefix-hello"
 
-  - it: an addToken-added token has no fallback for a target it was never given a value for, and no parentTargetMap configured
+  - it: a token.add-added token has no fallback for a target it was never given a value for, and no parentTargetMap configured
     set:
       target: prod-01
       tokenOps:
@@ -679,7 +930,7 @@ tests:
           path: diag.errors[0]
           value: "no value found for 'DERIVED_VAR' — target chain exhausted at 'qa' starting from 'qa'"
 
-  - it: "a second crdkit.addToken call for the SAME name but a DIFFERENT target adds another dedicated attribute, preserving the first"
+  - it: "a second crdkit.token.add call for the SAME name but a DIFFERENT target adds another dedicated attribute, preserving the first"
     set:
       target: prod-01
       tokenOps:
@@ -697,7 +948,7 @@ tests:
             qa: "qa-value"
             targetContainer: "none"
 
-  - it: "a second crdkit.addToken call for the SAME (name, target) pair overwrites in place"
+  - it: "a second crdkit.token.add call for the SAME (name, target) pair overwrites in place"
     set:
       target: prod-01
       tokenOps:
@@ -714,7 +965,7 @@ tests:
             prod-01: "second-value"
             targetContainer: "none"
 
-  - it: "a second crdkit.addToken call that omits targetContainer INHERITS the one set by an earlier call, rather than resetting it to 'none'"
+  - it: "a second crdkit.token.add call that omits targetContainer INHERITS the one set by an earlier call, rather than resetting it to 'none'"
     set:
       target: prod-01
       tokenOps:
@@ -730,7 +981,7 @@ tests:
           path: tokens.DERIVED_VAR.targetContainer
           value: "main"
 
-  - it: "crdkit.addToken's value chain-resolves against the FINAL state of ctx.tokens — a value referencing a token added by a LATER addToken call still resolves"
+  - it: "crdkit.token.add's value chain-resolves against the FINAL state of ctx.tokens — a value referencing a token added by a LATER token.add call still resolves"
     set:
       target: prod-01
       tokenOps:
@@ -740,16 +991,16 @@ tests:
           value: "computed-later"
       structure.x: "@FIRST_VAR@"
     asserts:
-      # this is the whole reason addToken defers resolution instead of
+      # this is the whole reason token.add defers resolution instead of
       # resolving eagerly at its own call site — FIRST_VAR references a
-      # token that's only added by a SECOND, later addToken call. Both
+      # token that's only added by a SECOND, later token.add call. Both
       # calls insert raw declarations before anything is resolved, so by
       # the time "structure.x" actually triggers resolution, both exist.
       - equal:
           path: structure.x
           value: "uses-computed-later"
 
-  - it: "crdkit.addToken can silently overwrite an existing token, including a locked one — no protection, by design"
+  - it: "crdkit.token.add can silently overwrite an existing token, including a locked one — no protection, by design"
     set:
       target: prod-01
       system.API_GROUP: "locked.example.com"
@@ -757,16 +1008,16 @@ tests:
         - name: API_GROUP
           value: "overwritten-by-integration"
     asserts:
-      # addToken deliberately skips the reserved-name collision check
+      # token.add deliberately skips the reserved-name collision check
       # (see crdkit's CLAUDE.md: integrations are trusted, unlike
       # consumer input) — crdkit.render's OWN post-chain reassertion is
       # what actually protects "system" tokens end-to-end in the real
-      # pipeline; this harness calls addToken directly, without that
+      # pipeline; this harness calls token.add directly, without that
       # reassertion step, so the overwrite is visible here. API_GROUP's
       # existing bare-scalar declaration was already normalized into
-      # {default: "locked.example.com"} by crdkit.mergeTokens.internal
-      # before addToken ever runs — "default" is an ORDINARY target
-      # entry (not reserved), so addToken merges the new dedicated
+      # {default: "locked.example.com"} by crdkit.tokens.merge.internal
+      # before token.add ever runs — "default" is an ORDINARY target
+      # entry (not reserved), so token.add merges the new dedicated
       # attribute in alongside it rather than replacing it outright; a
       # target OTHER than "prod-01" would still fall back to the
       # "overwritten" library's original value via "default".
@@ -777,7 +1028,7 @@ tests:
             prod-01: "overwritten-by-integration"
             targetContainer: "none"
 
-  - it: crdkit.addToken warns on a non-conforming name and validates targetContainer the same as any other token
+  - it: "crdkit.token.add warns on a non-conforming name but does NOT validate targetContainer — its caller is trusted, first-party code"
     set:
       target: prod-01
       tokenOps:
@@ -785,12 +1036,15 @@ tests:
           value: "computed"
           targetContainer: "bogus"
     asserts:
+      # unlike a hand-declared token (validated eagerly at merge time,
+      # see crdkit.tokens.merge.internal), token.add trusts its caller —
+      # an invalid targetContainer here is stored as-is, no ERROR.
       - equal:
           path: tokens.derivedVar.targetContainer
-          value: "none"
+          value: "bogus"
       - matchRegex:
           path: diag.warnings[0]
           pattern: "UPPER_SNAKE_CASE"
-      - matchRegex:
-          path: diag.errors[0]
-          pattern: "invalid targetContainer 'bogus'"
+      - lengthEqual:
+          path: diag.errors
+          count: 0
