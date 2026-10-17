@@ -140,19 +140,18 @@ Scope: internal
 Interface:
 - Params (dict): { "annotations": <list of strings>, "diag": <dict> }
 - Returns YAML: { "value": <list of reserved key names> }
-- Computes the complete list of reserved (non-entry) keys: the built-in
-  crdkit-internal ones (_value, _gen, _generated, match), plus any
-  annotation name that collides with a built-in. Annotations with
-  collision names are dropped with ERROR.
+- Computes the complete list of reserved (non-entry) keys: built-in
+  crdkit keys (_value, _gen, _generated, match) plus every annotation
+  name that does NOT collide; colliding annotation names are dropped
+  with an ERROR.
 */}}
 {{- define "crdkit.reservedKeys.internal" -}}
 {{- $annotations := .annotations | default (list) -}}
 {{- $diag := .diag -}}
-{{- $builtins := list "_value" "_gen" "_generated" "match" "default" -}}
-{{- $result := list -}}
-{{- $result = concat $result $builtins -}}
+{{- $collisionCheck := list "_value" "_gen" "_generated" "match" "default" -}}
+{{- $result := list "_value" "_gen" "_generated" "match" -}}
 {{- range $annot := $annotations -}}
-  {{- if has $annot $builtins -}}
+  {{- if has $annot $collisionCheck -}}
     {{- $_ := set $diag "errors" (append $diag.errors (printf "annotation name '%s' collides with a crdkit-reserved key and was ignored" $annot)) -}}
   {{- else -}}
     {{- $result = append $result $annot -}}
@@ -278,7 +277,7 @@ Implementation notes:
 {{- $parentTargetTemplate := .parentTargetTemplate -}}
 {{- $root := .root -}}
 {{- $resolving := .resolving | default (list) -}}
-{{- $reservedKeys := .reservedKeys | default (list "_value" "_gen" "_generated" "match" "default") -}}
+{{- $reservedKeys := .reservedKeys | default (list "_value" "_gen" "_generated" "match") -}}
 
 {{- $isDict := kindIs "map" $raw -}}
 
@@ -712,8 +711,8 @@ Implementation notes:
   same target → overwrite. Annotations are merged (new keys and
   overwrites present in both). Internal keys (_value, _gen, _generated)
   are always dropped on write.
-- Bumps ctx.gen to invalidate resolution caches (see "Cache z generacją"
-  in crdkit.resolveEntry.internal).
+- Bumps ctx.gen to invalidate resolution caches — resolveEntry.internal
+  checks _gen against the current generation to detect stale cache.
 - Skips the reserved-name collision check
   (crdkit.tokens.merge.internal's) — that protects against untrusted
   consumer input; crdkit.token.add callers are trusted, first-party
@@ -723,7 +722,10 @@ Implementation notes:
 {{- $ctx := index . 0 -}}
 {{- $name := index . 1 -}}
 {{- $value := index . 2 -}}
-{{- $rawAnnotations := index . 3 | default nil -}}
+{{- $rawAnnotations := "" -}}
+{{- if gt (len .) 3 -}}
+  {{- $rawAnnotations = index . 3 -}}
+{{- end -}}
 {{- $target := $ctx.target -}}
 {{- if and (gt (len .) 4) (index . 4) -}}
   {{- $target = index . 4 -}}
@@ -742,7 +744,7 @@ Implementation notes:
 {{- if hasKey $tokens $name -}}
   {{- $existing := index $tokens $name -}}
   {{- if kindIs "map" $existing -}}
-    {{- $decl = omit $existing "_value" "_gen" "_generated" -}}
+    {{- $decl = omit $existing "_value" "_gen" -}}
   {{- end -}}
 {{- end -}}
 

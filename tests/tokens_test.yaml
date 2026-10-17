@@ -882,7 +882,7 @@ tests:
           value:
             prod-01: "second-value"
 
-  - it: "a second crdkit.token.add call with annotations merges them over existing ones, adding only absent keys"
+  - it: "a second crdkit.token.add call with annotations overwrites existing annotation keys and adds new ones"
     set:
       target: prod-01
       tokenOps:
@@ -896,12 +896,17 @@ tests:
           annotations:
             owner: "team-b"
           target: "qa"
+        - name: DERIVED_VAR
+          value: "prod-value-2"
+          annotations:
+            exposure: "side-car"
+          target: "prod-01"
     asserts:
       - equal:
           path: tokens.DERIVED_VAR
           value:
-            prod-01: "prod-value"
-            exposure: "main"
+            prod-01: "prod-value-2"
+            exposure: "side-car"
             qa: "qa-value"
             owner: "team-b"
 
@@ -973,6 +978,91 @@ tests:
       - lengthEqual:
           path: diag.errors
           count: 1
+
+  # --- C3: system declaration replaces consumer declaration ---
+
+  - it: "system token replaces consumer token wholesale; collision warning still fires"
+    set:
+      target: prod
+      system:
+        X:
+          default: "locked"
+      tokens:
+        X:
+          prod: "hijack"
+      structure.v: "@X@"
+    asserts:
+      - equal:
+          path: structure.v
+          value: "locked"
+      - matchRegex:
+          path: diag.warnings[0]
+          pattern: "token 'X' is reserved by the library"
+
+  - it: "system token declaration replaces consumer completely, not a deep merge"
+    set:
+      target: prod
+      system:
+        X:
+          default: "locked"
+          PROD: "p"
+      tokens:
+        X:
+          default: "u"
+    asserts:
+      - equal:
+          path: tokens.X
+          value:
+            default: "locked"
+            PROD: "p"
+
+  - it: "defaults deep-merge with user tokens; both keys preserved"
+    set:
+      target: prod
+      defaults:
+        Y:
+          default: "d"
+      tokens:
+        Y:
+          prod: "u"
+    asserts:
+      - equal:
+          path: tokens.Y
+          value:
+            default: "d"
+            prod: "u"
+
+  # --- C5: annotations on defaults and generic behavior ---
+
+  - it: "token with only default value renders correctly via fallback"
+    set:
+      target: prod-01
+      parentTargetMap:
+        prod-01: "PROD"
+        PROD: default
+      tokens:
+        DEFAULT:
+          default: "default value"
+      structure:
+        value_of_default: "@DEFAULT@"
+    asserts:
+      - equal:
+          path: structure.value_of_default
+          value: "default value"
+
+  - it: "annotation on a defaults token is preserved after merge"
+    set:
+      target: prod
+      annotations:
+        - "exposure"
+      defaults:
+        Y:
+          default: "d"
+          exposure: "x"
+    asserts:
+      - equal:
+          path: tokens.Y.exposure
+          value: "x"
 
   - it: "tokenOps 'resolve' records the value resolved at that point in the op sequence"
     set:
