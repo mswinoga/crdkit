@@ -1323,3 +1323,85 @@ tests:
       - equal:
           path: tokenDefs.D._value.prod-01
           value: "d-new"
+
+  # --- crdkit-internal keys in declarations are stripped at merge ---
+
+  - it: "a user declaration with '_generated' loses the key, warns, and still resolves"
+    set:
+      target: prod-01
+      tokens:
+        X:
+          default: "d"
+          _generated:
+            prod-01: "injected"
+      structure:
+        v: "@X@"
+    asserts:
+      - notExists:
+          path: tokens.X._generated
+      - contains:
+          path: diag.warnings
+          content: "token 'X' declares crdkit-internal key '_generated'; it was removed"
+      - equal:
+          path: structure.v
+          value: "d"
+
+  - it: "a defaults declaration with '_value' loses the key, warns, and the poisoned cache is never served"
+    set:
+      target: prod-01
+      defaults:
+        X:
+          default: "d"
+          _value:
+            prod-01: "poisoned"
+      structure:
+        v: "@X@"
+    asserts:
+      - contains:
+          path: diag.warnings
+          content: "token 'X' declares crdkit-internal key '_value'; it was removed"
+      - equal:
+          path: structure.v
+          value: "d"
+
+  - it: "a system declaration with '_gen' loses the key, warns, and still resolves"
+    set:
+      target: prod-01
+      system:
+        X:
+          default: "locked"
+          _gen: 99
+      structure:
+        v: "@X@"
+    asserts:
+      - contains:
+          path: diag.warnings
+          content: "token 'X' declares crdkit-internal key '_gen'; it was removed"
+      - equal:
+          path: structure.v
+          value: "locked"
+      - equal:
+          path: tokens.X._gen
+          value: 0
+
+  - it: "every internal key present is reported separately, and the declaration keeps its other keys"
+    set:
+      target: prod-01
+      tokens:
+        X:
+          default: "d"
+          _value: {}
+          _gen: 5
+          _generated: {}
+          exposure: "e"
+      annotations:
+        - "exposure"
+    asserts:
+      - lengthEqual:
+          path: diag.warnings
+          count: 3
+      - equal:
+          path: tokens.X
+          value:
+            default: "d"
+            exposure: "e"

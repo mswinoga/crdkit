@@ -219,15 +219,16 @@ Implementation notes:
   {{- end -}}
 {{- end -}}
 
-{{- range $name, $raw := $merged -}}
-  {{- if kindIs "map" $raw -}}
-    {{- range $key := (list "_value" "_gen" "_generated") -}}
-      {{- if hasKey $raw $key -}}
-        {{- $_ := set $diag "warnings" (append $diag.warnings (printf "token '%s' declares crdkit-internal key '%s'; it was removed" $name $key)) -}}
-        {{- $_ := set $raw (omit $raw $key) -}}
-      {{- end -}}
+{{/* internal keys are crdkit-managed; strip on a copy so the caller's input maps are never mutated. */}}
+{{- range $name := keys $merged -}}
+  {{- $decl := index $merged $name -}}
+  {{- range $key := (list "_value" "_gen" "_generated") -}}
+    {{- if hasKey $decl $key -}}
+      {{- $_ := set $diag "warnings" (append $diag.warnings (printf "token '%s' declares crdkit-internal key '%s'; it was removed" $name $key)) -}}
+      {{- $decl = omit $decl $key -}}
     {{- end -}}
   {{- end -}}
+  {{- $_ := set $merged $name $decl -}}
 {{- end -}}
 
 {{- $merged | toYaml -}}
