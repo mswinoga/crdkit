@@ -1,7 +1,5 @@
 {{/*
-Name: crdkit.renderDiagnostics.internal
-
-Scope: internal
+crdkit.renderDiagnostics.internal (internal)
 
 Emits accumulated diagnostics — downstream tooling greps for these exact
 prefixes, so don't reformat them.

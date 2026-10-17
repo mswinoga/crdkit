@@ -1,7 +1,5 @@
 {{/*
-Name: crdkit.integrations.chain
-
-Scope: public
+crdkit.integrations.chain (public)
 
 Calls each template in "chain", in order, passing `ctx` directly — the
 dispatcher for a specific library's "integration" templates.

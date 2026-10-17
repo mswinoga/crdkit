@@ -1,7 +1,5 @@
 {{/*
-Name: crdkit.ensureDictKey
-
-Scope: public
+crdkit.ensureDictKey (public)
 
 Ensures $model has "key" set, initializing it to "default" if absent.
 
@@ -31,9 +29,7 @@ Implementation notes:
 {{- end -}}
 
 {{/*
-Name: crdkit.dictMerge
-
-Scope: public
+crdkit.dictMerge (public)
 
 Walks a multi-level path from $model, creating an empty dict at each
 missing level, then merges "value" into the dict at the end of the path
@@ -78,9 +74,7 @@ Implementation notes:
 {{- end -}}
 
 {{/*
-Name: crdkit.listExtend
-
-Scope: public
+crdkit.listExtend (public)
 
 Same as crdkit.dictMerge, but the final path segment is ensured to be a
 LIST, and "value" is appended via `concat`.

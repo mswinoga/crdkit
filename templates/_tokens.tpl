@@ -1,6 +1,4 @@
 {{/*
-Name: crdkit.matchRules
-
 All token resolution logic — scope (public/internal) is declared per
 template below, not uniformly for the file. Product-specific token
 content (locked/default keys, values) is never referenced by name —
@@ -105,7 +103,7 @@ crdkit.tokenDef.value — it deliberately isn't namespaced under either.
 */}}
 
 {{/*
-Scope: public
+crdkit.matchRules (public)
 
 Evaluates a target-escalation-style regex rule list against a subject
 string; first match wins.
@@ -145,9 +143,7 @@ value: {{ $result | quote }}
 {{- end -}}
 
 {{/*
-Name: crdkit.noParentTarget
-
-Scope: public
+crdkit.noParentTarget (public)
 
 Default "parentTarget" template when a caller supplies none — no
 escalation beyond the exact target.
@@ -161,9 +157,7 @@ Interface:
 {{- end -}}
 
 {{/*
-Name: crdkit.reservedKeys.internal
-
-Scope: internal
+crdkit.reservedKeys.internal (internal)
 
 Computes the complete list of reserved (non-entry) keys: built-in crdkit
 keys (_value, _gen, _generated, match) plus every annotation name that
@@ -195,9 +189,7 @@ value: {{ $result | toYaml | nindent 2 }}
 {{- end -}}
 
 {{/*
-Name: crdkit.tokens.merge.internal
-
-Scope: internal
+crdkit.tokens.merge.internal (internal)
 
 Merges system/default/user token declarations; applies collision,
 internal-key and naming-convention diagnostics. Output becomes
@@ -276,9 +268,7 @@ Implementation notes:
 {{- end -}}
 
 {{/*
-Name: crdkit.resolveEntry.internal
-
-Scope: internal
+crdkit.resolveEntry.internal (internal)
 
 Runs the target-escalation ladder against "def", selects one entry, then
 recursively substitutes "@ref@" markers throughout it
@@ -459,9 +449,7 @@ value: {{ $resolvedValue | toYaml | nindent 2 }}
 {{- end -}}
 
 {{/*
-Name: crdkit.substituteStructure.internal
-
-Scope: internal
+crdkit.substituteStructure.internal (internal)
 
 Recursively walks "value": a string is substituted via
 crdkit.substituteText.internal; a map/list is walked entry-by-entry
@@ -521,9 +509,7 @@ value: {{ $value | toYaml | nindent 2 }}
 {{- end -}}
 
 {{/*
-Name: crdkit.substituteText.internal
-
-Scope: internal
+crdkit.substituteText.internal (internal)
 
 Substitutes "@ref@" markers within a single string leaf, for the SAME
 target as the value being substituted into.
@@ -576,9 +562,7 @@ Implementation notes:
 {{- end -}}
 
 {{/*
-Name: crdkit.stringify.internal
-
-Scope: internal
+crdkit.stringify.internal (internal)
 
 Coerces an already-resolved value for embedding into a text blob (a
 "@NAME@" marker's replacement, or a direct *.string entry point): a
@@ -615,9 +599,7 @@ ok: true
 {{- end -}}
 
 {{/*
-Name: crdkit.token.value
-
-Scope: public
+crdkit.token.value (public)
 
 Resolves a REAL token, registered under "name" in ctx.tokens.
 
@@ -662,9 +644,7 @@ value: ""
 {{- end -}}
 
 {{/*
-Name: crdkit.token.string
-
-Scope: public
+crdkit.token.string (public)
 
 Resolves a REAL token and coerces the result to text (see
 crdkit.stringify.internal) — for use outside the usual "@NAME@" marker
@@ -690,9 +670,7 @@ Implementation notes:
 {{- end -}}
 
 {{/*
-Name: crdkit.tokenDef.value
-
-Scope: public
+crdkit.tokenDef.value (public)
 
 Resolves an arbitrary structure using the exact same target- escalation
 rules as a real token, without requiring it to be registered under a
@@ -727,9 +705,7 @@ Implementation notes:
 {{- end -}}
 
 {{/*
-Name: crdkit.tokenDef.string
-
-Scope: public
+crdkit.tokenDef.string (public)
 
 Resolves an arbitrary structure and coerces the result to text (see
 crdkit.stringify.internal).
@@ -756,9 +732,7 @@ Implementation notes:
 {{- end -}}
 
 {{/*
-Name: crdkit.tokens.substitute
-
-Scope: public
+crdkit.tokens.substitute (public)
 
 Replaces "@NAME@" markers in an arbitrary text block by resolving each
 referenced token on demand — this is what makes a token "used."
@@ -803,9 +777,7 @@ Implementation notes:
 {{- end -}}
 
 {{/*
-Name: crdkit.token.add
-
-Scope: public
+crdkit.token.add (public)
 
 Injects one derived token into a live tokens map — the crdkit.token.add
 counterpart to crdkit.dictMerge/listExtend for ctx.model.
@@ -885,9 +857,7 @@ Implementation notes:
 {{- end -}}
 
 {{/*
-Name: crdkit.token.underlay
-
-Scope: public
+crdkit.token.underlay (public)
 
 Registers a GENERATED value: the lowest-priority source for a token,
 consulted only after every consumer-declared source (exact target,

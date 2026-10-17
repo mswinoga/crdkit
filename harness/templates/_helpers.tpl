@@ -1,5 +1,5 @@
 {{/*
-Name: harness.parentTarget
+harness.parentTarget (internal)
 
 Test-only "parentTarget" implementation, playing the role a real
 specific library's own template would play (e.g. "mycrd.parentTarget")
@@ -11,8 +11,12 @@ at a time by crdkit's own resolution engine. A test that never sets
 parentTargetMap gets an empty map, so every lookup misses — no
 escalation at all, same as crdkit.noParentTarget.
 
-Expects a dict: { "target": <string, the current rung>, "context": <root $> } — the shape every "parentTarget" template receives.
+Interface:
+- Params (dict): { "target": <string, the current rung>, "context": <root $> }
+  — the shape every "parentTarget" template receives.
+- Returns: the next rung from `.Values.parentTargetMap`, or nothing.
 
+Implementation notes:
 GOTCHA, worth knowing before writing any OTHER "parentTarget" template:
 a bare `{{- index $map $target -}}` as a define block's trailing output,
 for a KEY THAT'S MISSING from a `map[string]interface{}`, renders as the

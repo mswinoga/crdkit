@@ -1,7 +1,5 @@
 {{/*
-Name: crdkit.render
-
-Scope: public
+crdkit.render (public)
 
 The engine's entry point. Product-specific input (tokens, chain,
 taxonomy) is supplied by the caller's own thin wrapper (e.g.

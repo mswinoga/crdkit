@@ -1,7 +1,5 @@
 {{/*
-Name: crdkit.standardLabels
-
-Scope: public
+crdkit.standardLabels (public)
 
 Standard labels computed from Helm's own context — not called
 automatically by crdkit.render; a specific library merges the result
