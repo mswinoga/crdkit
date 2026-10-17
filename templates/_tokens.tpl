@@ -520,6 +520,12 @@ Implementation notes:
   crdkit.resolveEntry.internal — this is the one caller that does a
   name-based lookup, so it's the one that can tell "unknown" apart from
   "declared but unresolvable."
+- Always needs `| fromYaml` then `.value` on the caller's side — unlike
+  crdkit.token.string, which needs neither. The wrapper is required
+  HERE because the resolved value can be any kind (string/dict/list/
+  bool/...), and Helm's `fromYaml` can only decode a top-level map;
+  crdkit.token.string skips it entirely because a plain string needs no
+  decoding at all.
 */}}
 {{- define "crdkit.token.value" -}}
 {{- $ctx := index . 0 -}}
