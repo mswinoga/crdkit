@@ -21,12 +21,28 @@ Token declaration shape (what a consumer/integration writes/reads on
 - A bare scalar (same value for every target) — crdkit.tokens.merge.internal
   normalizes it into `{default: <that>}` right after merging, so
   `ctx.tokens[NAME]` is ALWAYS a dict.
-- Reserved dict keys: "targetContainer", "_value" (memoization cache),
-  "match" (regex rules). "default" is NOT reserved — it's an ordinary
-  target entry that crdkit ALSO treats as a hardcoded fallback (see
-  crdkit.resolveEntry.internal). Every other key IS a target entry.
-- `targetContainer`, if declared, is validated once, eagerly, at merge
-  time (crdkit.tokens.merge.internal) — resolution never touches it.
+- Reserved dict keys (never target entries): the crdkit-internal keys
+  "_value" (memoization cache), "_gen" (generation the cache belongs to)
+  and "_generated" (values registered by crdkit.token.underlay), "match"
+  (regex rules), and every ANNOTATION name the calling library passes to
+  crdkit.render (crdkit.reservedKeys.internal). "default" is NOT
+  reserved — it's an ordinary target entry that crdkit ALSO treats as a
+  hardcoded fallback (see crdkit.resolveEntry.internal). Every other key
+  IS a target entry.
+- Annotations are static metadata on a declaration (e.g. an owner or an
+  exposure marker). crdkit never interprets their names or values and
+  never resolves them; a library reads them directly off
+  `ctx.tokens[NAME]`.
+- Internal keys written into a declaration by a consumer, defaults or
+  system are stripped at merge time with a WARNING
+  (crdkit.tokens.merge.internal).
+
+Cache generations: `ctx.gen` is a counter bumped by every
+crdkit.token.add / crdkit.token.underlay. A declaration's "_gen" records
+the generation its "_value" cache was written under; on a mismatch the
+cache is discarded wholesale before use (crdkit.resolveEntry.internal).
+The current generation travels as the "gen" param through every
+internal resolution template, like "reservedKeys".
 
 A resolved VALUE can itself be structural, not just a scalar: once the
 target-escalation ladder selects an entry, every STRING LEAF within it
@@ -54,6 +70,9 @@ diagnosed if something actually tries to resolve against it.
 
 Dependency graph (who calls whom):
 
+  crdkit.render (public) -> crdkit.reservedKeys.internal -> ctx.reservedKeys
+                         -> crdkit.tokens.merge.internal -> ctx.tokens
+
   crdkit.tokens.substitute (public)
     -> crdkit.token.value (public)
          -> crdkit.resolveEntry.internal
@@ -71,7 +90,8 @@ Dependency graph (who calls whom):
          -> crdkit.resolveEntry.internal (as above)
     -> crdkit.stringify.internal
 
-  crdkit.token.add (public) -- stores raw declarations only, no engine dependency
+  crdkit.token.add / crdkit.token.underlay (public) -- store raw
+    declarations only, no engine dependency; bump ctx.gen
 
 Three public "shapes": crdkit.token.* resolves a REAL, named token;
 crdkit.tokenDef.* resolves an arbitrary structure (e.g. sourced from
@@ -144,6 +164,12 @@ Interface:
   crdkit keys (_value, _gen, _generated, match) plus every annotation
   name that does NOT collide; colliding annotation names are dropped
   with an ERROR.
+
+Implementation notes:
+- An annotation named like a built-in key OR "default" collides:
+  "default" stays a target entry, so it can't also be an annotation.
+- The list is computed once per render (crdkit.render) and handed to
+  every resolution helper through ctx.reservedKeys.
 */}}
 {{- define "crdkit.reservedKeys.internal" -}}
 {{- $annotations := .annotations | default (list) -}}
@@ -167,8 +193,9 @@ Interface:
 - Params (dict): { "tokens": <raw user tokens, may be nil>, "diag":
   <dict>, "system": <dict>, "defaults": <dict> }
 - Returns YAML: merged raw declarations map (not resolved).
-- Merges system/default/user token declarations; applies collision +
-  naming-convention diagnostics. Output becomes ctx.tokens.
+- Merges system/default/user token declarations; applies collision,
+  internal-key and naming-convention diagnostics. Output becomes
+  ctx.tokens.
 
 Implementation notes:
 - Merge order: defaults deep-merge with user (user keys win), then
@@ -178,6 +205,9 @@ Implementation notes:
   user tokens, same treatment as a system-token collision.
 - Normalizes every scalar declaration into `{default: <value>}` — see
   the file-level doc comment.
+- Internal keys (`_value`, `_gen`, `_generated`) in any declaration are
+  removed from a copy, each with a WARNING naming the token and key —
+  only crdkit itself writes them.
 - Every final token name is checked against `^[A-Z][A-Z0-9_]*$` — a
   WARNING (not ERROR) on mismatch, applied uniformly including
   system/default names.
@@ -243,7 +273,9 @@ Interface:
   resolved value>, "target": <string>, "diag": <dict>,
   "parentTargetTemplate": <fully-qualified template name>, "root":
   <caller's root context>, "resolving": <list, internal cycle
-  detection> }
+  detection>, "reservedKeys": <list of non-entry key names, optional —
+  defaults to the built-in crdkit keys>, "gen": <current cache
+  generation, optional — defaults to 0> }
 - Returns YAML: { "value": <resolved string, or a dict/list with every
   string leaf's markers resolved> }
 - Runs the target-escalation ladder against "def", selects one entry,
@@ -252,13 +284,17 @@ Interface:
   crdkit.token.value (a real, named token) and crdkit.tokenDef.value
   (an arbitrary structure, resolved by the same rules without being
   registered in ctx.tokens). "fieldId" labels diagnostics only.
-  Memoized onto "def" itself under "_value", keyed by target.
+  Memoized onto "def" itself under "_value", keyed by target, valid for
+  one generation ("_gen").
 
 Implementation notes:
 - Resolution order:
-  1. exact-target `_value` cache hit.
-  2. dedicated attribute — a literal key (other than "targetContainer"/
-     "_value"/"match") equal to the target string exactly.
+  1. exact-target `_value` cache hit — valid only when the declaration's
+     `_gen` equals "gen" (compared via `toString`, robust to int/int64/
+     float64 after a YAML round-trip); on a mismatch `_value` is reset
+     to an empty dict and `_gen` set to "gen" first.
+  2. dedicated attribute — a literal key (other than a reserved key)
+     equal to the target string exactly.
   3. `match:` — regex rules tried once, against the exact target only
      (never retried at an escalated rung).
   4. walk `parentTargetTemplate` one rung at a time, checking a literal
@@ -270,12 +306,17 @@ Implementation notes:
      exhausted — regardless of taxonomy. Must run after the walk (not
      before), since "def" can have both a `default` entry and a
      taxonomy-reachable one, and the more specific value must win.
+  6. `_generated[<exact target>]` — values registered by
+     crdkit.token.underlay; lowest priority, so a consumer always wins,
+     even with its own `default`. Applies to the exact target only (never
+     to a rung) and is cached ONLY under `_value[<target>]`: rungs are
+     shared across targets, `_generated` is per target.
+  7. none of the above: the "no value found" ERROR.
 - A "def" that's a bare scalar (not a dict) has nowhere to attach a
   `_value` cache, so it's resolved fresh every call — cheap, since
   there's no ladder to walk.
-- `targetContainer` is never inspected here — validated eagerly at
-  merge time instead (crdkit.tokens.merge.internal); resolution doesn't
-  care about it at all.
+- Annotations are never inspected here beyond being excluded from the
+  target entries via "reservedKeys".
 - Guards one author mistake: no value found for the target — ERROR.
   "Unknown token referenced" is the caller's concern (see
   crdkit.token.value) — "def" is handed over already resolved-to-exist.
@@ -410,7 +451,8 @@ Interface:
 - Params (dict): { "value": <any>, "tokens": <live tokens map>,
   "target": <string>, "diag": <dict>, "parentTargetTemplate":
   <fully-qualified template name>, "root": <caller's root context>,
-  "resolving": <list of names in progress> }
+  "resolving": <list of names in progress>, "reservedKeys": <list>,
+  "gen": <int> }
 - Returns YAML: { "value": <"value", with every string leaf's "@ref@"
   markers substituted> }
 - Recursively walks "value": a string is substituted via
@@ -421,7 +463,7 @@ Interface:
 Implementation notes:
 - This is what lets a token's (or crdkit.tokenDef.value's "def") value
   be an arbitrary structure, not just a scalar — reserved keys
-  ("targetContainer"/"_value"/"match") only mean anything at the OUTER
+  (internal keys, "match", annotations) only mean anything at the OUTER
   declaration level inspected by crdkit.resolveEntry.internal; once a
   value is selected and handed here, every key is ordinary data.
 - No cycle risk from the structural recursion itself — it's finite
@@ -468,7 +510,8 @@ Interface:
 - Params (dict): { "text": <string>, "tokens": <live tokens map>,
   "target": <string>, "diag": <dict>, "parentTargetTemplate":
   <fully-qualified template name>, "root": <caller's root context>,
-  "resolving": <list of names in progress, non-empty> }
+  "resolving": <list of names in progress, non-empty>,
+  "reservedKeys": <list>, "gen": <int> }
 - Returns: text with every "@NAME@" reference substituted.
 - Substitutes "@ref@" markers within a single string leaf, for the
   SAME target as the value being substituted into.
@@ -553,7 +596,8 @@ Scope: public
 
 Interface:
 - Params (list): [ctx, name, target?]
-  - ctx: dict with "tokens"/"diag"/"parentTargetTemplate"/"target" keys
+  - ctx: dict with "tokens"/"diag"/"parentTargetTemplate"/"target"
+    keys, plus "reservedKeys" and "gen" (both optional)
   - name: token name to resolve
   - target: optional — defaults to ctx.target; pass explicitly only to
     resolve for a target OTHER than the render's own
@@ -621,7 +665,8 @@ Scope: public
 
 Interface:
 - Params (list): [ctx, fieldId, def, target?]
-  - ctx: dict with "tokens"/"diag"/"parentTargetTemplate"/"target" keys
+  - ctx: dict with "tokens"/"diag"/"parentTargetTemplate"/"target"
+    keys, plus "reservedKeys" and "gen" (both optional)
   - fieldId: label used in diagnostics — required, since "def" has no
     name of its own
   - def: a structure sourced from consumer Values, shaped like a token
@@ -747,8 +792,9 @@ Implementation notes:
   the chain.
 - A repeat call for an existing name MERGES: new target → new key;
   same target → overwrite. Annotations are merged (new keys and
-  overwrites present in both). Internal keys (_value, _gen, _generated)
-  are always dropped on write.
+  overwrites present in both). The cache keys (_value, _gen) are dropped
+  on write; _generated (see crdkit.token.underlay) is kept — an entry
+  added here for a target beats the generated value for that target.
 - Bumps ctx.gen to invalidate resolution caches — resolveEntry.internal
   checks _gen against the current generation to detect stale cache.
 - Skips the reserved-name collision check

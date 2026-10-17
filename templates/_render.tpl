@@ -16,9 +16,13 @@ Interface:
   - chain: ordered list of fully-qualified integration template names
     (head = outermost) — the ONLY thing that builds ctx.model
   - annotations: optional list of annotation names supplied by the
-    library; these become reserved keys alongside crdkit's built-in ones
-  - diag: optional {errors, warnings} seed; crdkit only transports its
-    entries and appends new diagnostics as they arise
+    library. Each becomes a reserved key (never a target entry) on token
+    declarations; crdkit stores annotations but never interprets or
+    resolves them. A name equal to a crdkit-internal key, "match" or
+    "default" records an ERROR and is ignored.
+  - diag: optional {errors, warnings} seed (missing lists are filled in
+    with empty ones); crdkit only transports the seeded entries and
+    appends new diagnostics as they arise, then emits them all
 - Returns: the rendered CR as YAML text, with diagnostics prepended as
   `# ERROR:`/`# WARNING:` comments.
 - The engine's entry point. Product-specific input (tokens, chain,
@@ -30,6 +34,10 @@ Implementation notes:
   ONLY step that populates ctx.model) -> one substitution pass over the
   whole model -> scan for unresolved "@word@" markers (possible typos)
   -> emit diagnostics + `{{ model | toYaml }}`.
+- ctx carries: root, diag, model, tokens, target, parentTargetTemplate,
+  reservedKeys (list) and gen (int, starts at 0; bumped by
+  crdkit.token.add / crdkit.token.underlay to invalidate resolution
+  caches).
 - Never reads `context.Values` itself, and has no opinion on
   apiVersion/kind/labels/spec — entirely the chain's responsibility via
   crdkit.dictMerge/listExtend/ensureDictKey.

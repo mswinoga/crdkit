@@ -30,6 +30,11 @@ dependencies:
 Everything product-specific, as an explicit dict param — see
 `templates/_render.tpl`'s doc comment for the full list:
 - `system`/`defaults` token dicts
+- `annotations`: list of annotation names the library attaches to token
+  declarations (optional; see "Token model")
+- `diag`: optional `{errors, warnings}` seed; crdkit appends to it and
+  emits everything (the library can record its own pre-render
+  diagnostics there)
 - `chain`: ordered list of fully-qualified integration template names
 - `parentTargetTemplate`: fully-qualified template name implementing the
   library's own target-escalation taxonomy (optional; defaults to no
@@ -43,7 +48,7 @@ first in the list). See "Building ctx.model" below.
 ## Integration chain
 
 Integrations receive a shared `ctx` (`root`/`diag`/`model`/`tokens`/
-`target`), mutated in place across the traversal.
+`target`/`reservedKeys`/`gen`), mutated in place across the traversal.
 
 - Visibility is order-dependent: a token/model field set partway
   through the chain is only visible to code running after that point
@@ -53,9 +58,12 @@ Integrations receive a shared `ctx` (`root`/`diag`/`model`/`tokens`/
   lazily, the same as a hand-declared token — not resolved at
   add-time, so it can reference a token another integration adds later
   in the chain.
-- Locked tokens are protected against a consumer's own `tokens:` map
-  (merged last in `crdkit.tokens.merge.internal`) — not against the
-  chain, which is trusted, first-party code.
+- `crdkit.token.underlay` registers a GENERATED value instead — lowest
+  priority, see "Generated values" below.
+- Locked ("system") tokens are protected against a consumer's own
+  `tokens:` map: a system declaration REPLACES a consumer declaration of
+  the same name wholesale (`crdkit.tokens.merge.internal`) — not against
+  the chain, which is trusted, first-party code.
 
 ## Building ctx.model
 
@@ -110,8 +118,15 @@ unresolved-marker check runs over the same text.
 Lazy, per-target, memoized. A token resolves (and is diagnosed, if
 malformed) only the first time something needs it — a `@NAME@` marker.
 Declared-but-unused tokens produce no diagnostic. Results cache onto
-the token's own declaration, so resolving the same token for a
-*different* target (e.g. `qap1` while rendering `qa`) is cheap.
+the token's own declaration (`_value`, keyed by target), so resolving
+the same token for a *different* target (e.g. `qap1` while rendering
+`qa`) is cheap.
+
+The cache is generation-stamped: `ctx.gen` is bumped by every
+`crdkit.token.add` / `crdkit.token.underlay`, and a declaration's `_gen`
+records the generation its `_value` belongs to. A mismatch discards the
+cache before use, so a token resolved before a mutation is re-resolved
+afterwards — also for `crdkit.tokenDef.*` structures.
 
 A resolved value isn't limited to a scalar: it can be a dict/list too,
 with every string leaf recursively `@ref@`-substituted (non-string
@@ -156,8 +171,9 @@ crdkit.tokens.substitute
 All entry points take `ctx` first, `target` last and OPTIONAL — omit it
 (or pass `""`) to resolve for the current render's own `ctx.target`;
 pass it explicitly only to resolve for a target other than the one
-driving the render. `crdkit.token.add` follows the same convention:
-`(list $ctx "DERIVED_VAR" "computed-value" "main" $target)`.
+driving the render. `crdkit.token.add` and `crdkit.token.underlay`
+follow the same convention, with an optional annotations dict before
+`target`: `(list $ctx "DERIVED_VAR" "computed-value" (dict "owner" "svc") $target)`.
 
 ## Target escalation
 
@@ -165,7 +181,9 @@ driving the render. `crdkit.token.add` follows the same convention:
 dedicated attribute (literal key = exact target), a `match:` regex rule
 (tested once, against the exact target), or by walking the library's
 own `parentTargetTemplate` — repeating until a value is found or the
-template returns nothing.
+template returns nothing. After the walk, `default` is the fallback;
+after that, a generated value for the exact target (`_generated`, see
+"Generated values"); after that, the "no value found" diagnostic.
 
 ```gotemplate
 {{- define "mycrd.parentTarget" -}}
@@ -196,9 +214,12 @@ above).
 ## Token model
 
 - A token DECLARATION is a plain scalar (same value for every target) or
-  a dict. Reserved dict keys: `targetContainer`, `_value` (memoization
-  cache, internal), `match`. Every other key, including `default`, IS a
-  target entry.
+  a dict. Reserved dict keys (never target entries):
+  - crdkit-internal: `_value` (memoization cache), `_gen` (cache
+    generation), `_generated` (generated values)
+  - `match` (ordered regex rules)
+  - every annotation name passed to `crdkit.render`
+  Every other key, including `default`, IS a target entry.
 - Resolving a token (`crdkit.token.value`) returns a separate shape,
   `{value}` — the interpolated result for one name+target pair (a
   string, or a structure if the selected entry is itself one).
@@ -206,7 +227,7 @@ above).
 ```yaml
 tokens:
   DB_HOST:
-    targetContainer: main      # one of: main, side-car, both, none (default)
+    owner: payments            # an annotation (library passed annotations: [owner])
     default: "db.internal"     # goes through the normal dedicated-attribute/match/parentTarget resolution
 ```
 
@@ -214,19 +235,48 @@ tokens:
   directly regardless of taxonomy, even under `crdkit.noParentTarget`.
   A token with no `default` key that can't resolve for a target
   produces the ordinary "no value found" diagnostic, lazily.
-- crdkit doesn't create the env var itself. A resolved value reaches
-  `ctx.model` for free — an integration can write e.g. `variables: {DB_HOST:
-  "@DB_HOST@"}`, and it resolves in crdkit.render's single substitution
-  pass, same as any other model field. `targetContainer` isn't part of
-  that substitution; a library wanting it downstream reads it directly
-  off the token's declaration (`ctx.tokens.DB_HOST.targetContainer`).
-- `targetContainer` is validated eagerly, once, at merge time — for
-  EVERY token that declares one, regardless of whether it's ever
-  resolved. An invalid value records an `# ERROR:` and is corrected to
-  `"none"` in place; the token's value still resolves normally.
-  Resolution itself never looks at `targetContainer` at all.
+- Annotations are static metadata: crdkit stores them, never resolves
+  or validates them, and never knows their names. A library reads them
+  directly off the declaration (`ctx.tokens.DB_HOST.owner`) and owns
+  any policy (validation, locking). An annotation name equal to a
+  crdkit-internal key, `match` or `default` records an `# ERROR:` and
+  is ignored. A target equal to an annotation name is not a target
+  entry.
+- A resolved value reaches `ctx.model` for free — an integration can
+  write e.g. `variables: {DB_HOST: "@DB_HOST@"}`, and it resolves in
+  crdkit.render's single substitution pass, same as any other model
+  field.
+- Internal keys written in a consumer, defaults or system declaration
+  are removed at merge time with a `# WARNING:`.
 - Token names are expected to be `UPPER_SNAKE_CASE` — non-conforming
   names still work, but record a `# WARNING:`.
+
+### Adding tokens from an integration
+
+`(list $ctx name value annotations? target?)`, both `crdkit.token.add`
+and `crdkit.token.underlay`:
+
+- `crdkit.token.add` stores `value` as the entry for the exact target
+  and MERGES `annotations` over the declaration's existing ones (an
+  omitted key is inherited). Non-dict annotations record an `# ERROR:`;
+  the value is still stored.
+- `crdkit.token.underlay` stores `value` as a generated value (below)
+  and sets each annotation only when the declaration doesn't have it.
+  Creates the token if missing.
+
+### Generated values
+
+`crdkit.token.underlay` registers values in `_generated[<target>]`,
+the lowest-priority source: consulted only after the exact target,
+`match`, the parent walk and `default` all found nothing, so a consumer
+declaration always wins, including with its own `default`. A generated
+value applies to its exact target only and is cached under that target
+alone (parent-walk rungs are shared across targets). A second underlay
+for the same target overwrites the first.
+
+```gotemplate
+{{- include "crdkit.token.underlay" (list .ctx "DB_URL" "jdbc:@DB_HOST@" (dict "owner" "payments")) -}}
+```
 
 ## Local testing
 
