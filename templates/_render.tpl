@@ -60,7 +60,7 @@ Implementation notes:
 {{- $tokens := $tokensYaml | fromYaml -}}
 
 {{- $model := dict -}}
-{{- $ctx := dict "root" $root "diag" $diag "model" $model "tokens" $tokens "target" $target "parentTargetTemplate" $parentTargetTemplate "reservedKeys" $reservedKeys -}}
+{{- $ctx := dict "root" $root "diag" $diag "model" $model "tokens" $tokens "target" $target "parentTargetTemplate" $parentTargetTemplate "reservedKeys" $reservedKeys "gen" 0 -}}
 
 {{- include "crdkit.integrations.chain" (dict "chain" .chain "ctx" $ctx) -}}
 

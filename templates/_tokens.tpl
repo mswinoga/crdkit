@@ -686,18 +686,20 @@ Implementation notes:
 Scope: public
 
 Interface:
-- Params (list): [ctx, name, value, targetContainer, target?]
-  - ctx: dict with "tokens"/"diag"/"target" keys
+- Params (list): [ctx, name, value, annotations?, target?]
+  - ctx: dict with "tokens"/"diag"/"target"/"gen" keys
   - name: token name to add
   - value: raw value for this exact target (may contain "@ref@"
     markers, or be a structure — resolved lazily like any other value)
-  - targetContainer: main/side-car/both/none, optional (default "none")
-    — NOT validated here, unlike a hand-declared token (see
-    crdkit.tokens.merge.internal); crdkit.token.add callers are
-    trusted, first-party library code
+  - annotations: dict of annotation key-value pairs, optional — merged
+    over existing annotations (a key present in both uses the new value;
+    missing keys are inherited). Non-dict non-nil values record an ERROR
+    but do not prevent the value from being stored. crdkit.token.add
+    callers are trusted, first-party library code (no annotation values
+    are validated).
   - target: exact target string "value" applies to — optional, defaults
     to ctx.target
-- Returns: nothing (mutates ctx.tokens in place).
+- Returns: nothing (mutates ctx.tokens in place, bumps ctx.gen).
 - Injects one derived token into a live tokens map — the crdkit.token.add
   counterpart to crdkit.dictMerge/listExtend for ctx.model.
 
@@ -707,10 +709,11 @@ Implementation notes:
   so a value can reference a token another integration adds later in
   the chain.
 - A repeat call for an existing name MERGES: new target → new key;
-  same target → overwrite; omitted targetContainer → inherits the
-  prior one (not reset to "none"). If the existing declaration isn't a
-  dict, it's replaced outright.
-- Any existing "_value" cache is always dropped on write.
+  same target → overwrite. Annotations are merged (new keys and
+  overwrites present in both). Internal keys (_value, _gen, _generated)
+  are always dropped on write.
+- Bumps ctx.gen to invalidate resolution caches (see "Cache z generacją"
+  in crdkit.resolveEntry.internal).
 - Skips the reserved-name collision check
   (crdkit.tokens.merge.internal's) — that protects against untrusted
   consumer input; crdkit.token.add callers are trusted, first-party
@@ -720,7 +723,7 @@ Implementation notes:
 {{- $ctx := index . 0 -}}
 {{- $name := index . 1 -}}
 {{- $value := index . 2 -}}
-{{- $rawTargetContainer := index . 3 -}}
+{{- $rawAnnotations := index . 3 | default nil -}}
 {{- $target := $ctx.target -}}
 {{- if and (gt (len .) 4) (index . 4) -}}
   {{- $target = index . 4 -}}
@@ -731,21 +734,25 @@ Implementation notes:
   {{- $_ := set $diag "warnings" (append $diag.warnings (printf "token name '%s' should be UPPER_SNAKE_CASE for readability" $name)) -}}
 {{- end -}}
 
+{{- if and $rawAnnotations (not (kindIs "map" $rawAnnotations)) -}}
+  {{- $_ := set $diag "errors" (append $diag.errors (printf "crdkit.token.add for '%s': annotations must be a dict — ignored" $name)) -}}
+{{- end -}}
+
 {{- $decl := dict -}}
-{{- $existingTargetContainer := "" -}}
 {{- if hasKey $tokens $name -}}
   {{- $existing := index $tokens $name -}}
   {{- if kindIs "map" $existing -}}
-    {{- $decl = omit $existing "_value" "targetContainer" -}}
-    {{- if hasKey $existing "targetContainer" -}}
-      {{- $existingTargetContainer = $existing.targetContainer -}}
-    {{- end -}}
+    {{- $decl = omit $existing "_value" "_gen" "_generated" -}}
   {{- end -}}
 {{- end -}}
 
-{{- $targetContainer := $rawTargetContainer | default $existingTargetContainer | default "none" -}}
+{{- if and $rawAnnotations (kindIs "map" $rawAnnotations) -}}
+  {{- range $k, $v := $rawAnnotations -}}
+    {{- $_ := set $decl $k $v -}}
+  {{- end -}}
+{{- end -}}
 
 {{- $_ := set $decl $target $value -}}
-{{- $_ := set $decl "targetContainer" $targetContainer -}}
+{{- $_ := set $ctx "gen" (add1 $ctx.gen) -}}
 {{- $_ := set $tokens $name $decl -}}
 {{- end -}}

@@ -84,12 +84,12 @@ substituted "structure" text.
       "defaults" (.Values.defaults | default dict)) | fromYaml -}}
 
 {{- $model := dict -}}
-{{- $ctx := dict "root" $ "diag" $diag "model" $model "tokens" $tokens "target" $target "parentTargetTemplate" "harness.parentTarget" "reservedKeys" $reservedKeys -}}
+{{- $ctx := dict "root" $ "diag" $diag "model" $model "tokens" $tokens "target" $target "parentTargetTemplate" "harness.parentTarget" "reservedKeys" $reservedKeys "gen" 0 -}}
 
 {{- $opsResolved := list -}}
 {{- range $op := .Values.tokenOps | default (list) -}}
   {{- if or (eq ($op.op | default "add") "add") (not $op.op) -}}
-    {{- $_ := include "crdkit.token.add" (list $ctx $op.name $op.value $op.targetContainer ($op.target | default $target)) -}}
+    {{- $_ := include "crdkit.token.add" (list $ctx $op.name $op.value $op.annotations ($op.target | default $target)) -}}
   {{- else if eq $op.op "resolve" -}}
     {{- $opTarget := $op.target | default $target -}}
     {{- $r := include "crdkit.token.value" (list $ctx $op.name $opTarget) | fromYaml -}}

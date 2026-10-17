@@ -32,7 +32,6 @@ tests:
     set:
       target: some-unrecognized-target-with-no-taxonomy-hop-at-all
       tokens.DB_HOST.default: "db.internal"
-      tokens.DB_HOST.targetContainer: "main"
       crossTargets:
         - "some-unrecognized-target-with-no-taxonomy-hop-at-all"
       crossTargetNames:
@@ -805,7 +804,6 @@ tests:
           value:
             default: "was-a-plain-scalar"
             prod-01: "now-dedicated-for-prod-01"
-            targetContainer: "none"
 
   - it: "crdkit.token.add stores 'value' as a DEDICATED ATTRIBUTE (a literal key equal to the exact target) — not resolved at add-time"
     set:
@@ -818,13 +816,10 @@ tests:
       # raw declaration right after token.add runs — no structure/crossTargets
       # reference anywhere in this test, so this is purely what token.add
       # itself wrote, still carrying the unresolved "@GREETING@" marker.
-      # targetContainer is always set (defaulting to "none"), flat
-      # alongside the target entry — no "value" wrapper anymore.
       - equal:
           path: tokens.DERIVED_VAR
           value:
             prod-01: "prefix-@GREETING@"
-            targetContainer: "none"
 
   - it: a token.add-added token resolves lazily via its dedicated attribute, exactly like any hand-declared token, once actually referenced
     set:
@@ -870,7 +865,6 @@ tests:
           value:
             prod-01: "prod-value"
             qa: "qa-value"
-            targetContainer: "none"
 
   - it: "a second crdkit.token.add call for the SAME (name, target) pair overwrites in place"
     set:
@@ -887,23 +881,29 @@ tests:
           path: tokens.DERIVED_VAR
           value:
             prod-01: "second-value"
-            targetContainer: "none"
 
-  - it: "a second crdkit.token.add call that omits targetContainer INHERITS the one set by an earlier call, rather than resetting it to 'none'"
+  - it: "a second crdkit.token.add call with annotations merges them over existing ones, adding only absent keys"
     set:
       target: prod-01
       tokenOps:
         - name: DERIVED_VAR
           value: "prod-value"
-          targetContainer: "main"
+          annotations:
+            exposure: "main"
           target: "prod-01"
         - name: DERIVED_VAR
           value: "qa-value"
+          annotations:
+            owner: "team-b"
           target: "qa"
     asserts:
       - equal:
-          path: tokens.DERIVED_VAR.targetContainer
-          value: "main"
+          path: tokens.DERIVED_VAR
+          value:
+            prod-01: "prod-value"
+            exposure: "main"
+            qa: "qa-value"
+            owner: "team-b"
 
   - it: "crdkit.token.add's value chain-resolves against the FINAL state of ctx.tokens — a value referencing a token added by a LATER token.add call still resolves"
     set:
@@ -950,28 +950,29 @@ tests:
           value:
             default: "locked.example.com"
             prod-01: "overwritten-by-integration"
-            targetContainer: "none"
 
-  - it: "crdkit.token.add warns on a non-conforming name but does NOT validate targetContainer — its caller is trusted, first-party code"
+  - it: "crdkit.token.add warns on a non-conforming name and errors if annotations is not a dict"
     set:
       target: prod-01
       tokenOps:
         - name: derivedVar
           value: "computed"
-          targetContainer: "bogus"
+          annotations: "main"
     asserts:
-      # unlike a hand-declared token (validated eagerly at merge time,
-      # see crdkit.tokens.merge.internal), token.add trusts its caller —
-      # an invalid targetContainer here is stored as-is, no ERROR.
+      # token.add validates that annotations (if provided) is a dict;
+      # a string is rejected with an ERROR, but the value is still stored.
       - equal:
-          path: tokens.derivedVar.targetContainer
-          value: "bogus"
+          path: tokens.derivedVar.prod-01
+          value: "computed"
       - matchRegex:
           path: diag.warnings[0]
           pattern: "UPPER_SNAKE_CASE"
+      - matchRegex:
+          path: diag.errors[0]
+          pattern: "annotations must be a dict"
       - lengthEqual:
           path: diag.errors
-          count: 0
+          count: 1
 
   - it: "tokenOps 'resolve' records the value resolved at that point in the op sequence"
     set:
