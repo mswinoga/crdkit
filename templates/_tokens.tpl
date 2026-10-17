@@ -138,6 +138,33 @@ Interface:
 Scope: internal
 
 Interface:
+- Params (dict): { "annotations": <list of strings>, "diag": <dict> }
+- Returns YAML: { "value": <list of reserved key names> }
+- Computes the complete list of reserved (non-entry) keys: the built-in
+  crdkit-internal ones (_value, _gen, _generated, match), plus any
+  annotation name that collides with a built-in. Annotations with
+  collision names are dropped with ERROR.
+*/}}
+{{- define "crdkit.reservedKeys.internal" -}}
+{{- $annotations := .annotations | default (list) -}}
+{{- $diag := .diag -}}
+{{- $builtins := list "_value" "_gen" "_generated" "match" "default" -}}
+{{- $result := list -}}
+{{- $result = concat $result $builtins -}}
+{{- range $annot := $annotations -}}
+  {{- if has $annot $builtins -}}
+    {{- $_ := set $diag "errors" (append $diag.errors (printf "annotation name '%s' collides with a crdkit-reserved key and was ignored" $annot)) -}}
+  {{- else -}}
+    {{- $result = append $result $annot -}}
+  {{- end -}}
+{{- end -}}
+value: {{ $result | toYaml }}
+{{- end -}}
+
+{{/*
+Scope: internal
+
+Interface:
 - Params (dict): { "tokens": <raw user tokens, may be nil>, "diag":
   <dict>, "system": <dict>, "defaults": <dict> }
 - Returns YAML: merged raw declarations map (not resolved).
@@ -269,7 +296,7 @@ Implementation notes:
 {{- $parentTargetTemplate := .parentTargetTemplate -}}
 {{- $root := .root -}}
 {{- $resolving := .resolving | default (list) -}}
-{{- $reservedKeys := list "targetContainer" "_value" "match" -}}
+{{- $reservedKeys := .reservedKeys | default (list "_value" "_gen" "_generated" "match" "default") -}}
 
 {{- $isDict := kindIs "map" $raw -}}
 
@@ -349,7 +376,7 @@ value: {{ index $cache $target | toYaml | nindent 2 }}
     {{- end -}}
   {{- end -}}
 
-  {{- $substituted := include "crdkit.substituteStructure.internal" (dict "value" $rawValue "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" (append $resolving $fieldId)) | fromYaml -}}
+  {{- $substituted := include "crdkit.substituteStructure.internal" (dict "value" $rawValue "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" (append $resolving $fieldId) "reservedKeys" $reservedKeys) | fromYaml -}}
   {{- $resolvedValue := $substituted.value -}}
   {{- if $cacheable -}}
     {{- range $rung := $rungsWalked -}}
@@ -394,20 +421,21 @@ Implementation notes:
 {{- $parentTargetTemplate := .parentTargetTemplate -}}
 {{- $root := .root -}}
 {{- $resolving := .resolving -}}
+{{- $reservedKeys := .reservedKeys -}}
 {{- if kindIs "string" $value -}}
-  {{- $substituted := include "crdkit.substituteText.internal" (dict "text" $value "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" $resolving) -}}
+  {{- $substituted := include "crdkit.substituteText.internal" (dict "text" $value "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" $resolving "reservedKeys" $reservedKeys) -}}
 value: {{ $substituted | toYaml | nindent 2 }}
 {{- else if kindIs "map" $value -}}
   {{- $result := dict -}}
   {{- range $k, $v := $value -}}
-    {{- $sub := include "crdkit.substituteStructure.internal" (dict "value" $v "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" $resolving) | fromYaml -}}
+    {{- $sub := include "crdkit.substituteStructure.internal" (dict "value" $v "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" $resolving "reservedKeys" $reservedKeys) | fromYaml -}}
     {{- $_ := set $result $k $sub.value -}}
   {{- end -}}
 value: {{ $result | toYaml | nindent 2 }}
 {{- else if kindIs "slice" $value -}}
   {{- $result := list -}}
   {{- range $item := $value -}}
-    {{- $sub := include "crdkit.substituteStructure.internal" (dict "value" $item "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" $resolving) | fromYaml -}}
+    {{- $sub := include "crdkit.substituteStructure.internal" (dict "value" $item "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" $resolving "reservedKeys" $reservedKeys) | fromYaml -}}
     {{- $result = append $result $sub.value -}}
   {{- end -}}
 value: {{ $result | toYaml | nindent 2 }}
@@ -540,7 +568,7 @@ Implementation notes:
 {{- $_ := set $ctx.diag "errors" (append $ctx.diag.errors (printf "unknown token '%s' referenced" $name)) -}}
 value: ""
 {{- else -}}
-{{- include "crdkit.resolveEntry.internal" (dict "fieldId" $name "def" (index $ctx.tokens $name) "tokens" $ctx.tokens "target" $target "diag" $ctx.diag "parentTargetTemplate" $ctx.parentTargetTemplate "root" $ctx.root) -}}
+{{- include "crdkit.resolveEntry.internal" (dict "fieldId" $name "def" (index $ctx.tokens $name) "tokens" $ctx.tokens "target" $target "diag" $ctx.diag "parentTargetTemplate" $ctx.parentTargetTemplate "root" $ctx.root "reservedKeys" $ctx.reservedKeys) -}}
 {{- end -}}
 {{- end -}}
 
@@ -599,7 +627,7 @@ Implementation notes:
 {{- if and (gt (len .) 3) (index . 3) -}}
   {{- $target = index . 3 -}}
 {{- end -}}
-{{- include "crdkit.resolveEntry.internal" (dict "fieldId" $fieldId "def" $def "tokens" $ctx.tokens "target" $target "diag" $ctx.diag "parentTargetTemplate" $ctx.parentTargetTemplate "root" $ctx.root) -}}
+{{- include "crdkit.resolveEntry.internal" (dict "fieldId" $fieldId "def" $def "tokens" $ctx.tokens "target" $target "diag" $ctx.diag "parentTargetTemplate" $ctx.parentTargetTemplate "root" $ctx.root "reservedKeys" $ctx.reservedKeys) -}}
 {{- end -}}
 
 {{/*

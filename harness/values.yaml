@@ -12,3 +12,4 @@ crossTargetNames: []
 parentTargetMap: {}
 chainSetsApiVersionKind: false
 diagSeed: {}
+annotations: []

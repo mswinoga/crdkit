@@ -73,6 +73,10 @@ substituted "structure" text.
 {{- $diag := dict "errors" (list) "warnings" (list) -}}
 {{- $target := .Values.target | default "" -}}
 
+{{- $reservedKeysYaml := include "crdkit.reservedKeys.internal" (dict
+      "annotations" (.Values.annotations | default (list)) "diag" $diag) -}}
+{{- $reservedKeys := ($reservedKeysYaml | fromYaml).value -}}
+
 {{- $tokens := include "crdkit.tokens.merge.internal" (dict
       "tokens" (.Values.tokens | default dict)
       "diag" $diag
@@ -80,7 +84,7 @@ substituted "structure" text.
       "defaults" (.Values.defaults | default dict)) | fromYaml -}}
 
 {{- $model := dict -}}
-{{- $ctx := dict "root" $ "diag" $diag "model" $model "tokens" $tokens "target" $target "parentTargetTemplate" "harness.parentTarget" -}}
+{{- $ctx := dict "root" $ "diag" $diag "model" $model "tokens" $tokens "target" $target "parentTargetTemplate" "harness.parentTarget" "reservedKeys" $reservedKeys -}}
 
 {{- $opsResolved := list -}}
 {{- range $op := .Values.tokenOps | default (list) -}}

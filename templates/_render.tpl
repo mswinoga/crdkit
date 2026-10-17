@@ -15,6 +15,8 @@ Interface:
     crdkit.noParentTarget (no escalation)
   - chain: ordered list of fully-qualified integration template names
     (head = outermost) — the ONLY thing that builds ctx.model
+  - annotations: optional list of annotation names supplied by the
+    library; these become reserved keys alongside crdkit's built-in ones
   - diag: optional {errors, warnings} seed; crdkit only transports its
     entries and appends new diagnostics as they arise
 - Returns: the rendered CR as YAML text, with diagnostics prepended as
@@ -48,13 +50,17 @@ Implementation notes:
 {{- $target := .target -}}
 {{- $parentTargetTemplate := .parentTargetTemplate | default "crdkit.noParentTarget" -}}
 
+{{- $reservedKeysYaml := include "crdkit.reservedKeys.internal" (dict
+      "annotations" (.annotations | default (list)) "diag" $diag) -}}
+{{- $reservedKeys := ($reservedKeysYaml | fromYaml).value -}}
+
 {{- $tokensYaml := include "crdkit.tokens.merge.internal" (dict
       "tokens" .tokens "diag" $diag
       "system" $system "defaults" .defaults) -}}
 {{- $tokens := $tokensYaml | fromYaml -}}
 
 {{- $model := dict -}}
-{{- $ctx := dict "root" $root "diag" $diag "model" $model "tokens" $tokens "target" $target "parentTargetTemplate" $parentTargetTemplate -}}
+{{- $ctx := dict "root" $root "diag" $diag "model" $model "tokens" $tokens "target" $target "parentTargetTemplate" $parentTargetTemplate "reservedKeys" $reservedKeys -}}
 
 {{- include "crdkit.integrations.chain" (dict "chain" .chain "ctx" $ctx) -}}
 
