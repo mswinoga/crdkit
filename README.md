@@ -86,6 +86,10 @@ crdkit's concern.
 
 - `crdkit.dictMerge` with an empty path (`(list model value)`) merges
   directly into the target — see `templates/_model.tpl`.
+- `crdkit.model.hasPath` — `(list model key1 ... keyN)` returns the plain
+  string `true` when the path exists (each intermediate node a map), an
+  empty string otherwise: `{{ if include "crdkit.model.hasPath" (list
+  .ctx.model "spec" "services") }}`.
 - Order is the precedence policy: consumer labels first,
   `crdkit.standardLabels` second (wins on collision), then the rest of
   the chain (which can still override anything).

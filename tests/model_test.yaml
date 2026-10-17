@@ -195,3 +195,136 @@ tests:
       - equal:
           path: model.containers["my-container"].env
           value: ["A=1"]
+
+  - it: hasPath returns "true" for an existing path
+    set:
+      modelOps:
+        - op: dictMerge
+          path: ["a", "b"]
+          value:
+            c: "1"
+        - op: hasPath
+          path: ["a", "b", "c"]
+    asserts:
+      - equal:
+          path: hasPathResults[0].found
+          value: "true"
+
+  - it: hasPath returns exactly an empty string for a missing leaf (never "false")
+    set:
+      modelOps:
+        - op: dictMerge
+          path: ["a", "b"]
+          value:
+            c: "1"
+        - op: hasPath
+          path: ["a", "b", "missing"]
+    asserts:
+      - equal:
+          path: hasPathResults[0].found
+          value: ""
+
+  - it: hasPath returns empty for a missing intermediate node
+    set:
+      modelOps:
+        - op: dictMerge
+          path: ["a"]
+          value:
+            b: "1"
+        - op: hasPath
+          path: ["a", "nope", "c"]
+    asserts:
+      - equal:
+          path: hasPathResults[0].found
+          value: ""
+
+  - it: hasPath returns empty when an intermediate node is a scalar
+    set:
+      modelOps:
+        - op: dictMerge
+          path: ["a"]
+          value:
+            b: "text"
+        - op: hasPath
+          path: ["a", "b", "c"]
+    asserts:
+      - equal:
+          path: hasPathResults[0].found
+          value: ""
+
+  - it: hasPath returns empty when an intermediate node is a list
+    set:
+      modelOps:
+        - op: listExtend
+          path: ["a", "items"]
+          value: ["x"]
+        - op: hasPath
+          path: ["a", "items", "0"]
+        - op: hasPath
+          path: ["a", "items", "x"]
+    asserts:
+      - equal:
+          path: hasPathResults[0].found
+          value: ""
+      - equal:
+          path: hasPathResults[1].found
+          value: ""
+
+  - it: hasPath with an empty path returns "true"
+    set:
+      modelOps:
+        - op: hasPath
+          path: []
+    asserts:
+      - equal:
+          path: hasPathResults[0].found
+          value: "true"
+
+  - it: hasPath treats a key containing a dot as a single key
+    set:
+      modelOps:
+        - op: dictMerge
+          path: ["files"]
+          value:
+            app.conf: "x"
+        - op: hasPath
+          path: ["files", "app.conf"]
+        - op: hasPath
+          path: ["files", "app", "conf"]
+    asserts:
+      - equal:
+          path: hasPathResults[0].found
+          value: "true"
+      - equal:
+          path: hasPathResults[1].found
+          value: ""
+
+  - it: hasPath counts a key holding an empty value as present
+    set:
+      modelOps:
+        - op: dictMerge
+          path: ["a"]
+          value:
+            empty: ""
+        - op: hasPath
+          path: ["a", "empty"]
+    asserts:
+      - equal:
+          path: hasPathResults[0].found
+          value: "true"
+
+  - it: hasPath does not mutate the model
+    set:
+      modelOps:
+        - op: dictMerge
+          path: ["a"]
+          value:
+            b: "1"
+        - op: hasPath
+          path: ["a", "zzz", "y"]
+    asserts:
+      - equal:
+          path: model
+          value:
+            a:
+              b: "1"

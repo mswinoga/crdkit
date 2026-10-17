@@ -64,7 +64,10 @@ a real render goes through:
     value} (or {op, key, default} for ensureDictKey) applied in order
     to a fresh model, letting a test case drive an arbitrary sequence
     of crdkit.dictMerge/listExtend/ensureDictKey calls purely through
-    values (rendered as "model").
+    values (rendered as "model"). Op "hasPath" ({op, path}) calls
+    crdkit.model.hasPath against the model as built so far and appends
+    {path, found} to "hasPathResults" ("found" is the helper's raw
+    string output: "true" or "").
 
 "tokens" in the output is the LIVE ctx.tokens map, including whatever
 "_value" caches accumulated from everything above — tests can assert
@@ -133,6 +136,7 @@ substituted "structure" text.
   {{- $tokenDefResolved = append $tokenDefResolved (dict "value" $r.value "string" $s) -}}
 {{- end -}}
 
+{{- $hasPathResults := list -}}
 {{- range $op := .Values.modelOps | default (list) -}}
   {{- if eq $op.op "dictMerge" -}}
     {{- include "crdkit.dictMerge" (concat (list $model) $op.path (list $op.value)) -}}
@@ -140,6 +144,9 @@ substituted "structure" text.
     {{- include "crdkit.listExtend" (concat (list $model) $op.path (list $op.value)) -}}
   {{- else if eq $op.op "ensureDictKey" -}}
     {{- include "crdkit.ensureDictKey" (dict "model" $model "key" $op.key "default" $op.default) -}}
+  {{- else if eq $op.op "hasPath" -}}
+    {{- $found := include "crdkit.model.hasPath" (concat (list $model) $op.path) -}}
+    {{- $hasPathResults = append $hasPathResults (dict "path" $op.path "found" $found) -}}
   {{- end -}}
 {{- end -}}
 
@@ -159,5 +166,7 @@ tokenDefs:
 {{ $tokenDefs | toYaml | indent 2 }}
 model:
 {{ $model | toYaml | indent 2 }}
+hasPathResults:
+{{ $hasPathResults | toYaml | indent 2 }}
 diag:
 {{ $diag | toYaml | indent 2 }}

@@ -106,3 +106,44 @@ Implementation notes:
 {{- include "crdkit.ensureDictKey" (dict "model" $current "key" $finalKey "default" (list)) -}}
 {{- $_ := set $current $finalKey (concat (index $current $finalKey) $value) -}}
 {{- end -}}
+
+{{/*
+crdkit.model.hasPath (public)
+
+Reports whether every key of a path exists in $model, each intermediate
+node being a map.
+
+Interface:
+- Params (list): [model, key1, ..., keyN] (N >= 0) — same shape as the
+  path of Sprig's `dig`
+- Returns: the plain string "true" when the path exists, an EMPTY string
+  otherwise. Usable directly as
+  `{{ if include "crdkit.model.hasPath" (list $model "a" "b") }}`.
+
+Implementation notes:
+- NEVER return "false": a non-empty string is truthy in Go templates,
+  so every `if` over the result would pass.
+- No `{value: …}` wrapper: the wrapper exists only for results decoded
+  with `fromYaml`; a presence flag needs no decoding.
+- A key whose value is nil or empty still counts as present.
+- A path through a scalar or list is missing.
+- Never mutates `model`; never records diagnostics.
+*/}}
+{{- define "crdkit.model.hasPath" -}}
+{{- $node := first . -}}
+{{- $found := true -}}
+{{- range $key := rest . -}}
+  {{- if $found -}}
+    {{- if kindIs "map" $node -}}
+      {{- if hasKey $node $key -}}
+        {{- $node = index $node $key -}}
+      {{- else -}}
+        {{- $found = false -}}
+      {{- end -}}
+    {{- else -}}
+      {{- $found = false -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- if $found -}}true{{- end -}}
+{{- end -}}
