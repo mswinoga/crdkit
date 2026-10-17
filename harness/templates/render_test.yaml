@@ -23,5 +23,6 @@ so this harness defines its own minimal one to prove the mechanism.
       "target" (.Values.target | default "prod")
       "system" (.Values.system | default dict)
       "defaults" (.Values.defaults | default dict)
+      "diag" ((.Values.diagSeed | default dict) | toYaml | fromYaml)
       "chain" (list "harness.integration.maybePopulateModel")
     ) -}}

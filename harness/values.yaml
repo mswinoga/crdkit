@@ -11,3 +11,4 @@ crossTargets: []
 crossTargetNames: []
 parentTargetMap: {}
 chainSetsApiVersionKind: false
+diagSeed: {}

@@ -31,3 +31,17 @@ tests:
           path: kind
       - notExists:
           path: metadata
+
+  - it: a seeded diag.errors is transported and the render still produces the model
+    set:
+      target: prod
+      chainPopulatesModel: true
+      tokens:
+        GROUP_SUFFIX: "v2"
+      diagSeed:
+        errors:
+          - "seeded"
+    asserts:
+      - equal:
+          path: kind
+          value: "HarnessCR"

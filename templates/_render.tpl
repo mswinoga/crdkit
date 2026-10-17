@@ -15,6 +15,8 @@ Interface:
     crdkit.noParentTarget (no escalation)
   - chain: ordered list of fully-qualified integration template names
     (head = outermost) — the ONLY thing that builds ctx.model
+  - diag: optional {errors, warnings} seed; crdkit only transports its
+    entries and appends new diagnostics as they arise
 - Returns: the rendered CR as YAML text, with diagnostics prepended as
   `# ERROR:`/`# WARNING:` comments.
 - The engine's entry point. Product-specific input (tokens, chain,
@@ -34,7 +36,13 @@ Implementation notes:
   finds nothing.
 */}}
 {{- define "crdkit.render" -}}
-{{- $diag := dict "errors" (list) "warnings" (list) -}}
+{{- $diag := .diag | default dict -}}
+{{- if not (hasKey $diag "errors") -}}
+  {{- $diag = set $diag "errors" (list) -}}
+{{- end -}}
+{{- if not (hasKey $diag "warnings") -}}
+  {{- $diag = set $diag "warnings" (list) -}}
+{{- end -}}
 {{- $root := .context -}}
 {{- $system := .system | default dict -}}
 {{- $target := .target -}}
