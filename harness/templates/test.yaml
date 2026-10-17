@@ -24,6 +24,7 @@ a real render goes through:
     crdkit.noParentTarget for that test.
   - .Values.tokenOps is a data-driven list of {op, name, value,
     annotations, target}. "op" is "add" (default, via crdkit.token.add),
+    "underlay" (via crdkit.token.underlay),
     "resolve" (resolves name at that point in the op sequence, appending
     {name, target, value} to opsResolved) or "resolveDef" (same, but
     resolves .Values.tokenDefs[defName] via crdkit.tokenDef.value; the
@@ -92,6 +93,8 @@ substituted "structure" text.
 {{- range $op := .Values.tokenOps | default (list) -}}
   {{- if or (eq ($op.op | default "add") "add") (not $op.op) -}}
     {{- $_ := include "crdkit.token.add" (list $ctx $op.name $op.value $op.annotations ($op.target | default $target)) -}}
+  {{- else if eq $op.op "underlay" -}}
+    {{- $_ := include "crdkit.token.underlay" (list $ctx $op.name $op.value $op.annotations ($op.target | default $target)) -}}
   {{- else if eq $op.op "resolve" -}}
     {{- $opTarget := $op.target | default $target -}}
     {{- $r := include "crdkit.token.value" (list $ctx $op.name $opTarget) | fromYaml -}}

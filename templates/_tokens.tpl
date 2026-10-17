@@ -317,6 +317,7 @@ value: {{ index $cache $target | toYaml | nindent 2 }}
   {{- $rawValue := "" -}}
   {{- $rungsWalked := list $target -}}
   {{- $current := $target -}}
+  {{- $fromGenerated := false -}}
 
   {{- if not $isDict -}}
     {{- $rawValue = $raw -}}
@@ -371,6 +372,15 @@ value: {{ index $cache $target | toYaml | nindent 2 }}
         {{- $rawValue = index $raw "default" -}}
         {{- $found = true -}}
       {{- end -}}
+      {{/* lowest priority: a generated value exists for the EXACT target only (never for a rung). */}}
+      {{- if and (not $found) (not $cycleDetected) (hasKey $raw "_generated") -}}
+        {{- $generated := index $raw "_generated" -}}
+        {{- if and (kindIs "map" $generated) (hasKey $generated $target) -}}
+          {{- $rawValue = index $generated $target -}}
+          {{- $found = true -}}
+          {{- $fromGenerated = true -}}
+        {{- end -}}
+      {{- end -}}
       {{- if and (not $found) (not $cycleDetected) -}}
         {{- $_ := set $diag "errors" (append $diag.errors (printf "no value found for '%s' — target chain exhausted at '%s' starting from '%s'" $fieldId $current $target)) -}}
       {{- end -}}
@@ -380,8 +390,13 @@ value: {{ index $cache $target | toYaml | nindent 2 }}
   {{- $substituted := include "crdkit.substituteStructure.internal" (dict "value" $rawValue "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" (append $resolving $fieldId) "reservedKeys" $reservedKeys "gen" $gen) | fromYaml -}}
   {{- $resolvedValue := $substituted.value -}}
   {{- if $cacheable -}}
-    {{- range $rung := $rungsWalked -}}
-      {{- $_ := set $cache $rung $resolvedValue -}}
+    {{/* rungs are shared across targets but _generated is per target: a generated value must not leak into rung caches. */}}
+    {{- if $fromGenerated -}}
+      {{- $_ := set $cache $target $resolvedValue -}}
+    {{- else -}}
+      {{- range $rung := $rungsWalked -}}
+        {{- $_ := set $cache $rung $resolvedValue -}}
+      {{- end -}}
     {{- end -}}
   {{- end -}}
 value: {{ $resolvedValue | toYaml | nindent 2 }}
@@ -778,6 +793,84 @@ Implementation notes:
 {{- end -}}
 
 {{- $_ := set $decl $target $value -}}
+{{- $_ := set $ctx "gen" (add1 $ctx.gen) -}}
+{{- $_ := set $tokens $name $decl -}}
+{{- end -}}
+
+{{/*
+Scope: public
+
+Interface:
+- Params (list): [ctx, name, value, annotations?, target?]
+  - ctx: dict with "tokens"/"diag"/"target"/"gen" keys
+  - name: token name
+  - value: generated value for this exact target (may contain "@ref@"
+    markers, or be a structure — resolved lazily like any other value)
+  - annotations: dict of annotation key-value pairs, optional — each key
+    is set only when the declaration does not already have it. Non-dict
+    non-nil values record an ERROR and are ignored.
+  - target: exact target string "value" applies to — optional, defaults
+    to ctx.target
+- Returns: nothing (mutates ctx.tokens in place, bumps ctx.gen).
+- Registers a GENERATED value: the lowest-priority source for a token,
+  consulted only after every consumer-declared source (exact target,
+  match, parent walk, default) found nothing. Creates the token if it
+  does not exist.
+
+Implementation notes:
+- Stores "value" under `_generated[target]`, overwriting any earlier
+  generated value for that target. A generated value applies to its
+  exact target only and is cached under that target alone.
+- Annotations never overwrite: an existing annotation (e.g. one the
+  consumer declared) wins over the generated one.
+- Bumps ctx.gen to invalidate resolution caches.
+- Name check (UPPER_SNAKE_CASE WARNING) and annotations check match
+  crdkit.token.add; callers are trusted, first-party code.
+*/}}
+{{- define "crdkit.token.underlay" -}}
+{{- $ctx := index . 0 -}}
+{{- $name := index . 1 -}}
+{{- $value := index . 2 -}}
+{{- $rawAnnotations := "" -}}
+{{- if gt (len .) 3 -}}
+  {{- $rawAnnotations = index . 3 -}}
+{{- end -}}
+{{- $target := $ctx.target -}}
+{{- if and (gt (len .) 4) (index . 4) -}}
+  {{- $target = index . 4 -}}
+{{- end -}}
+{{- $tokens := $ctx.tokens -}}
+{{- $diag := $ctx.diag -}}
+{{- if not (regexMatch "^[A-Z][A-Z0-9_]*$" $name) -}}
+  {{- $_ := set $diag "warnings" (append $diag.warnings (printf "token name '%s' should be UPPER_SNAKE_CASE for readability" $name)) -}}
+{{- end -}}
+
+{{- if and $rawAnnotations (not (kindIs "map" $rawAnnotations)) -}}
+  {{- $_ := set $diag "errors" (append $diag.errors (printf "crdkit.token.underlay for '%s': annotations must be a dict — ignored" $name)) -}}
+{{- end -}}
+
+{{- $decl := dict -}}
+{{- if hasKey $tokens $name -}}
+  {{- $existing := index $tokens $name -}}
+  {{- if kindIs "map" $existing -}}
+    {{- $decl = omit $existing "_value" "_gen" -}}
+  {{- end -}}
+{{- end -}}
+
+{{- if and $rawAnnotations (kindIs "map" $rawAnnotations) -}}
+  {{- range $k, $v := $rawAnnotations -}}
+    {{- if not (hasKey $decl $k) -}}
+      {{- $_ := set $decl $k $v -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+
+{{- $generated := dict -}}
+{{- if and (hasKey $decl "_generated") (kindIs "map" (index $decl "_generated")) -}}
+  {{- $generated = index $decl "_generated" -}}
+{{- end -}}
+{{- $_ := set $generated $target $value -}}
+{{- $_ := set $decl "_generated" $generated -}}
 {{- $_ := set $ctx "gen" (add1 $ctx.gen) -}}
 {{- $_ := set $tokens $name $decl -}}
 {{- end -}}

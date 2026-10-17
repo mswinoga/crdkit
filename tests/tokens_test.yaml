@@ -1405,3 +1405,320 @@ tests:
           value:
             default: "d"
             exposure: "e"
+
+  # --- crdkit.token.underlay: generated values, lowest priority ---
+
+  - it: "underlay on a missing token creates it with '_generated' for the target plus the annotations, and it resolves"
+    set:
+      target: prod-01
+      annotations:
+        - "owner"
+      tokenOps:
+        - op: underlay
+          name: X
+          value: "v"
+          annotations:
+            owner: "svc"
+      structure:
+        v: "@X@"
+    asserts:
+      - equal:
+          path: tokens.X._generated
+          value:
+            prod-01: "v"
+      - equal:
+          path: tokens.X.owner
+          value: "svc"
+      - equal:
+          path: structure.v
+          value: "v"
+      - lengthEqual:
+          path: diag.errors
+          count: 0
+
+  - it: "a consumer 'default' wins over a generated value"
+    set:
+      target: prod-01
+      tokens:
+        X:
+          default: "d"
+      tokenOps:
+        - op: underlay
+          name: X
+          value: "g"
+      structure:
+        v: "@X@"
+    asserts:
+      - equal:
+          path: structure.v
+          value: "d"
+
+  - it: "a consumer entry reached through the parent walk wins over a generated value"
+    set:
+      target: prod-01
+      parentTargetMap:
+        prod-01: "prod"
+      tokens:
+        X:
+          prod: "p"
+      tokenOps:
+        - op: underlay
+          name: X
+          value: "g"
+      structure:
+        v: "@X@"
+    asserts:
+      - equal:
+          path: structure.v
+          value: "p"
+
+  - it: "a generated value is used when the consumer declaration has no entry reachable from the target"
+    set:
+      target: dev-01
+      tokens:
+        X:
+          prod: "p"
+      tokenOps:
+        - op: underlay
+          name: X
+          value: "g"
+      structure:
+        v: "@X@"
+    asserts:
+      - equal:
+          path: structure.v
+          value: "g"
+      - lengthEqual:
+          path: diag.errors
+          count: 0
+
+  - it: "a generated value for one target is not visible to another target"
+    set:
+      target: prod-01
+      tokenOps:
+        - op: underlay
+          name: X
+          value: "g"
+          target: prod-01
+        - op: resolve
+          name: X
+          target: qa
+    asserts:
+      - lengthEqual:
+          path: diag.errors
+          count: 1
+      - matchRegex:
+          path: diag.errors[0]
+          pattern: "no value found for 'X'"
+
+  - it: "a value resolved from '_generated' is cached under the exact target only, never under walked rungs"
+    set:
+      target: prod-01
+      parentTargetMap:
+        prod-01: "prod"
+        prod: "PROD"
+      tokenOps:
+        - op: underlay
+          name: X
+          value: "g"
+        - op: resolve
+          name: X
+    asserts:
+      - equal:
+          path: opsResolved[0].value
+          value: "g"
+      - exists:
+          path: tokens.X._value.prod-01
+      - notExists:
+          path: tokens.X._value.prod
+      - notExists:
+          path: tokens.X._value.PROD
+
+  - it: "a generated value does not leak through a shared rung to a sibling target"
+    set:
+      target: prod-01
+      parentTargetMap:
+        prod-01: "prod"
+        prod-02: "prod"
+      tokenOps:
+        - op: underlay
+          name: X
+          value: "g"
+          target: prod-01
+        - op: resolve
+          name: X
+          target: prod-01
+        - op: resolve
+          name: X
+          target: prod-02
+    asserts:
+      - equal:
+          path: opsResolved[0].value
+          value: "g"
+      - lengthEqual:
+          path: diag.errors
+          count: 1
+
+  - it: "underlay annotations never overwrite existing ones and fill missing ones"
+    set:
+      target: prod-01
+      annotations:
+        - "owner"
+        - "exposure"
+      tokens:
+        X:
+          default: "d"
+          owner: "consumer"
+      tokenOps:
+        - op: underlay
+          name: X
+          value: "g"
+          annotations:
+            owner: "generated"
+            exposure: "main"
+    asserts:
+      - equal:
+          path: tokens.X.owner
+          value: "consumer"
+      - equal:
+          path: tokens.X.exposure
+          value: "main"
+
+  - it: "a second underlay for the same target overwrites the first generated value"
+    set:
+      target: prod-01
+      tokenOps:
+        - op: underlay
+          name: X
+          value: "first"
+        - op: underlay
+          name: X
+          value: "second"
+      structure:
+        v: "@X@"
+    asserts:
+      - equal:
+          path: structure.v
+          value: "second"
+      - equal:
+          path: tokens.X._generated
+          value:
+            prod-01: "second"
+
+  - it: "underlays for different targets accumulate"
+    set:
+      target: prod-01
+      tokenOps:
+        - op: underlay
+          name: X
+          value: "a"
+        - op: underlay
+          name: X
+          value: "b"
+          target: prod-02
+    asserts:
+      - equal:
+          path: tokens.X._generated
+          value:
+            prod-01: "a"
+            prod-02: "b"
+
+  - it: "underlay bumps the generation — a dependent token resolved earlier is re-resolved"
+    set:
+      target: prod-01
+      tokens:
+        A: "pre-@B@"
+        B:
+          dev-01: "x"
+      tokenOps:
+        - op: resolve
+          name: A
+        - op: underlay
+          name: B
+          value: "g"
+        - op: resolve
+          name: A
+    asserts:
+      - equal:
+          path: opsResolved[1].value
+          value: "pre-g"
+      - equal:
+          path: tokens.A._gen
+          value: 1
+      - lengthEqual:
+          path: diag.errors
+          count: 1
+
+  - it: "underlay warns on a non UPPER_SNAKE_CASE name"
+    set:
+      target: prod-01
+      tokenOps:
+        - op: underlay
+          name: lowerName
+          value: "v"
+    asserts:
+      - contains:
+          path: diag.warnings
+          content: "token name 'lowerName' should be UPPER_SNAKE_CASE for readability"
+
+  - it: "underlay with non-dict annotations records an ERROR and still stores the generated value"
+    set:
+      target: prod-01
+      tokenOps:
+        - op: underlay
+          name: X
+          value: "v"
+          annotations: "main"
+    asserts:
+      - contains:
+          path: diag.errors
+          content: "crdkit.token.underlay for 'X': annotations must be a dict — ignored"
+      - equal:
+          path: tokens.X._generated
+          value:
+            prod-01: "v"
+
+  - it: "crdkit.token.add on a token with generated values keeps '_generated'; an added entry beats it"
+    set:
+      target: prod-01
+      tokenOps:
+        - op: underlay
+          name: X
+          value: "g"
+        - op: add
+          name: X
+          value: "added"
+          target: prod-02
+        - op: resolve
+          name: X
+          target: prod-01
+        - op: resolve
+          name: X
+          target: prod-02
+    asserts:
+      - equal:
+          path: tokens.X._generated
+          value:
+            prod-01: "g"
+      - equal:
+          path: opsResolved[0].value
+          value: "g"
+      - equal:
+          path: opsResolved[1].value
+          value: "added"
+
+  - it: "a generated value may itself reference other tokens"
+    set:
+      target: prod-01
+      tokens:
+        B: "bee"
+      tokenOps:
+        - op: underlay
+          name: X
+          value: "x-@B@"
+      structure:
+        v: "@X@"
+    asserts:
+      - equal:
+          path: structure.v
+          value: "x-bee"
