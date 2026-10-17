@@ -146,9 +146,9 @@ Interface:
   ctx.tokens.
 
 Implementation notes:
-- Merge order, later wins: defaults -> user -> system (locked).
-  `mergeOverwrite` is used since Sprig's `merge` gives priority to the
-  FIRST argument.
+- Merge order: defaults deep-merge with user (user keys win), then
+  system keys are set wholesale (each system token REPLACES any consumer
+  declaration with the same name, including all its keys).
 - "AT" (crdkit's one reserved built-in token name) is stripped from
   user tokens, same treatment as a system-token collision.
 - Normalizes every scalar declaration into `{default: <value>}` — see
@@ -183,7 +183,9 @@ Implementation notes:
 {{- end -}}
 
 {{- $merged := mergeOverwrite (dict) $defaults $userTokens -}}
-{{- $merged = mergeOverwrite $merged $system -}}
+{{- range $name, $decl := $system -}}
+  {{- $_ := set $merged $name $decl -}}
+{{- end -}}
 
 {{/* Normalize scalars into {default: <value>} — safe to mutate $merged
      while ranging over it since this only updates EXISTING keys. */}}
