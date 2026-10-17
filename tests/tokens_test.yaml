@@ -1048,3 +1048,22 @@ tests:
       - lengthEqual:
           path: diag.errors
           count: 0
+
+  - it: "tokenOps 'resolve' records the value resolved at that point in the op sequence"
+    set:
+      target: prod-01
+      tokens:
+        GREETING: "hello"
+      tokenOps:
+        - op: resolve
+          name: GREETING
+    asserts:
+      - equal:
+          path: opsResolved[0].name
+          value: "GREETING"
+      - equal:
+          path: opsResolved[0].target
+          value: "prod-01"
+      - equal:
+          path: opsResolved[0].value
+          value: "hello"

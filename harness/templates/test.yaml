@@ -22,12 +22,14 @@ a real render goes through:
     per test. A test that doesn't set parentTargetMap gets an empty
     map, so the lookup always misses — functionally identical to
     crdkit.noParentTarget for that test.
-  - .Values.tokenOps is a data-driven list of {name, value,
-    targetContainer, target} applied via crdkit.token.add, mimicking an
-    integration contributing a derived token mid-chain. "target" is
-    optional per-op, defaulting to .Values.target — override it to
-    exercise token.add's merge-not-clobber behavior across multiple
-    calls for the same name under DIFFERENT targets in one test case.
+  - .Values.tokenOps is a data-driven list of {op, name, value,
+    targetContainer, target}. "op" is "add" (default, via crdkit.token.add)
+    or "resolve" (resolves name at that point in the op sequence, appending
+    {name, target, value} to opsResolved). "target" is optional per-op,
+    defaulting to .Values.target — override it to exercise token.add's
+    merge-not-clobber behavior across multiple calls for the same name
+    under DIFFERENT targets in one test case, or to resolve against a
+    different target than the harness top-level one.
   - .Values.structure is a second, separate document that gets
     crdkit.tokens.substitute applied to it — this is what makes a token
     "used" and triggers its (lazy) resolution for .Values.target.
@@ -80,8 +82,15 @@ substituted "structure" text.
 {{- $model := dict -}}
 {{- $ctx := dict "root" $ "diag" $diag "model" $model "tokens" $tokens "target" $target "parentTargetTemplate" "harness.parentTarget" -}}
 
+{{- $opsResolved := list -}}
 {{- range $op := .Values.tokenOps | default (list) -}}
-  {{- $_ := include "crdkit.token.add" (list $ctx $op.name $op.value $op.targetContainer ($op.target | default $target)) -}}
+  {{- if or (eq ($op.op | default "add") "add") (not $op.op) -}}
+    {{- $_ := include "crdkit.token.add" (list $ctx $op.name $op.value $op.targetContainer ($op.target | default $target)) -}}
+  {{- else if eq $op.op "resolve" -}}
+    {{- $opTarget := $op.target | default $target -}}
+    {{- $r := include "crdkit.token.value" (list $ctx $op.name $opTarget) | fromYaml -}}
+    {{- $opsResolved = append $opsResolved (dict "name" $op.name "target" $opTarget "value" $r.value) -}}
+  {{- end -}}
 {{- end -}}
 
 {{- $structureYaml := .Values.structure | default dict | toYaml -}}
@@ -131,6 +140,8 @@ stringResolved:
 {{ $stringResolved | toYaml | indent 2 }}
 tokenDefResolved:
 {{ $tokenDefResolved | toYaml | indent 2 }}
+opsResolved:
+{{ $opsResolved | toYaml | indent 2 }}
 model:
 {{ $model | toYaml | indent 2 }}
 diag:
