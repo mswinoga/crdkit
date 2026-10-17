@@ -13,3 +13,4 @@ parentTargetMap: {}
 chainSetsApiVersionKind: false
 diagSeed: {}
 annotations: []
+tokenDefs: {}

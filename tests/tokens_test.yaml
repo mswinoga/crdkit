@@ -1199,3 +1199,127 @@ tests:
       - contains:
           path: diag.errors
           content: "annotation name 'default' collides with a crdkit-reserved key and was ignored"
+
+  # --- cache generations: a token mutation invalidates stale caches ---
+
+  - it: "a dependent token is re-resolved after crdkit.token.add changes the token it references"
+    set:
+      target: prod-01
+      tokens:
+        A: "pre-@B@"
+        B: "old"
+      tokenOps:
+        - op: resolve
+          name: A
+        - op: add
+          name: B
+          value: "new"
+        - op: resolve
+          name: A
+    asserts:
+      - equal:
+          path: opsResolved[0].value
+          value: "pre-old"
+      - equal:
+          path: opsResolved[1].value
+          value: "pre-new"
+      - equal:
+          path: tokens.A._value.prod-01
+          value: "pre-new"
+      - equal:
+          path: tokens.A._gen
+          value: 1
+
+  - it: "without a mutation, a second resolve is served from the cache (no repeated diagnostics)"
+    set:
+      target: qa
+      tokens:
+        X:
+          prod: "p"
+      tokenOps:
+        - op: resolve
+          name: X
+        - op: resolve
+          name: X
+    asserts:
+      - exists:
+          path: tokens.X._value.qa
+      - equal:
+          path: tokens.X._gen
+          value: 0
+      - lengthEqual:
+          path: diag.errors
+          count: 1
+
+  - it: "a cache hit requires the exact target key — a cache holding only other targets does not short-circuit"
+    set:
+      target: prod-01
+      tokens:
+        X:
+          prod-01: "one"
+          prod-02: "two"
+      tokenOps:
+        - op: resolve
+          name: X
+          target: prod-01
+        - op: resolve
+          name: X
+          target: prod-02
+    asserts:
+      - equal:
+          path: opsResolved[0].value
+          value: "one"
+      - equal:
+          path: opsResolved[1].value
+          value: "two"
+      - exists:
+          path: tokens.X._value.prod-02
+
+  - it: "an error-producing resolution is recomputed (and re-diagnosed) after a generation bump"
+    set:
+      target: qa
+      tokens:
+        X:
+          prod: "p"
+      tokenOps:
+        - op: resolve
+          name: X
+        - op: add
+          name: Y
+          value: "unrelated"
+        - op: resolve
+          name: X
+    asserts:
+      - lengthEqual:
+          path: diag.errors
+          count: 2
+
+  - it: "a tokenDef structure is re-resolved after crdkit.token.add changes a token it references"
+    set:
+      target: prod-01
+      tokens:
+        B: "old"
+      tokenDefs:
+        D:
+          default: "d-@B@"
+      tokenOps:
+        - op: resolveDef
+          defName: D
+        - op: add
+          name: B
+          value: "new"
+        - op: resolveDef
+          defName: D
+    asserts:
+      - equal:
+          path: opsResolved[0].value
+          value: "d-old"
+      - equal:
+          path: opsResolved[1].value
+          value: "d-new"
+      - equal:
+          path: tokenDefs.D._gen
+          value: 1
+      - equal:
+          path: tokenDefs.D._value.prod-01
+          value: "d-new"

@@ -23,9 +23,12 @@ a real render goes through:
     map, so the lookup always misses — functionally identical to
     crdkit.noParentTarget for that test.
   - .Values.tokenOps is a data-driven list of {op, name, value,
-    targetContainer, target}. "op" is "add" (default, via crdkit.token.add)
-    or "resolve" (resolves name at that point in the op sequence, appending
-    {name, target, value} to opsResolved). "target" is optional per-op,
+    annotations, target}. "op" is "add" (default, via crdkit.token.add),
+    "resolve" (resolves name at that point in the op sequence, appending
+    {name, target, value} to opsResolved) or "resolveDef" (same, but
+    resolves .Values.tokenDefs[defName] via crdkit.tokenDef.value; the
+    tokenDefs entry is ONE shared object across ops, rendered as
+    "tokenDefs", so its cache is observable). "target" is optional per-op,
     defaulting to .Values.target — override it to exercise token.add's
     merge-not-clobber behavior across multiple calls for the same name
     under DIFFERENT targets in one test case, or to resolve against a
@@ -39,10 +42,7 @@ a real render goes through:
     as `{value: <resolved thing>}` — exercises resolving a token for a
     target OTHER than the one driving this "render" (the whole point of
     the redesign), and lets a test assert on the resulting "_value"
-    cache shape directly via "tokens". No more "targetContainer" here —
-    it's validated eagerly at merge time instead, see
-    crdkit.tokens.merge.internal; assert on "tokens.NAME.targetContainer"
-    (the raw declaration) instead. Deliberately does NOT also compute
+    cache shape directly via "tokens". Deliberately does NOT also compute
     crdkit.token.string here — that has a diagnostic side effect on a
     structural value (see crdkit.stringify.internal), which would
     silently pollute diag.errors for every OTHER test that happens to
@@ -86,6 +86,8 @@ substituted "structure" text.
 {{- $model := dict -}}
 {{- $ctx := dict "root" $ "diag" $diag "model" $model "tokens" $tokens "target" $target "parentTargetTemplate" "harness.parentTarget" "reservedKeys" $reservedKeys "gen" 0 -}}
 
+{{/* Shared deep copy: ops that name the same tokenDefs entry operate on ONE object, so its _value/_gen cache persists between ops. */}}
+{{- $tokenDefs := .Values.tokenDefs | default dict | toYaml | fromYaml -}}
 {{- $opsResolved := list -}}
 {{- range $op := .Values.tokenOps | default (list) -}}
   {{- if or (eq ($op.op | default "add") "add") (not $op.op) -}}
@@ -94,6 +96,10 @@ substituted "structure" text.
     {{- $opTarget := $op.target | default $target -}}
     {{- $r := include "crdkit.token.value" (list $ctx $op.name $opTarget) | fromYaml -}}
     {{- $opsResolved = append $opsResolved (dict "name" $op.name "target" $opTarget "value" $r.value) -}}
+  {{- else if eq $op.op "resolveDef" -}}
+    {{- $opTarget := $op.target | default $target -}}
+    {{- $r := include "crdkit.tokenDef.value" (list $ctx $op.defName (index $tokenDefs $op.defName) $opTarget) | fromYaml -}}
+    {{- $opsResolved = append $opsResolved (dict "name" $op.defName "target" $opTarget "value" $r.value) -}}
   {{- end -}}
 {{- end -}}
 
@@ -146,6 +152,8 @@ tokenDefResolved:
 {{ $tokenDefResolved | toYaml | indent 2 }}
 opsResolved:
 {{ $opsResolved | toYaml | indent 2 }}
+tokenDefs:
+{{ $tokenDefs | toYaml | indent 2 }}
 model:
 {{ $model | toYaml | indent 2 }}
 diag:
