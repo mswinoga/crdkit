@@ -2,4 +2,4 @@ apiVersion: v2
 name: crdkit
 description: Generic env-aware token resolution and integration-chaining engine for CR-rendering library charts
 type: library
-version: 0.0.0
+version: 0.0.4
