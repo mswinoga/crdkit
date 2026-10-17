@@ -1,4 +1,6 @@
 {{/*
+Name: crdkit.render
+
 Scope: public
 
 The engine's entry point. Product-specific input (tokens, chain,

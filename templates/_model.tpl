@@ -1,4 +1,6 @@
 {{/*
+Name: crdkit.ensureDictKey
+
 Scope: public
 
 Ensures $model has "key" set, initializing it to "default" if absent.
@@ -29,6 +31,8 @@ Implementation notes:
 {{- end -}}
 
 {{/*
+Name: crdkit.dictMerge
+
 Scope: public
 
 Walks a multi-level path from $model, creating an empty dict at each
@@ -74,6 +78,8 @@ Implementation notes:
 {{- end -}}
 
 {{/*
+Name: crdkit.listExtend
+
 Scope: public
 
 Same as crdkit.dictMerge, but the final path segment is ensured to be a

@@ -1,4 +1,6 @@
 {{/*
+Name: crdkit.standardLabels
+
 Scope: public
 
 Standard labels computed from Helm's own context — not called

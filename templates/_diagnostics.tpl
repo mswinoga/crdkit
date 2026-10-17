@@ -1,4 +1,6 @@
 {{/*
+Name: crdkit.renderDiagnostics.internal
+
 Scope: internal
 
 Emits accumulated diagnostics — downstream tooling greps for these exact

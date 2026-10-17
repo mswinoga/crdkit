@@ -1,4 +1,6 @@
 {{/*
+Name: crdkit.matchRules
+
 All token resolution logic — scope (public/internal) is declared per
 template below, not uniformly for the file. Product-specific token
 content (locked/default keys, values) is never referenced by name —
@@ -143,6 +145,8 @@ value: {{ $result | quote }}
 {{- end -}}
 
 {{/*
+Name: crdkit.noParentTarget
+
 Scope: public
 
 Default "parentTarget" template when a caller supplies none — no
@@ -157,6 +161,8 @@ Interface:
 {{- end -}}
 
 {{/*
+Name: crdkit.reservedKeys.internal
+
 Scope: internal
 
 Computes the complete list of reserved (non-entry) keys: built-in crdkit
@@ -189,6 +195,8 @@ value: {{ $result | toYaml | nindent 2 }}
 {{- end -}}
 
 {{/*
+Name: crdkit.tokens.merge.internal
+
 Scope: internal
 
 Merges system/default/user token declarations; applies collision,
@@ -268,6 +276,8 @@ Implementation notes:
 {{- end -}}
 
 {{/*
+Name: crdkit.resolveEntry.internal
+
 Scope: internal
 
 Runs the target-escalation ladder against "def", selects one entry, then
@@ -449,6 +459,8 @@ value: {{ $resolvedValue | toYaml | nindent 2 }}
 {{- end -}}
 
 {{/*
+Name: crdkit.substituteStructure.internal
+
 Scope: internal
 
 Recursively walks "value": a string is substituted via
@@ -509,6 +521,8 @@ value: {{ $value | toYaml | nindent 2 }}
 {{- end -}}
 
 {{/*
+Name: crdkit.substituteText.internal
+
 Scope: internal
 
 Substitutes "@ref@" markers within a single string leaf, for the SAME
@@ -562,6 +576,8 @@ Implementation notes:
 {{- end -}}
 
 {{/*
+Name: crdkit.stringify.internal
+
 Scope: internal
 
 Coerces an already-resolved value for embedding into a text blob (a
@@ -599,6 +615,8 @@ ok: true
 {{- end -}}
 
 {{/*
+Name: crdkit.token.value
+
 Scope: public
 
 Resolves a REAL token, registered under "name" in ctx.tokens.
@@ -644,6 +662,8 @@ value: ""
 {{- end -}}
 
 {{/*
+Name: crdkit.token.string
+
 Scope: public
 
 Resolves a REAL token and coerces the result to text (see
@@ -670,6 +690,8 @@ Implementation notes:
 {{- end -}}
 
 {{/*
+Name: crdkit.tokenDef.value
+
 Scope: public
 
 Resolves an arbitrary structure using the exact same target- escalation
@@ -705,6 +727,8 @@ Implementation notes:
 {{- end -}}
 
 {{/*
+Name: crdkit.tokenDef.string
+
 Scope: public
 
 Resolves an arbitrary structure and coerces the result to text (see
@@ -732,6 +756,8 @@ Implementation notes:
 {{- end -}}
 
 {{/*
+Name: crdkit.tokens.substitute
+
 Scope: public
 
 Replaces "@NAME@" markers in an arbitrary text block by resolving each
@@ -777,6 +803,8 @@ Implementation notes:
 {{- end -}}
 
 {{/*
+Name: crdkit.token.add
+
 Scope: public
 
 Injects one derived token into a live tokens map — the crdkit.token.add
@@ -857,6 +885,8 @@ Implementation notes:
 {{- end -}}
 
 {{/*
+Name: crdkit.token.underlay
+
 Scope: public
 
 Registers a GENERATED value: the lowest-priority source for a token,

@@ -1,4 +1,6 @@
 {{/*
+Name: harness.parentTarget
+
 Test-only "parentTarget" implementation, playing the role a real
 specific library's own template would play (e.g. "mycrd.parentTarget")
 — see crdkit.render's "parentTargetTemplate" param. Entirely data-driven so

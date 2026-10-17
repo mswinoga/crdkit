@@ -1,4 +1,6 @@
 {{/*
+Name: crdkit.name
+
 Miscellaneous small helpers with no token/rendering logic of their own.
 */}}
 
@@ -11,6 +13,8 @@ convention. Available for callers that need a truncated/sanitized name.
 {{- end -}}
 
 {{/*
+Name: crdkit.dependencyVersion
+
 Looks up a named dependency's resolved version from the consuming
 chart's own declared `dependencies:` (Chart.yaml). Library charts never
 get their own root context — every `include` runs with whatever "." the

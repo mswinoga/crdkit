@@ -1,4 +1,6 @@
 {{/*
+Name: crdkit.integrations.chain
+
 Scope: public
 
 Calls each template in "chain", in order, passing `ctx` directly — the
