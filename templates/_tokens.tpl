@@ -157,7 +157,7 @@ Interface:
     {{- $result = append $result $annot -}}
   {{- end -}}
 {{- end -}}
-value: {{ $result | toYaml }}
+value: {{ $result | toYaml | nindent 2 }}
 {{- end -}}
 
 {{/*
@@ -483,6 +483,7 @@ Implementation notes:
 {{- $parentTargetTemplate := .parentTargetTemplate -}}
 {{- $root := .root -}}
 {{- $resolving := .resolving -}}
+{{- $reservedKeys := .reservedKeys -}}
 {{- $markers := regexFindAll "@[A-Za-z0-9_]+@" $text -1 -}}
 {{- range $marker := $markers -}}
   {{- $refName := trimSuffix "@" (trimPrefix "@" $marker) -}}
@@ -490,7 +491,7 @@ Implementation notes:
     {{- if has $refName $resolving -}}
       {{- $_ := set $diag "errors" (append $diag.errors (printf "token '%s' references '@%s@', which is already being resolved — cycle (direct or indirect self-reference)" (last $resolving) $refName)) -}}
     {{- else -}}
-      {{- $refResolved := include "crdkit.resolveEntry.internal" (dict "fieldId" $refName "def" (index $tokens $refName) "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" $resolving) | fromYaml -}}
+      {{- $refResolved := include "crdkit.resolveEntry.internal" (dict "fieldId" $refName "def" (index $tokens $refName) "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" $resolving "reservedKeys" $reservedKeys) | fromYaml -}}
       {{- $coerced := include "crdkit.stringify.internal" (dict "resolved" $refResolved "fieldId" $refName "diag" $diag) | fromYaml -}}
       {{- if $coerced.ok -}}
         {{- $text = $text | replace $marker $coerced.text -}}

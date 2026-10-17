@@ -1082,3 +1082,120 @@ tests:
       - equal:
           path: opsResolved[0].value
           value: "hello"
+
+  # --- reserved keys: annotation names are never target entries ---
+
+  - it: "a target equal to an annotation name does not hit the annotation key — default resolves"
+    set:
+      target: owner
+      annotations:
+        - "owner"
+      tokens:
+        X:
+          default: "d"
+          owner: "o"
+      structure:
+        v: "@X@"
+    asserts:
+      - equal:
+          path: structure.v
+          value: "d"
+      - lengthEqual:
+          path: diag.errors
+          count: 0
+
+  - it: "without the annotation declared, the same target hits the 'owner' entry"
+    set:
+      target: owner
+      tokens:
+        X:
+          default: "d"
+          owner: "o"
+      structure:
+        v: "@X@"
+    asserts:
+      - equal:
+          path: structure.v
+          value: "o"
+
+  - it: "reserved annotation names are honored on a chained @ref@ resolution (reservedKeys threaded to nested lookups)"
+    set:
+      target: owner
+      annotations:
+        - "owner"
+      tokens:
+        A: "pre-@X@"
+        X:
+          default: "d"
+          owner: "o"
+      structure:
+        v: "@A@"
+    asserts:
+      - equal:
+          path: structure.v
+          value: "pre-d"
+
+  - it: "reserved annotation names are honored in crdkit.token.value for a cross target and in tokenDef"
+    set:
+      target: prod
+      annotations:
+        - "owner"
+      tokens:
+        X:
+          default: "d"
+          owner: "o"
+      crossTargets:
+        - "owner"
+      crossTargetNames:
+        - "X"
+      tokenDefOps:
+        - fieldId: "myDef"
+          target: "owner"
+          def:
+            default: "dd"
+            owner: "oo"
+    asserts:
+      - equal:
+          path: crossResolved.owner.X.value
+          value: "d"
+      - equal:
+          path: tokenDefResolved[0].value
+          value: "dd"
+
+  - it: "an annotation named 'match' is rejected with an ERROR and 'match' rules keep working"
+    set:
+      target: prod-07
+      annotations:
+        - "match"
+      tokens:
+        X:
+          default: "d"
+          match:
+            - "prod-.*": "matched"
+      structure:
+        v: "@X@"
+    asserts:
+      - equal:
+          path: structure.v
+          value: "matched"
+      - contains:
+          path: diag.errors
+          content: "annotation name 'match' collides with a crdkit-reserved key and was ignored"
+
+  - it: "an annotation named 'default' is rejected with an ERROR and 'default' keeps working as a fallback"
+    set:
+      target: anything
+      annotations:
+        - "default"
+      tokens:
+        X:
+          default: "d"
+      structure:
+        v: "@X@"
+    asserts:
+      - equal:
+          path: structure.v
+          value: "d"
+      - contains:
+          path: diag.errors
+          content: "annotation name 'default' collides with a crdkit-reserved key and was ignored"
