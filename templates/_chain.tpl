@@ -1,12 +1,13 @@
 {{/*
 Scope: public
 
+Calls each template in "chain", in order, passing `ctx` directly — the
+dispatcher for a specific library's "integration" templates.
+
 Interface:
 - Params (dict): { "chain": <list of fully-qualified template names>,
   "ctx": <root/diag/model/tokens/target dict> }
 - Returns: nothing (each integration mutates `ctx` in place).
-- Calls each template in "chain", in order, passing `ctx` directly — the
-  dispatcher for a specific library's "integration" templates.
 
 Implementation notes:
 - Flat loop, not recursive: an integration receives plain `ctx` and does

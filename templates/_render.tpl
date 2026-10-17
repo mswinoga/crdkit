@@ -1,6 +1,10 @@
 {{/*
 Scope: public
 
+The engine's entry point. Product-specific input (tokens, chain,
+taxonomy) is supplied by the caller's own thin wrapper (e.g.
+mycrd.render).
+
 Interface:
 - Params (dict):
   - context: consumer's root $ (never nested under .Values.<name>.*)
@@ -25,9 +29,6 @@ Interface:
     appends new diagnostics as they arise, then emits them all
 - Returns: the rendered CR as YAML text, with diagnostics prepended as
   `# ERROR:`/`# WARNING:` comments.
-- The engine's entry point. Product-specific input (tokens, chain,
-  taxonomy) is supplied by the caller's own thin wrapper (e.g.
-  mycrd.render).
 
 Implementation notes:
 - Pipeline: merge tokens -> build empty ctx.model -> run the chain (the

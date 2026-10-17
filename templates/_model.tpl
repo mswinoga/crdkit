@@ -1,11 +1,12 @@
 {{/*
 Scope: public
 
+Ensures $model has "key" set, initializing it to "default" if absent.
+
 Interface:
 - Params (dict): { "model": <live model dict>, "key": <string>,
   "default": <zero value, e.g. (list) or (dict)> }
 - Returns: nothing (mutates $model in place).
-- Ensures $model has "key" set, initializing it to "default" if absent.
 
 Implementation notes:
 - Maps are reference types: a map passed as an include argument, even
@@ -30,15 +31,16 @@ Implementation notes:
 {{/*
 Scope: public
 
+Walks a multi-level path from $model, creating an empty dict at each
+missing level, then merges "value" into the dict at the end of the path
+(incoming keys win on collision).
+
 Interface:
 - Params (list): [model, key1, ..., keyN, value] (N >= 0)
   - model: root dict to walk from
   - key1..keyN: path (may be empty)
   - value: dict to merge in at the end of the path
 - Returns: nothing (mutates $model in place).
-- Walks a multi-level path from $model, creating an empty dict at each
-  missing level, then merges "value" into the dict at the end of the
-  path (incoming keys win on collision).
 
 Implementation notes:
 - List-based (dig-style, variadic path) rather than dict-with-named-
@@ -74,12 +76,13 @@ Implementation notes:
 {{/*
 Scope: public
 
+Same as crdkit.dictMerge, but the final path segment is ensured to be a
+LIST, and "value" is appended via `concat`.
+
 Interface:
 - Params (list): [model, key1, ..., keyN, value] (N >= 1, value is a
   list)
 - Returns: nothing (mutates $model in place).
-- Same as crdkit.dictMerge, but the final path segment is ensured to be
-  a LIST, and "value" is appended via `concat`.
 
 Implementation notes:
 - No zero-key case (unlike dictMerge) — `ctx.model` is always a dict,

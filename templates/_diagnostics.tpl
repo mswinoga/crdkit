@@ -1,11 +1,12 @@
 {{/*
 Scope: internal
 
+Emits accumulated diagnostics — downstream tooling greps for these exact
+prefixes, so don't reformat them.
+
 Interface:
 - Params (dict): { "diag": <dict with "errors"/"warnings" lists> }
 - Returns: YAML comment lines, prefixed exactly `# ERROR:` / `# WARNING:`.
-- Emits accumulated diagnostics — downstream tooling greps for these
-  exact prefixes, so don't reformat them.
 
 Implementation notes:
 - Dedupes (`uniq`, order-preserving) before printing: lazy, on-demand

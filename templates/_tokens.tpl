@@ -105,12 +105,13 @@ crdkit.tokenDef.value — it deliberately isn't namespaced under either.
 {{/*
 Scope: public
 
+Evaluates a target-escalation-style regex rule list against a subject
+string; first match wins.
+
 Interface:
 - Params (dict): { "subject": <string>, "rules": <list of single-key
   {pattern: replacement} dicts, may be nil/empty> }
 - Returns YAML: { "matched": <bool>, "value": <string> }
-- Evaluates a target-escalation-style regex rule list against a
-  subject string; first match wins.
 
 Implementation notes:
 - Full-string anchored (`^(?:pattern)$`) — a rule matches the WHOLE
@@ -144,12 +145,13 @@ value: {{ $result | quote }}
 {{/*
 Scope: public
 
+Default "parentTarget" template when a caller supplies none — no
+escalation beyond the exact target.
+
 Interface:
 - Params (dict): { "target": <string>, "context": <root $> } — the
   shape every "parentTarget" template receives.
 - Returns: nothing.
-- Default "parentTarget" template when a caller supplies none — no
-  escalation beyond the exact target.
 */}}
 {{- define "crdkit.noParentTarget" -}}
 {{- end -}}
@@ -157,13 +159,13 @@ Interface:
 {{/*
 Scope: internal
 
+Computes the complete list of reserved (non-entry) keys: built-in crdkit
+keys (_value, _gen, _generated, match) plus every annotation name that
+does NOT collide; colliding annotation names are dropped with an ERROR.
+
 Interface:
 - Params (dict): { "annotations": <list of strings>, "diag": <dict> }
 - Returns YAML: { "value": <list of reserved key names> }
-- Computes the complete list of reserved (non-entry) keys: built-in
-  crdkit keys (_value, _gen, _generated, match) plus every annotation
-  name that does NOT collide; colliding annotation names are dropped
-  with an ERROR.
 
 Implementation notes:
 - An annotation named like a built-in key OR "default" collides:
@@ -189,13 +191,14 @@ value: {{ $result | toYaml | nindent 2 }}
 {{/*
 Scope: internal
 
+Merges system/default/user token declarations; applies collision,
+internal-key and naming-convention diagnostics. Output becomes
+ctx.tokens.
+
 Interface:
 - Params (dict): { "tokens": <raw user tokens, may be nil>, "diag":
   <dict>, "system": <dict>, "defaults": <dict> }
 - Returns YAML: merged raw declarations map (not resolved).
-- Merges system/default/user token declarations; applies collision,
-  internal-key and naming-convention diagnostics. Output becomes
-  ctx.tokens.
 
 Implementation notes:
 - Merge order: defaults deep-merge with user (user keys win), then
@@ -267,6 +270,15 @@ Implementation notes:
 {{/*
 Scope: internal
 
+Runs the target-escalation ladder against "def", selects one entry, then
+recursively substitutes "@ref@" markers throughout it
+(crdkit.substituteStructure.internal). The engine behind both
+crdkit.token.value (a real, named token) and crdkit.tokenDef.value (an
+arbitrary structure, resolved by the same rules without being registered
+in ctx.tokens). "fieldId" labels diagnostics only. Memoized onto "def"
+itself under "_value", keyed by target, valid for one generation
+("_gen").
+
 Interface:
 - Params (dict): { "fieldId": <string>, "def": <declaration or scalar>,
   "tokens": <live tokens map, for resolving @ref@ markers inside the
@@ -278,14 +290,6 @@ Interface:
   generation, optional — defaults to 0> }
 - Returns YAML: { "value": <resolved string, or a dict/list with every
   string leaf's markers resolved> }
-- Runs the target-escalation ladder against "def", selects one entry,
-  then recursively substitutes "@ref@" markers throughout it
-  (crdkit.substituteStructure.internal). The engine behind both
-  crdkit.token.value (a real, named token) and crdkit.tokenDef.value
-  (an arbitrary structure, resolved by the same rules without being
-  registered in ctx.tokens). "fieldId" labels diagnostics only.
-  Memoized onto "def" itself under "_value", keyed by target, valid for
-  one generation ("_gen").
 
 Implementation notes:
 - Resolution order:
@@ -447,6 +451,11 @@ value: {{ $resolvedValue | toYaml | nindent 2 }}
 {{/*
 Scope: internal
 
+Recursively walks "value": a string is substituted via
+crdkit.substituteText.internal; a map/list is walked entry-by-entry
+(same recursion, one level down); any other scalar passes through
+unchanged.
+
 Interface:
 - Params (dict): { "value": <any>, "tokens": <live tokens map>,
   "target": <string>, "diag": <dict>, "parentTargetTemplate":
@@ -455,10 +464,6 @@ Interface:
   "gen": <int> }
 - Returns YAML: { "value": <"value", with every string leaf's "@ref@"
   markers substituted> }
-- Recursively walks "value": a string is substituted via
-  crdkit.substituteText.internal; a map/list is walked entry-by-entry
-  (same recursion, one level down); any other scalar passes through
-  unchanged.
 
 Implementation notes:
 - This is what lets a token's (or crdkit.tokenDef.value's "def") value
@@ -506,6 +511,9 @@ value: {{ $value | toYaml | nindent 2 }}
 {{/*
 Scope: internal
 
+Substitutes "@ref@" markers within a single string leaf, for the SAME
+target as the value being substituted into.
+
 Interface:
 - Params (dict): { "text": <string>, "tokens": <live tokens map>,
   "target": <string>, "diag": <dict>, "parentTargetTemplate":
@@ -513,8 +521,6 @@ Interface:
   "resolving": <list of names in progress, non-empty>,
   "reservedKeys": <list>, "gen": <int> }
 - Returns: text with every "@NAME@" reference substituted.
-- Substitutes "@ref@" markers within a single string leaf, for the
-  SAME target as the value being substituted into.
 
 Implementation notes:
 - Cycle detection: "resolving" is the in-progress name stack for THIS
@@ -558,16 +564,17 @@ Implementation notes:
 {{/*
 Scope: internal
 
+Coerces an already-resolved value for embedding into a text blob (a
+"@NAME@" marker's replacement, or a direct *.string entry point): a
+string passes through as-is; a bool/int/float is stringified
+(`toString`); a map/list records an ERROR and comes back as `{text: "",
+ok: false}` — the caller decides what "not ok" means (leave a marker
+unexpanded, or return an empty string).
+
 Interface:
 - Params (dict): { "resolved": <already-decoded {value: <any>} dict>,
   "fieldId": <string>, "diag": <dict> }
 - Returns YAML: { "text": <string>, "ok": <bool> }
-- Coerces an already-resolved value for embedding into a text blob (a
-  "@NAME@" marker's replacement, or a direct *.string entry point): a
-  string passes through as-is; a bool/int/float is stringified
-  (`toString`); a map/list records an ERROR and comes back as
-  `{text: "", ok: false}` — the caller decides what "not ok" means
-  (leave a marker unexpanded, or return an empty string).
 
 Implementation notes:
 - Shared by crdkit.token.string, crdkit.tokenDef.string,
@@ -594,6 +601,8 @@ ok: true
 {{/*
 Scope: public
 
+Resolves a REAL token, registered under "name" in ctx.tokens.
+
 Interface:
 - Params (list): [ctx, name, target?]
   - ctx: dict with "tokens"/"diag"/"parentTargetTemplate"/"target"
@@ -603,7 +612,6 @@ Interface:
     resolve for a target OTHER than the render's own
 - Returns YAML: { "value": <resolved string, or a dict/list with every
   string leaf's markers resolved> }
-- Resolves a REAL token, registered under "name" in ctx.tokens.
 
 Implementation notes:
 - List-based (not dict) — deliberate exception for this frequently-
@@ -638,12 +646,13 @@ value: ""
 {{/*
 Scope: public
 
+Resolves a REAL token and coerces the result to text (see
+crdkit.stringify.internal) — for use outside the usual "@NAME@" marker
+mechanism, when the caller wants the value directly.
+
 Interface:
 - Params (list): [ctx, name, target?] — same as crdkit.token.value
 - Returns: plain string.
-- Resolves a REAL token and coerces the result to text (see
-  crdkit.stringify.internal) — for use outside the usual "@NAME@"
-  marker mechanism, when the caller wants the value directly.
 
 Implementation notes:
 - A structured result records an ERROR (via crdkit.stringify.internal)
@@ -663,6 +672,10 @@ Implementation notes:
 {{/*
 Scope: public
 
+Resolves an arbitrary structure using the exact same target- escalation
+rules as a real token, without requiring it to be registered under a
+name in ctx.tokens.
+
 Interface:
 - Params (list): [ctx, fieldId, def, target?]
   - ctx: dict with "tokens"/"diag"/"parentTargetTemplate"/"target"
@@ -675,9 +688,6 @@ Interface:
   - target: optional — defaults to ctx.target
 - Returns YAML: { "value": <resolved string, or a dict/list with every
   string leaf's markers resolved> }
-- Resolves an arbitrary structure using the exact same target-
-  escalation rules as a real token, without requiring it to be
-  registered under a name in ctx.tokens.
 
 Implementation notes:
 - Any `@ref@` marker in the resolved value is still looked up in the
@@ -697,12 +707,13 @@ Implementation notes:
 {{/*
 Scope: public
 
+Resolves an arbitrary structure and coerces the result to text (see
+crdkit.stringify.internal).
+
 Interface:
 - Params (list): [ctx, fieldId, def, target?] — same as
   crdkit.tokenDef.value
 - Returns: plain string.
-- Resolves an arbitrary structure and coerces the result to text (see
-  crdkit.stringify.internal).
 
 Implementation notes:
 - A structured result records an ERROR (via crdkit.stringify.internal)
@@ -723,13 +734,14 @@ Implementation notes:
 {{/*
 Scope: public
 
+Replaces "@NAME@" markers in an arbitrary text block by resolving each
+referenced token on demand — this is what makes a token "used."
+
 Interface:
 - Params (list): [ctx, text, target?]
   - target: optional — defaults to ctx.target
 - Returns: text with every "@NAME@" marker resolved, and "@AT@"
   replaced with a literal "@".
-- Replaces "@NAME@" markers in an arbitrary text block by resolving
-  each referenced token on demand — this is what makes a token "used."
 
 Implementation notes:
 - A marker naming something that isn't a known token is left
@@ -767,6 +779,9 @@ Implementation notes:
 {{/*
 Scope: public
 
+Injects one derived token into a live tokens map — the crdkit.token.add
+counterpart to crdkit.dictMerge/listExtend for ctx.model.
+
 Interface:
 - Params (list): [ctx, name, value, annotations?, target?]
   - ctx: dict with "tokens"/"diag"/"target"/"gen" keys
@@ -782,8 +797,6 @@ Interface:
   - target: exact target string "value" applies to — optional, defaults
     to ctx.target
 - Returns: nothing (mutates ctx.tokens in place, bumps ctx.gen).
-- Injects one derived token into a live tokens map — the crdkit.token.add
-  counterpart to crdkit.dictMerge/listExtend for ctx.model.
 
 Implementation notes:
 - Stores "value" as a dedicated attribute (literal key = target),
@@ -846,6 +859,11 @@ Implementation notes:
 {{/*
 Scope: public
 
+Registers a GENERATED value: the lowest-priority source for a token,
+consulted only after every consumer-declared source (exact target,
+match, parent walk, default) found nothing. Creates the token if it does
+not exist.
+
 Interface:
 - Params (list): [ctx, name, value, annotations?, target?]
   - ctx: dict with "tokens"/"diag"/"target"/"gen" keys
@@ -858,10 +876,6 @@ Interface:
   - target: exact target string "value" applies to — optional, defaults
     to ctx.target
 - Returns: nothing (mutates ctx.tokens in place, bumps ctx.gen).
-- Registers a GENERATED value: the lowest-priority source for a token,
-  consulted only after every consumer-declared source (exact target,
-  match, parent walk, default) found nothing. Creates the token if it
-  does not exist.
 
 Implementation notes:
 - Stores "value" under `_generated[target]`, overwriting any earlier
