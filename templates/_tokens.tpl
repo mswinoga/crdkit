@@ -278,6 +278,7 @@ Implementation notes:
 {{- $root := .root -}}
 {{- $resolving := .resolving | default (list) -}}
 {{- $reservedKeys := .reservedKeys | default (list "_value" "_gen" "_generated" "match") -}}
+{{- $gen := .gen | default 0 -}}
 
 {{- $isDict := kindIs "map" $raw -}}
 
@@ -287,10 +288,24 @@ Implementation notes:
   {{- if not (hasKey $raw "_value") -}}
     {{- $_ := set $raw "_value" (dict) -}}
   {{- end -}}
+  {{- if not (hasKey $raw "_gen") -}}
+    {{- $_ := set $raw "_gen" 0 -}}
+  {{- end -}}
   {{- $cache = $raw._value -}}
 {{- end -}}
 
+{{- $cacheValid := false -}}
 {{- if and $cacheable (hasKey $cache $target) -}}
+  {{- if eq (toString $raw._gen) (toString $gen) -}}
+    {{- $cacheValid = true -}}
+  {{- else -}}
+    {{- $_ := set $raw "_value" (dict) -}}
+    {{- $_ := set $raw "_gen" $gen -}}
+    {{- $cache = $raw._value -}}
+  {{- end -}}
+{{- end -}}
+
+{{- if $cacheValid -}}
 value: {{ index $cache $target | toYaml | nindent 2 }}
 {{- else -}}
   {{- $found := false -}}
@@ -357,12 +372,13 @@ value: {{ index $cache $target | toYaml | nindent 2 }}
     {{- end -}}
   {{- end -}}
 
-  {{- $substituted := include "crdkit.substituteStructure.internal" (dict "value" $rawValue "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" (append $resolving $fieldId) "reservedKeys" $reservedKeys) | fromYaml -}}
+  {{- $substituted := include "crdkit.substituteStructure.internal" (dict "value" $rawValue "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" (append $resolving $fieldId) "reservedKeys" $reservedKeys "gen" $gen) | fromYaml -}}
   {{- $resolvedValue := $substituted.value -}}
   {{- if $cacheable -}}
     {{- range $rung := $rungsWalked -}}
       {{- $_ := set $cache $rung $resolvedValue -}}
     {{- end -}}
+    {{- $_ := set $raw "_gen" $gen -}}
   {{- end -}}
 value: {{ $resolvedValue | toYaml | nindent 2 }}
 {{- end -}}
