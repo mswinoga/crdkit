@@ -27,14 +27,14 @@ Interface:
   - diag: optional {errors, warnings} seed (missing lists are filled in
     with empty ones); crdkit only transports the seeded entries and
     appends new diagnostics as they arise, then emits them all
-- Returns: the rendered CR as YAML text, with diagnostics prepended as
-  `# ERROR:`/`# WARNING:` comments.
+- Returns: the rendered CR as YAML text, followed by its diagnostics as
+  `# ERROR:`/`# WARNING:` comment lines.
 
 Implementation notes:
 - Pipeline: merge tokens -> build empty ctx.model -> run the chain (the
   ONLY step that populates ctx.model) -> one substitution pass over the
   whole model -> scan for unresolved "@word@" markers (possible typos)
-  -> emit diagnostics + `{{ model | toYaml }}`.
+  -> emit `{{ model | toYaml }}`, then the diagnostics.
 - ctx carries: root, diag, model, tokens, target, parentTargetTemplate,
   reservedKeys (list) and gen (int, starts at 0; bumped by
   crdkit.token.add / crdkit.token.underlay to invalidate resolution
@@ -85,6 +85,6 @@ Implementation notes:
   {{- end -}}
 {{- end -}}
 
-{{- include "crdkit.renderDiagnostics.internal" (dict "diag" $diag) }}
 {{ $substitutedModel | toYaml }}
+{{- include "crdkit.renderDiagnostics.internal" (dict "diag" $diag) }}
 {{- end -}}
