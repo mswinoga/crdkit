@@ -169,8 +169,7 @@ Interface:
   <dict>, "system": <dict>, "defaults": <dict> }
 - Returns YAML: merged raw declarations map (not resolved).
 - Merges system/default/user token declarations; applies collision +
-  naming-convention + targetContainer diagnostics. Output becomes
-  ctx.tokens.
+  naming-convention diagnostics. Output becomes ctx.tokens.
 
 Implementation notes:
 - Merge order: defaults deep-merge with user (user keys win), then
@@ -183,13 +182,6 @@ Implementation notes:
 - Every final token name is checked against `^[A-Z][A-Z0-9_]*$` — a
   WARNING (not ERROR) on mismatch, applied uniformly including
   system/default names.
-- `targetContainer`, if declared, is validated here — eagerly, for
-  EVERY token regardless of whether it's ever resolved (a deliberate
-  exception to "only diagnose what's used", matching the naming check
-  above). An invalid value records an ERROR and is corrected to "none"
-  in place. crdkit.token.add-added entries are NOT covered by this
-  check (added after this runs) — crdkit.token.add trusts its caller
-  instead.
 */}}
 {{- define "crdkit.tokens.merge.internal" -}}
 {{- $userTokens := .tokens | default dict -}}
@@ -225,16 +217,6 @@ Implementation notes:
 {{- range $name := keys $merged -}}
   {{- if not (regexMatch "^[A-Z][A-Z0-9_]*$" $name) -}}
     {{- $_ := set $diag "warnings" (append $diag.warnings (printf "token name '%s' should be UPPER_SNAKE_CASE for readability" $name)) -}}
-  {{- end -}}
-{{- end -}}
-
-{{- $validContainers := list "main" "side-car" "both" "none" -}}
-{{- range $name, $raw := $merged -}}
-  {{- if hasKey $raw "targetContainer" -}}
-    {{- if not (has $raw.targetContainer $validContainers) -}}
-      {{- $_ := set $diag "errors" (append $diag.errors (printf "invalid targetContainer '%s' for '%s' — must be one of main/side-car/both (or omitted)" $raw.targetContainer $name)) -}}
-      {{- $_ := set $raw "targetContainer" "none" -}}
-    {{- end -}}
   {{- end -}}
 {{- end -}}
 

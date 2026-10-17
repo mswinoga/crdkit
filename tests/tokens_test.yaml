@@ -543,136 +543,69 @@ tests:
           path: diag.errors[0]
           value: "no value found for 'myField' — target chain exhausted at 'unrecognized' starting from 'unrecognized'"
 
-  # --- targetContainer: validated eagerly at merge time, not during resolution ---
+  # --- annotations: generic metadata attached to declarations ---
 
-  - it: a token can declare an explicit valid targetContainer, flat alongside a target entry — no "value" wrapper
+  - it: an annotation is written literally alongside target entries, no "value" wrapper
     set:
       target: prod-01
-      tokens.DB_HOST.default: "db.internal"
-      tokens.DB_HOST.targetContainer: "main"
+      tokens:
+        DB_HOST:
+          default: "db.internal"
+          exposure: "main"
+      annotations:
+        - "exposure"
     asserts:
       - equal:
           path: tokens.DB_HOST.default
           value: "db.internal"
       - equal:
-          path: tokens.DB_HOST.targetContainer
+          path: tokens.DB_HOST.exposure
           value: "main"
 
-  - it: a token can target the side-car or both containers
-    set:
-      target: prod-01
-      tokens.SIDECAR_VAR.default: "x"
-      tokens.SIDECAR_VAR.targetContainer: "side-car"
-      tokens.SHARED_VAR.default: "y"
-      tokens.SHARED_VAR.targetContainer: "both"
-    asserts:
-      - equal:
-          path: tokens.SIDECAR_VAR.targetContainer
-          value: "side-car"
-      - equal:
-          path: tokens.SHARED_VAR.targetContainer
-          value: "both"
-
-  - it: "an invalid targetContainer is validated eagerly at merge time, falls back to 'none', but the token's value still resolves normally"
+  - it: an annotation value is never validated — arbitrary values are allowed
     set:
       target: prod
-      tokens.BAD_VAR.prod: "still-here"
-      tokens.BAD_VAR.targetContainer: "sidecar-typo"
-      structure.x: "@BAD_VAR@"
+      tokens:
+        EXPOSED:
+          default: "x"
+          exposure: "bogus-value"
+      annotations:
+        - "exposure"
     asserts:
       - equal:
-          path: tokens.BAD_VAR.targetContainer
-          value: "none"
-      - equal:
-          path: structure.x
-          value: "still-here"
-      - equal:
-          path: diag.errors[0]
-          value: "invalid targetContainer 'sidecar-typo' for 'BAD_VAR' — must be one of main/side-car/both (or omitted)"
+          path: tokens.EXPOSED.exposure
+          value: "bogus-value"
       - lengthEqual:
           path: diag.errors
-          count: 1
+          count: 0
+      - lengthEqual:
+          path: diag.warnings
+          count: 0
 
-  - it: "an invalid targetContainer is diagnosed even when the token is never referenced anywhere — a deliberate exception to 'only diagnose what's used'"
-    set:
-      target: prod
-      tokens.UNUSED_BAD.default: "x"
-      tokens.UNUSED_BAD.targetContainer: "bogus"
-    asserts:
-      - equal:
-          path: diag.errors[0]
-          value: "invalid targetContainer 'bogus' for 'UNUSED_BAD' — must be one of main/side-car/both (or omitted)"
-
-  - it: "the eager targetContainer check applies to a system (locked) token exactly like a user-declared one"
+  - it: an annotation on a system (locked) token is preserved after merge
     set:
       target: prod
       system.LOCKED_VAR:
         default: "x"
-        targetContainer: "bogus"
+        exposure: "lib-value"
+      annotations:
+        - "exposure"
     asserts:
       - equal:
-          path: tokens.LOCKED_VAR.targetContainer
-          value: "none"
+          path: tokens.LOCKED_VAR.default
+          value: "x"
       - equal:
-          path: diag.errors[0]
-          value: "invalid targetContainer 'bogus' for 'LOCKED_VAR' — must be one of main/side-car/both (or omitted)"
+          path: tokens.LOCKED_VAR.exposure
+          value: "lib-value"
 
-  - it: "the eager targetContainer check applies to a default token exactly like a user-declared one"
-    set:
-      target: prod
-      defaults.DEFAULT_VAR:
-        default: "x"
-        targetContainer: "bogus"
-    asserts:
-      - equal:
-          path: tokens.DEFAULT_VAR.targetContainer
-          value: "none"
-      - equal:
-          path: diag.errors[0]
-          value: "invalid targetContainer 'bogus' for 'DEFAULT_VAR' — must be one of main/side-car/both (or omitted)"
-
-  - it: "multiple target entries coexist flat alongside targetContainer, each resolving independently"
-    set:
-      target: prod
-      tokens:
-        DB_HOST:
-          targetContainer: "main"
-          prod: "db-prod.internal"
-          other: "db-other.internal"
-      crossTargets:
-        - "prod"
-      crossTargetNames:
-        - "DB_HOST"
-    asserts:
-      - equal:
-          path: crossResolved.prod.DB_HOST.value
-          value: "db-prod.internal"
-      - equal:
-          path: tokens.DB_HOST.targetContainer
-          value: "main"
-
-  - it: "token with only default value renders correctly"
-    set:
-      target: prod-01
-      parentTargetMap:
-        prod-01: "PROD"
-        PROD: default
-      tokens:
-        DEFAULT:
-          default: "default value"
-      structure:
-        value_of_default: "@DEFAULT@"
-    asserts:
-      - equal:
-          path: structure.value_of_default
-          value: "default value"
-
-  - it: "a token declaring ONLY targetContainer, no target entries at all, produces the ordinary 'no value found' error like any other unresolvable token — no dedicated 'declares targetContainer without value' special case anymore"
+  - it: a token declaring ONLY an annotation, no target entries at all, produces the ordinary "no value found" error
     set:
       target: prod
       tokens:
         BROKEN:
-          targetContainer: "main"
+          exposure: "main"
+      annotations:
+        - "exposure"
       crossTargets:
         - "prod"
       crossTargetNames:
@@ -685,28 +618,19 @@ tests:
           path: crossResolved.prod.BROKEN.value
           value: ""
       - equal:
-          path: tokens.BROKEN.targetContainer
+          path: tokens.BROKEN.exposure
           value: "main"
 
-  - it: an empty-string targetContainer is invalid, same as any other unrecognized value
-    set:
-      target: prod
-      tokens.EMPTY_VAR.default: "x"
-      tokens.EMPTY_VAR.targetContainer: ""
-    asserts:
-      - equal:
-          path: tokens.EMPTY_VAR.targetContainer
-          value: "none"
-      - matchRegex:
-          path: diag.errors[0]
-          pattern: "invalid targetContainer ''"
-
-  - it: a token with targetContainer can still chain off another token's value normally
+  - it: an annotation token can still chain off another token's value normally
     set:
       target: prod
       tokens.HOST_NAME: "db1"
-      tokens.DB_HOST.prod: "@HOST_NAME@.internal"
-      tokens.DB_HOST.targetContainer: "main"
+      tokens:
+        DB_HOST:
+          prod: "@HOST_NAME@.internal"
+          exposure: "main"
+      annotations:
+        - "exposure"
       crossTargets:
         - "prod"
       crossTargetNames:
@@ -716,7 +640,7 @@ tests:
           path: crossResolved.prod.DB_HOST.value
           value: "db1.internal"
       - equal:
-          path: tokens.DB_HOST.targetContainer
+          path: tokens.DB_HOST.exposure
           value: "main"
 
   # --- merge / naming-convention / collision diagnostics ---
