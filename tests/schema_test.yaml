@@ -464,3 +464,279 @@ tests:
             - "'services.C.type' has unknown value 'other' — ignored"
             - "'services.D' has no 'type' — ignored"
             - "'services.E' must be a map — ignored"
+
+  # --- value pass (per-target values) ---
+
+  - it: 'a per-target value valid for the target records nothing'
+    set:
+      target: prod
+      schemaOps:
+        - op: validateValues
+          schema:
+            kind: map
+            properties:
+              greeting: {kind: scalar, type: string, tokens: true}
+              count: {kind: scalar, type: int, tokens: true}
+          values:
+            greeting: {default: hi, prod: hello}
+            count: {default: 1, prod: 2}
+    asserts:
+      - lengthEqual:
+          path: diag.errors
+          count: 0
+      - equal:
+          path: seen
+          value: {"count|prod": true, "greeting|prod": true}
+
+  - it: 'a per-target value of the wrong type or outside the enum is an ERROR naming the target'
+    set:
+      target: prod
+      schemaOps:
+        - op: validateValues
+          schema:
+            kind: map
+            properties:
+              count: {kind: scalar, type: int, tokens: true}
+              mode: {kind: scalar, enum: [a, b], tokens: true}
+              id: {kind: scalar, pattern: "^[a-z]+$", tokens: true}
+          values:
+            count: {default: 1, prod: many}
+            mode: {default: a, prod: c}
+            id: {prod: X1}
+    asserts:
+      - equal:
+          path: diag.errors
+          value:
+            - "'count' for target 'prod' must be of type 'int' — got 'many'"
+            - "'id' for target 'prod' must match '^[a-z]+$' — got 'X1'"
+            - "'mode' for target 'prod' must be one of 'a', 'b' — got 'c'"
+
+  - it: 'type checks use "parses as": a numeric string and a marker-built number pass type int, a non-bool string fails bool'
+    set:
+      target: prod
+      tokens:
+        BASE: "4"
+      schemaOps:
+        - op: validateValues
+          schema:
+            kind: map
+            properties:
+              a: {kind: scalar, type: int, tokens: true}
+              b: {kind: scalar, type: int, tokens: true}
+              c: {kind: scalar, type: bool, tokens: true}
+              d: {kind: scalar, type: bool, tokens: true}
+              e: {kind: scalar, type: number, tokens: true}
+          values:
+            a: {default: "5"}
+            b: {default: "@BASE@0"}
+            c: {default: "true"}
+            d: {default: "yes"}
+            e: {default: "1.5e3"}
+    asserts:
+      - equal:
+          path: diag.errors
+          value:
+            - "'d' for target 'prod' must be of type 'bool' — got 'yes'"
+
+  - it: 'a plain string with markers is substituted for the target and checked'
+    set:
+      target: prod
+      tokens:
+        GOOD: "3"
+        BAD: "x"
+      schemaOps:
+        - op: validateValues
+          schema:
+            kind: map
+            properties:
+              good: {kind: scalar, type: int}
+              bad: {kind: scalar, type: int}
+              ports: {kind: list, items: {kind: scalar, type: int}}
+          values: {good: "@GOOD@", bad: "@BAD@", ports: [80, "@BAD@"]}
+    asserts:
+      - equal:
+          path: diag.errors
+          value:
+            - "'bad' for target 'prod' must be of type 'int' — got 'x'"
+            - "'ports[1]' for target 'prod' must be of type 'int' — got 'x'"
+
+  - it: 'a per-target list is checked as a list, element by element'
+    set:
+      target: prod
+      schemaOps:
+        - op: validateValues
+          schema:
+            kind: map
+            properties:
+              hosts: {kind: list, tokens: true, items: {kind: scalar, type: int}}
+              other: {kind: list, tokens: true}
+          values:
+            hosts: {default: [1], prod: [1, b]}
+            other: {prod: "x"}
+    asserts:
+      - equal:
+          path: diag.errors
+          value:
+            - "'hosts[1]' for target 'prod' must be of type 'int' — got 'b'"
+            - "'other' for target 'prod' must be a list"
+
+  - it: 'a failed resolution reports only its own ERROR, no schema ERROR on top'
+    set:
+      target: prod
+      schemaOps:
+        - op: validateValues
+          schema:
+            kind: map
+            properties:
+              count: {kind: scalar, type: int, tokens: true}
+              typo: {kind: scalar, type: int}
+          values:
+            count: {qa: 1}
+            typo: "@MISSING@"
+    asserts:
+      - equal:
+          path: diag.errors
+          value:
+            - "no value found for 'count' — target chain exhausted at 'prod' starting from 'prod'"
+
+  - it: 'the value pass follows a switch into the selected case'
+    set:
+      target: prod
+      schemaOps:
+        - op: validateValues
+          path: services
+          schema:
+            kind: map
+            values:
+              switch:
+                by: type
+                cases:
+                  greeter:
+                    kind: map
+                    properties:
+                      type: {kind: scalar, markers: false}
+                      greeting: {kind: scalar, type: int, tokens: true}
+          values:
+            A: {type: greeter, greeting: {prod: hi}}
+            B: {type: unknown, greeting: {prod: hi}}
+    asserts:
+      - equal:
+          path: diag.errors
+          value:
+            - "'services.A.greeting' for target 'prod' must be of type 'int' — got 'hi'"
+
+  - it: 'the same path and target is checked once across value-pass and single-field calls'
+    set:
+      target: prod
+      schemaOps:
+        - op: validateValues
+          schema: {kind: map, properties: {count: {kind: scalar, type: int, tokens: true}}}
+          values: {count: {prod: x}}
+        - op: validateValues
+          schema: {kind: map, properties: {count: {kind: scalar, type: int, tokens: true}}}
+          values: {count: {prod: x}}
+        - op: value
+          node: {kind: scalar, type: int, tokens: true}
+          def: {prod: x}
+          path: count
+    asserts:
+      - equal:
+          path: diag.errors
+          value:
+            - "'count' for target 'prod' must be of type 'int' — got 'x'"
+      - equal:
+          path: results[2].value
+          value: x
+
+  - it: 'a single field resolves and is checked for an explicit target other than the render target'
+    set:
+      target: qa
+      parentTargetMap:
+        qap1: qa
+      schemaOps:
+        - op: value
+          node: {kind: scalar, type: int, tokens: true}
+          def: {qa: 1, qap1: x}
+          path: application.services.APP.count
+          target: qap1
+        - op: value
+          node: {kind: scalar, type: int, tokens: true}
+          def: {qa: 1, qap1: x}
+          path: application.services.APP.count
+        - op: value
+          node: {kind: scalar, type: int}
+          def: 7
+          path: application.services.APP.static
+    asserts:
+      - equal:
+          path: results[0].value
+          value: x
+      - equal:
+          path: results[1].value
+          value: 1
+      - equal:
+          path: results[2].value
+          value: 7
+      - equal:
+          path: diag.errors
+          value:
+            - "'application.services.APP.count' for target 'qap1' must be of type 'int' — got 'x'"
+
+  # --- locating nodes ---
+
+  - it: 'crdkit.schema.node follows properties, values, list indices and switches'
+    set:
+      schemaOps:
+        - op: node
+          schema: &services
+            kind: map
+            properties:
+              services:
+                kind: map
+                values:
+                  switch:
+                    by: type
+                    cases:
+                      greeter:
+                        kind: map
+                        properties:
+                          type: {kind: scalar, markers: false}
+                          greeting: {kind: scalar, tokens: true}
+                          ports: {kind: list, items: {kind: scalar, type: int}}
+          values: &servicesValues
+            services:
+              A: {type: greeter}
+              B: {type: other}
+          keys: [services, A, greeting]
+        - op: node
+          schema: *services
+          values: *servicesValues
+          keys: [services, A, ports, 0]
+        - op: node
+          schema: *services
+          values: *servicesValues
+          keys: [services, A]
+        - op: node
+          schema: *services
+          values: *servicesValues
+          keys: [services, B, greeting]
+        - op: node
+          schema: *services
+          values: *servicesValues
+          keys: [services, A, unknown]
+    asserts:
+      - equal:
+          path: results[0]
+          value: {found: true, value: {kind: scalar, tokens: true}}
+      - equal:
+          path: results[1]
+          value: {found: true, value: {kind: scalar, type: int}}
+      - equal:
+          path: results[2].value.properties.type
+          value: {kind: scalar, markers: false}
+      - equal:
+          path: results[3].found
+          value: false
+      - equal:
+          path: results[4].found
+          value: false
