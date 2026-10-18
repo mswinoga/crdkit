@@ -300,33 +300,39 @@ A schema is a tree of **nodes**; each node is a dict.
 
 | Key | Applies to | Meaning | Omitted |
 |---|---|---|---|
-| `kind` | all | `scalar` \| `map` \| `list` \| `any` | self-check ERROR (a `switch` node is a map) |
+| `type` | all | the value's shape and scalar type (see "Types") | self-check ERROR (a `switch` node is a map) |
 | `doc` | all | Markdown text for the reference | allowed |
 | `default` | all | value inserted when the key is absent | none |
 | `required` | all | the key must be present | `false` |
-| `type` | `scalar` | `string` \| `int` \| `number` \| `bool` | any scalar |
-| `enum` | `scalar` | list of allowed values (compared as strings) | any |
-| `pattern` | `scalar` | regex on the value's string form, unanchored | any |
-| `markers` | `scalar` | `false` → a `@NAME@` marker is an ERROR | `true` |
-| `tokens` | `scalar`, `list` | `true` → the value may be a token declaration | `true` (see below) |
+| `enum` | scalar types | list of allowed values (compared as strings) | any |
+| `pattern` | scalar types | regex on the value's string form, unanchored | any |
+| `markers` | scalar types | `false` → a `@NAME@` marker is an ERROR | `true` |
+| `tokens` | scalar types, `list` | `true` → the value may be a token declaration | `true` (see below) |
 | `properties` | `map` | `{<key>: <node>}` for named keys | none |
 | `values` | `map` | node for every key not in `properties` | closed: other keys → WARNING |
 | `keys` | `map` | `{pattern: <regex>}` for keys matched by `values` | any key |
-| `items` | `list` | node for every element | `{kind: any}` |
+| `items` | `list` | node for every element | `{type: any}` |
 | `switch` | node | `{by: <key>, cases: {<value>: <node>}}` | — |
 
-Kinds:
-- `scalar` — string, number or bool.
-- `map` — `properties` and/or `values`; with neither, it accepts no
-  keys.
-- `list` — every element checked against `items`.
-- `any` — accepts every value; nothing below it is checked. A map of
-  anything is `{kind: map, values: {kind: any}}`.
+Types:
+
+| `type` | Shape | Accepts |
+|---|---|---|
+| `string` \| `int` \| `number` \| `bool` | scalar | a scalar of that type |
+| `scalar` | scalar | any scalar (string, number or bool) |
+| `map` | map | `properties` and/or `values`; with neither, no keys |
+| `list` | list | every element checked against `items` |
+| `any` | — | every value; nothing below it is checked |
+
+- "Scalar types" are the first five rows; a key on a type it doesn't
+  apply to is a self-check ERROR (`'enum' does not apply to type
+  'map'`).
+- A map of anything is `{type: map, values: {type: any}}`.
 
 Switch:
 - A node with `switch` validates a map against the case named by the
   value of its `by` key; each case is a complete node.
-- Every case must declare the `by` key as `kind: scalar, markers:
+- Every case must declare the `by` key as a scalar type with `markers:
   false` — the case is chosen before anything is resolved.
 - No case for the value, or no `by` key → WARNING, node dropped.
 - The key is `by`, never `on`: Helm's `fromYaml` speaks YAML 1.1 and
@@ -336,11 +342,11 @@ Per-target values (`tokens`):
 - A per-target node's value may be a plain value or a token declaration
   (`default`, target keys, `match`), resolved for a target exactly like
   a token (see "Target escalation").
-- Per-target by default on `scalar` and `list` — except a `markers:
-  false` scalar (static) and any node below a per-target node. An
-  explicit `tokens: false` opts out.
-- Only `scalar`/`list`: a declaration is always a dict, so a dict in a
-  scalar/list field is unambiguously a declaration
+- Per-target by default on scalar types and `list` — except a
+  `markers: false` scalar (static) and any node below a per-target
+  node. An explicit `tokens: false` opts out.
+- Only scalar types/`list`: a declaration is always a dict, so a dict
+  in a scalar/list field is unambiguously a declaration
   (`{default: [a], prod: [a, b]}`); in a map field it would not be.
 - At most one per-target node on any path from the root.
 
@@ -354,25 +360,25 @@ Defaults and required:
 Example:
 
 ```yaml
-kind: map
-values: {kind: any}                       # the consumer chart's own keys
+type: map
+values: {type: any}                       # the consumer chart's own keys
 properties:
-  target:     {kind: scalar, type: string, markers: false, required: true, doc: "Render target."}
-  renderMode: {kind: scalar, markers: false, enum: [validate, deploy], default: deploy}
+  target:     {type: string, markers: false, required: true, doc: "Render target."}
+  renderMode: {type: scalar, markers: false, enum: [validate, deploy], default: deploy}
   services:
-    kind: map
-    keys: {pattern: "^[A-Z][A-Z0-9_-]*$"}
+    type: map
+    keys: {pattern: "^[A-Z0-9_]+$"}
     values:
       switch:
         by: type
         cases:
           greeter:
-            kind: map
+            type: map
             properties:
-              type:     {kind: scalar, markers: false, required: true}
-              enabled:  {kind: scalar, type: bool, markers: false, default: true}
-              greeting: {kind: scalar, type: string, doc: "File content."}   # per-target
-              ports:    {kind: list, items: {kind: scalar, type: int}}      # per-target list
+              type:     {type: scalar, markers: false, required: true}
+              enabled:  {type: bool, markers: false, default: true}
+              greeting: {type: string, doc: "File content."}   # per-target
+              ports:    {type: list, items: {type: int}}      # per-target list
 ```
 
 ### Self-check
@@ -382,8 +388,8 @@ validation (values pass through unchanged). Each problem →
 `# ERROR: schema invalid: <schema path>: <reason>`, recorded once
 however often the schema is checked:
 - a schema that failed to parse (Helm's `fromYaml` error dict);
-- unknown node key, unknown `kind`/`type`, a key on a kind it doesn't
-  apply to, a non-bool flag, a non-list `enum`, malformed
+- unknown node key, an unknown or omitted `type`, a key on a type it
+  doesn't apply to, a non-bool flag, a non-list `enum`, malformed
   `keys`/`switch`;
 - `tokens: true` on `map`/`any`, below a per-target node, or with
   `markers: false`; `default` with `required: true`;
@@ -401,7 +407,7 @@ crdkit.schema.value           one field, any target, resolved + checked  (from a
 ```
 
 Structural pass (`crdkit.schema.validate`):
-- Checks kinds, unknown keys, `required`, switches, `keys.pattern`, and
+- Checks shapes, unknown keys, `required`, switches, `keys.pattern`, and
   `type`/`enum`/`pattern`/`markers` of static values.
 - Returns `{value: <normalized>}`: defaults applied, every failing node
   dropped (so its default applies instead).
@@ -446,7 +452,7 @@ list elements are indexed: `services["a.b"].ports[0]`.
 
 | Check | Level | Message |
 |---|---|---|
-| kind mismatch | WARNING | `'<path>' must be a map — ignored` |
+| shape mismatch | WARNING | `'<path>' must be a map — ignored` |
 | unknown key | WARNING | `'<path>' is not a known key — ignored` |
 | key pattern | ERROR | `key '<path>' must match '<re>' — ignored` |
 | switch, no key | WARNING | `'<path>' has no '<by>' — ignored` |
@@ -496,11 +502,11 @@ for the root, then one `## <path> with <by>: <case>` table per switch
 case:
 
 ```markdown
-| Key | Kind | Per target | Default | Required | Description |
+| Key | Type | Per target | Default | Required | Description |
 | --- | --- | --- | --- | --- | --- |
 | `renderMode` | scalar, one of: validate, deploy | no | `"deploy"` |  |  |
 | `services.<key>` | map, by `type`: greeter |  |  |  |  |
-| `target` | scalar (string) | no |  | yes | Render target. |
+| `target` | string | no |  | yes | Render target. |
 ```
 
 - Per target: `yes` (may be a token declaration), `markers` (may hold
