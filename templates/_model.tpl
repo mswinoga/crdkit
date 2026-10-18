@@ -14,8 +14,7 @@ Implementation notes:
   map the caller holds — a `set` here is visible to the caller once
   this include returns.
 - This is what lets any integration touch a ctx.model field without a
-  central, pre-declared "model shape" — no field, including "labels"
-  (the one field crdkit itself reads), is pre-initialized by anyone.
+  central, pre-declared "model shape" — no field is pre-initialized.
 - Prefer crdkit.dictMerge/crdkit.listExtend for the two common shapes
   ("field is a map, add entries" / "field is a list, add items") —
   reach for this directly only for a shape neither covers.

@@ -20,8 +20,8 @@ Implementation notes:
 */}}
 {{- define "crdkit.standardLabels" -}}
 {{- $root := .context -}}
-app.kubernetes.io/name: {{ $root.Chart.Name }}
-app.kubernetes.io/instance: {{ $root.Release.Name }}
-app.kubernetes.io/managed-by: {{ $root.Release.Service }}
-helm.sh/chart: {{ printf "%s-%s" $root.Chart.Name $root.Chart.Version }}
+app.kubernetes.io/name: {{ $root.Chart.Name | quote }}
+app.kubernetes.io/instance: {{ $root.Release.Name | quote }}
+app.kubernetes.io/managed-by: {{ $root.Release.Service | quote }}
+helm.sh/chart: {{ printf "%s-%s" $root.Chart.Name $root.Chart.Version | quote }}
 {{- end -}}

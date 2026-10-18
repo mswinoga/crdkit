@@ -8,9 +8,10 @@ mycrd.render).
 Interface:
 - Params (dict):
   - context: consumer's root $ (never nested under .Values.<name>.*)
-  - tokens: .Values.tokens (raw, may include target-keyed dicts)
-  - target: .Values.target — opaque string, whatever granularity the
-    caller's taxonomy uses
+  - tokens: raw consumer token declarations (may include target-keyed
+    dicts)
+  - target: opaque string, whatever granularity the caller's taxonomy
+    uses
   - system: raw locked-token declarations (always wins over consumer
     tokens — see crdkit.tokens.merge.internal)
   - defaults: raw default-token declarations (consumer may override)
@@ -18,7 +19,7 @@ Interface:
     the caller's target-escalation taxonomy — optional, defaults to
     crdkit.noParentTarget (no escalation)
   - chain: ordered list of fully-qualified integration template names
-    (head = outermost) — the ONLY thing that builds ctx.model
+    (called in list order) — the ONLY thing that builds ctx.model
   - annotations: optional list of annotation names supplied by the
     library. Each becomes a reserved key (never a target entry) on token
     declarations; crdkit stores annotations but never interprets or
