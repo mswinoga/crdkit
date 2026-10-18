@@ -241,7 +241,7 @@ tests:
             - "'application.services.APP.greting' is not a known key — ignored"
             - "'application.services[\"a.b\"].other' is not a known key — ignored"
 
-  - it: a key failing "keys.pattern" is a WARNING and is kept
+  - it: a key failing "keys.pattern" is an ERROR and is dropped with its value
     set:
       schemaOps:
         - op: validate
@@ -254,11 +254,14 @@ tests:
     asserts:
       - equal:
           path: results[0].value
-          value: {GOOD: 1, bad: 2}
+          value: {GOOD: 1}
+      - equal:
+          path: diag.errors
+          value:
+            - "key 'environment.bad' must match '^[A-Z][A-Z0-9_]*$' — ignored"
       - equal:
           path: diag.warnings
-          value:
-            - "key 'environment.bad' must match '^[A-Z][A-Z0-9_]*$'"
+          value: []
 
   - it: list elements are validated with indexed paths; a failing element is dropped
     set:

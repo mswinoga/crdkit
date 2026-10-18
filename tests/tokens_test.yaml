@@ -734,38 +734,22 @@ tests:
           path: diag.warnings[0]
           value: "token 'AT' is a reserved built-in and cannot be redefined; the user-supplied value was ignored"
 
-  - it: a lowercase (or otherwise non-UPPER_SNAKE_CASE) token name records a WARNING but still resolves
+  - it: token names are not checked by crdkit (naming policy belongs to the library)
     set:
       target: prod-01
       tokens.myToken: "hello"
+      tokens.1BAD: "x"
+      tokens._BAD: "y"
       structure.message: "@myToken@"
     asserts:
       - equal:
           path: structure.message
           value: "hello"
       - equal:
-          path: diag.warnings[0]
-          value: "token name 'myToken' should be UPPER_SNAKE_CASE for readability"
+          path: diag.warnings
+          value: []
 
-  - it: a token name starting with a digit is non-conforming, same WARNING as any other bad casing
-    set:
-      target: prod-01
-      tokens.1BAD: "x"
-    asserts:
-      - equal:
-          path: diag.warnings[0]
-          value: "token name '1BAD' should be UPPER_SNAKE_CASE for readability"
-
-  - it: a token name starting with an underscore is non-conforming too
-    set:
-      target: prod-01
-      tokens._BAD: "x"
-    asserts:
-      - equal:
-          path: diag.warnings[0]
-          value: "token name '_BAD' should be UPPER_SNAKE_CASE for readability"
-
-  - it: "GOTCHA: a differently-cased near-miss of a locked name is NOT blocked as a collision, only flagged for casing"
+  - it: "GOTCHA: a differently-cased near-miss of a locked name is NOT blocked as a collision"
     set:
       target: prod-01
       system.API_GROUP: "locked.example.com"
@@ -775,15 +759,13 @@ tests:
       # the user's "apiGroup" (different casing, different dict key) is a
       # DISTINCT token from the locked "API_GROUP" — no collision is
       # detected because the keys don't match, so it resolves normally.
-      # This documents a real, narrow gap in the reserved-name protection:
-      # it's case-sensitive, and the naming-convention check is only ever
-      # a WARNING, so this isn't actually prevented, just flagged.
+      # A library closes the gap with a name pattern in its values schema.
       - equal:
           path: structure.group
           value: "not-actually-blocked"
-      - matchRegex:
-          path: diag.warnings[0]
-          pattern: "'apiGroup' should be UPPER_SNAKE_CASE"
+      - equal:
+          path: diag.warnings
+          value: []
 
   # --- crdkit.token.add ---
 
@@ -969,9 +951,6 @@ tests:
       - equal:
           path: tokens.derivedVar.prod-01
           value: "computed"
-      - matchRegex:
-          path: diag.warnings[0]
-          pattern: "UPPER_SNAKE_CASE"
       - matchRegex:
           path: diag.errors[0]
           pattern: "annotations must be a dict"
@@ -1649,7 +1628,7 @@ tests:
           path: diag.errors
           count: 1
 
-  - it: "underlay warns on a non UPPER_SNAKE_CASE name"
+  - it: "underlay accepts any token name without a diagnostic"
     set:
       target: prod-01
       tokenOps:
@@ -1657,9 +1636,9 @@ tests:
           name: lowerName
           value: "v"
     asserts:
-      - contains:
+      - equal:
           path: diag.warnings
-          content: "token name 'lowerName' should be UPPER_SNAKE_CASE for readability"
+          value: []
 
   - it: "underlay with non-dict annotations records an ERROR and still stores the generated value"
     set:

@@ -255,8 +255,8 @@ tokens:
   field.
 - Internal keys written in a consumer, defaults or system declaration
   are removed at merge time with a `# WARNING:`.
-- Token names are expected to be `UPPER_SNAKE_CASE` — non-conforming
-  names still work, but record a `# WARNING:`.
+- Token names are not checked: a library sets its naming policy in its
+  values schema (e.g. a `keys.pattern` on the map variables live in).
 
 ### Adding tokens from an integration
 
@@ -448,7 +448,7 @@ list elements are indexed: `services["a.b"].ports[0]`.
 |---|---|---|
 | kind mismatch | WARNING | `'<path>' must be a map — ignored` |
 | unknown key | WARNING | `'<path>' is not a known key — ignored` |
-| key pattern | WARNING (kept) | `key '<path>' must match '<re>'` |
+| key pattern | ERROR | `key '<path>' must match '<re>' — ignored` |
 | switch, no key | WARNING | `'<path>' has no '<by>' — ignored` |
 | switch, no case | WARNING | `'<path>.<by>' has unknown value '<v>' — ignored` |
 | required | ERROR | `'<path>' is required` |

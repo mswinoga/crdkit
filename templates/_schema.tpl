@@ -341,11 +341,11 @@ Implementation notes:
 - Results travel through "out", not YAML: a YAML round-trip would turn
   every value into its decoded form at each level.
 - structural mode: kind mismatch / unknown key / unmatched switch →
-  WARNING; required / type / enum / pattern / markers → ERROR; a node
-  that fails is dropped (its parent's default then applies); a key
-  failing "keys.pattern" → WARNING, kept. A per-target node holding a
-  dict is a token declaration: kept as written, checked by the value
-  pass. A string holding "@NAME@" markers skips type/enum/pattern —
+  WARNING; required / type / enum / pattern / markers / keys.pattern →
+  ERROR; a node that fails is dropped (its parent's default then
+  applies), a key failing "keys.pattern" with its value. A per-target
+  node holding a dict is a token declaration: kept as written, checked
+  by the value pass. A string holding "@NAME@" markers skips type/enum/pattern —
   it is checked by the value pass once substituted.
 - resolved mode: the value is a resolved per-target value; every
   violation except an unknown key is an ERROR; scalars are checked
@@ -440,15 +440,16 @@ Implementation notes:
       {{- $childPath := include "crdkit.schema.path.internal" (dict "path" $path "key" $key) -}}
       {{- if not (kindIs "invalid" $child) -}}
         {{- $childNode := dict -}}
+        {{- $badKey := false -}}
         {{- if hasKey $properties $key -}}
           {{- $childNode = index $properties $key -}}
         {{- else if hasKey $node "values" -}}
           {{- $childNode = $node.values -}}
-          {{- if and (hasKey $node "keys") (not (mustRegexMatch $node.keys.pattern $key)) -}}
-            {{- $_ := set $diag "warnings" (append $diag.warnings (printf "key '%s'%s must match '%s'" $childPath $suffix $node.keys.pattern)) -}}
-          {{- end -}}
+          {{- $badKey = and (hasKey $node "keys") (not (mustRegexMatch $node.keys.pattern $key)) -}}
         {{- end -}}
-        {{- if not $childNode -}}
+        {{- if $badKey -}}
+          {{- $_ := set $diag "errors" (append $diag.errors (printf "key '%s'%s must match '%s'%s" $childPath $suffix $node.keys.pattern $tail)) -}}
+        {{- else if not $childNode -}}
           {{- $_ := set $diag "warnings" (append $diag.warnings (printf "'%s'%s is not a known key%s" $childPath $suffix $tail)) -}}
         {{- else -}}
           {{- $childOut := dict -}}

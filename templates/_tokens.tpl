@@ -211,9 +211,8 @@ Implementation notes:
 - Internal keys (`_value`, `_gen`, `_generated`) in any declaration are
   removed from a copy, each with a WARNING naming the token and key —
   only crdkit itself writes them.
-- Every final token name is checked against `^[A-Z][A-Z0-9_]*$` — a
-  WARNING (not ERROR) on mismatch, applied uniformly including
-  system/default names.
+- Token names are not checked: a naming policy belongs to the library
+  (e.g. its values schema).
 */}}
 {{- define "crdkit.tokens.merge.internal" -}}
 {{- $userTokens := .tokens | default dict -}}
@@ -243,12 +242,6 @@ Implementation notes:
 {{- range $name, $raw := $merged -}}
   {{- if not (kindIs "map" $raw) -}}
     {{- $_ := set $merged $name (dict "default" $raw) -}}
-  {{- end -}}
-{{- end -}}
-
-{{- range $name := keys $merged -}}
-  {{- if not (regexMatch "^[A-Z][A-Z0-9_]*$" $name) -}}
-    {{- $_ := set $diag "warnings" (append $diag.warnings (printf "token name '%s' should be UPPER_SNAKE_CASE for readability" $name)) -}}
   {{- end -}}
 {{- end -}}
 
@@ -829,9 +822,6 @@ Implementation notes:
 {{- end -}}
 {{- $tokens := $ctx.tokens -}}
 {{- $diag := $ctx.diag -}}
-{{- if not (regexMatch "^[A-Z][A-Z0-9_]*$" $name) -}}
-  {{- $_ := set $diag "warnings" (append $diag.warnings (printf "token name '%s' should be UPPER_SNAKE_CASE for readability" $name)) -}}
-{{- end -}}
 
 {{- if and $rawAnnotations (not (kindIs "map" $rawAnnotations)) -}}
   {{- $_ := set $diag "errors" (append $diag.errors (printf "crdkit.token.add for '%s': annotations must be a dict — ignored" $name)) -}}
@@ -884,8 +874,8 @@ Implementation notes:
 - Annotations never overwrite: an existing annotation (e.g. one the
   consumer declared) wins over the generated one.
 - Bumps ctx.gen to invalidate resolution caches.
-- Name check (UPPER_SNAKE_CASE WARNING) and annotations check match
-  crdkit.token.add; callers are trusted, first-party code.
+- Annotations check matches crdkit.token.add; callers are trusted,
+  first-party code.
 */}}
 {{- define "crdkit.token.underlay" -}}
 {{- $ctx := index . 0 -}}
@@ -901,9 +891,6 @@ Implementation notes:
 {{- end -}}
 {{- $tokens := $ctx.tokens -}}
 {{- $diag := $ctx.diag -}}
-{{- if not (regexMatch "^[A-Z][A-Z0-9_]*$" $name) -}}
-  {{- $_ := set $diag "warnings" (append $diag.warnings (printf "token name '%s' should be UPPER_SNAKE_CASE for readability" $name)) -}}
-{{- end -}}
 
 {{- if and $rawAnnotations (not (kindIs "map" $rawAnnotations)) -}}
   {{- $_ := set $diag "errors" (append $diag.errors (printf "crdkit.token.underlay for '%s': annotations must be a dict — ignored" $name)) -}}
