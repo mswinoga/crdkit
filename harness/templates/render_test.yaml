@@ -17,6 +17,20 @@ so this harness defines its own minimal one to prove the mechanism.
 {{- end -}}
 {{- include "crdkit.integrations.chain" . -}}
 {{- end -}}
+
+{{/* Copies every .Values.renderState key back out of ctx (as the chain sees it) into model.state, plus diag.errors at that point into model.stateErrors. "model" is skipped: copying ctx.model into itself would make it cyclic. */}}
+{{- define "harness.integration.exposeState" -}}
+{{- $ctx := . -}}
+{{- if .root.Values.renderState -}}
+  {{- $seen := dict -}}
+  {{- range $key, $_ := $ctx.root.Values.renderState -}}
+    {{- if ne $key "model" -}}
+      {{- $_ := set $seen $key (index $ctx $key) -}}
+    {{- end -}}
+  {{- end -}}
+  {{- include "crdkit.dictMerge" (list $ctx.model (dict "state" $seen "stateErrors" $ctx.diag.errors)) -}}
+{{- end -}}
+{{- end -}}
 {{- include "crdkit.render" (dict
       "context" $
       "tokens" (.Values.tokens | default dict)
@@ -25,5 +39,6 @@ so this harness defines its own minimal one to prove the mechanism.
       "defaults" (.Values.defaults | default dict)
       "annotations" (.Values.annotations | default (list))
       "diag" ((.Values.diagSeed | default dict) | toYaml | fromYaml)
-      "chain" (list "harness.integration.maybePopulateModel")
+      "state" ((.Values.renderState | default dict) | toYaml | fromYaml)
+      "chain" (list "harness.integration.maybePopulateModel" "harness.integration.exposeState")
     ) -}}

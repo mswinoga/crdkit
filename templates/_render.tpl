@@ -28,6 +28,10 @@ Interface:
   - diag: optional {errors, warnings} seed (missing lists are filled in
     with empty ones); crdkit only transports the seeded entries and
     appends new diagnostics as they arise, then emits them all
+  - state: optional dict whose keys are copied into ctx before the chain
+    runs — library-owned data for its integrations (e.g. normalized
+    input); crdkit never reads it. A key equal to a crdkit ctx key
+    records an ERROR and is ignored.
 - Returns: the rendered CR as YAML text, followed by its diagnostics as
   `# ERROR:`/`# WARNING:` comment lines.
 
@@ -39,7 +43,7 @@ Implementation notes:
 - ctx carries: root, diag, model, tokens, target, parentTargetTemplate,
   reservedKeys (list) and gen (int, starts at 0; bumped by
   crdkit.token.add / crdkit.token.underlay to invalidate resolution
-  caches).
+  caches), plus every accepted "state" key.
 - Never reads `context.Values` itself, and has no opinion on
   apiVersion/kind/labels/spec — entirely the chain's responsibility via
   crdkit.dictMerge/listExtend/ensureDictKey.
@@ -71,6 +75,13 @@ Implementation notes:
 
 {{- $model := dict -}}
 {{- $ctx := dict "root" $root "diag" $diag "model" $model "tokens" $tokens "target" $target "parentTargetTemplate" $parentTargetTemplate "reservedKeys" $reservedKeys "gen" 0 -}}
+{{- range $key, $value := .state | default dict -}}
+  {{- if hasKey $ctx $key -}}
+    {{- $_ := set $diag "errors" (append $diag.errors (printf "state key '%s' collides with a crdkit ctx key and was ignored" $key)) -}}
+  {{- else -}}
+    {{- $_ := set $ctx $key $value -}}
+  {{- end -}}
+{{- end -}}
 
 {{- include "crdkit.integrations.chain" (dict "chain" .chain "ctx" $ctx) -}}
 

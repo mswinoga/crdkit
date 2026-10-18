@@ -12,5 +12,6 @@ crossTargetNames: []
 parentTargetMap: {}
 chainSetsApiVersionKind: false
 diagSeed: {}
+renderState: {}
 annotations: []
 tokenDefs: {}

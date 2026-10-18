@@ -45,3 +45,56 @@ tests:
       - equal:
           path: kind
           value: "HarnessCR"
+
+  - it: a state seed key is copied into ctx and visible to the chain
+    set:
+      target: prod
+      renderState:
+        libraryData:
+          input: {a: 1}
+    asserts:
+      - equal:
+          path: state.libraryData
+          value:
+            input: {a: 1}
+      - lengthEqual:
+          path: stateErrors
+          count: 0
+
+  - it: a state key colliding with a crdkit ctx key records an ERROR and leaves ctx intact
+    set:
+      target: prod
+      chainPopulatesModel: true
+      tokens:
+        GROUP_SUFFIX: "v2"
+      renderState:
+        model: {hijacked: true}
+        target: other
+    asserts:
+      - equal:
+          path: kind
+          value: "HarnessCR"
+      - notExists:
+          path: hijacked
+      - equal:
+          path: state.target
+          value: prod
+      - contains:
+          path: stateErrors
+          content: "state key 'model' collides with a crdkit ctx key and was ignored"
+      - contains:
+          path: stateErrors
+          content: "state key 'target' collides with a crdkit ctx key and was ignored"
+
+  - it: an absent state seed changes nothing
+    set:
+      target: prod
+      chainPopulatesModel: true
+      tokens:
+        GROUP_SUFFIX: "v2"
+    asserts:
+      - notExists:
+          path: state
+      - equal:
+          path: apiVersion
+          value: "harness.example.com/v2"
