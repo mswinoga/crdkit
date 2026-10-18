@@ -57,6 +57,10 @@ Dependency graph (who calls whom):
               -> crdkit.schema.generatedExample.internal (recursive)
          -> crdkit.schema.sectionMarkdown.internal
   crdkit.schema.order.internal (internal) -> crdkit.schema.path.internal
+  crdkit.schema.document (public)
+    -> crdkit.schema.jsonSchema (public)
+    -> crdkit.schema.html (public, templates/_viewer.tpl)
+    -> crdkit.schema.docs (public)
   crdkit.schema.jsonSchema (public)
     -> crdkit.schema.check (public)
     -> crdkit.schema.order.internal
@@ -1829,3 +1833,41 @@ Implementation notes:
 {{- end -}}
 {{ $root | toPrettyJson }}
 {{ end -}}
+
+{{/*
+crdkit.schema.document (public)
+
+Generates one rendering of a values schema's documentation: the JSON
+Schema, the HTML viewer or the Markdown reference. A library calls it
+once per format, from its own documentation templates.
+
+Interface:
+- Params (dict): { "format": "json" | "html" | "md", "schemaText":
+  <schema as YAML text>, "example": <example values, optional>,
+  "sections": <{<node path>: [<section>]}, optional>, "title": <title,
+  optional>, "htmlLink": <URL of the HTML reference, "md" only,
+  optional>, "diag": <dict> }
+- Returns: that format's text (see crdkit.schema.jsonSchema,
+  crdkit.schema.html, crdkit.schema.docs); an empty string for an
+  unknown format (an ERROR is recorded).
+
+Implementation notes:
+- One crdkit.schema.jsonSchema call feeds every format, so the three
+  outputs agree. An invalid schema yields `{}` there (its ERRORs are
+  recorded) and the html/md renderers receive that.
+*/}}
+{{- define "crdkit.schema.document" -}}
+{{- $format := .format | default "" -}}
+{{- if not (has $format (list "json" "html" "md")) -}}
+  {{- $_ := set .diag "errors" (append .diag.errors (printf "crdkit.schema.document: unknown format '%s' (json, html or md) — nothing rendered" $format)) -}}
+{{- else -}}
+  {{- $json := include "crdkit.schema.jsonSchema" (dict "schemaText" .schemaText "example" .example "sections" .sections "title" (.title | default "") "diag" .diag) -}}
+  {{- if eq $format "json" -}}
+    {{- $json -}}
+  {{- else if eq $format "html" -}}
+    {{- include "crdkit.schema.html" (dict "schema" $json "title" (.title | default "")) -}}
+  {{- else -}}
+    {{- include "crdkit.schema.docs" (dict "schema" $json "title" (.title | default "") "htmlLink" (.htmlLink | default "")) -}}
+  {{- end -}}
+{{- end -}}
+{{- end -}}

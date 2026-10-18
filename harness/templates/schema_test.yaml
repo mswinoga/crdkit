@@ -17,6 +17,8 @@ entry to "results":
   - {op: html, schemaText, example?, sections?, title?}
                                                 → {text: <HTML>, outside: <HTML without the
                                                    embedded JSON>} (jsonSchema, then html)
+  - {op: document, format, schemaText, example?, sections?, title?, htmlLink?}
+                                                → {text: <that format's output>}
   - {op: order, text}                           → {order: {<schema path>: <index>}}
   - {op: jsonSchema, schemaText, example?, sections?, title?}
                                                 → {text: <JSON text>, json: <decoded>}
@@ -63,6 +65,8 @@ it renders empty lists — never interferes with a bare `helm template`.
     {{- $json := include "crdkit.schema.jsonSchema" (dict "schemaText" $op.schemaText "example" $op.example "sections" $op.sections "title" ($op.title | default "") "diag" $diag) -}}
     {{- $page := include "crdkit.schema.html" (dict "schema" $json "title" ($op.title | default "")) -}}
     {{- $results = append $results (dict "text" $page "outside" (regexReplaceAll "(?s)<script type=\"application/json\".*?</script>" $page "")) -}}
+  {{- else if eq $op.op "document" -}}
+    {{- $results = append $results (dict "text" (include "crdkit.schema.document" (dict "format" $op.format "schemaText" $op.schemaText "example" $op.example "sections" $op.sections "title" ($op.title | default "") "htmlLink" ($op.htmlLink | default "") "diag" $diag))) -}}
   {{- else if eq $op.op "order" -}}
     {{- $r := include "crdkit.schema.order.internal" (dict "text" $op.text) | fromYaml -}}
     {{- $results = append $results (dict "order" $r.value) -}}

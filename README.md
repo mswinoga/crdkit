@@ -289,8 +289,8 @@ for the same target overwrites the first.
 
 `templates/_schema.tpl` validates a library's consumer values against a
 schema the library supplies, normalizes them (defaults, dropped
-invalid nodes), checks per-target values for a target, and renders a
-Markdown values reference. crdkit owns the engine; the schema itself —
+invalid nodes), checks per-target values for a target, and generates the values
+documentation (JSON Schema, HTML viewer, Markdown). crdkit owns the engine; the schema itself —
 literal YAML, usually from the library's own defines — is the
 library's.
 
@@ -476,8 +476,10 @@ All take a dict.
 | `crdkit.schema.node` | `{schema, values, keys}` | YAML `{value: <node>}` or `{}` |
 | `crdkit.schema.value` | `{ctx, node, def, path, target?, seen?}` | YAML `{value: <resolved>}` |
 | `crdkit.schema.path` | `{keys, path?}` | the dotted path as text |
-| `crdkit.schema.docs` | `{schema, title?, htmlLink?}` — `schema` is the JSON Schema text | Markdown text |
+| `crdkit.schema.document` | `{format, schemaText, example?, sections?, title?, htmlLink?, diag}` | the text of one format (`json`, `html`, `md`) |
 | `crdkit.schema.jsonSchema` | `{schemaText, example?, sections?, title?, diag}` | JSON Schema text (draft-07) |
+| `crdkit.schema.html` | `{schema, title?}` — `schema` is the JSON Schema text | HTML page |
+| `crdkit.schema.docs` | `{schema, title?, htmlLink?}` — `schema` is the JSON Schema text | Markdown text |
 
 - `path`: values path prefix of `values` in the consumer's input (e.g.
   `application`); messages are relative to the root otherwise.
@@ -496,10 +498,104 @@ All take a dict.
 {{- $greeting := (include "crdkit.schema.value" (dict "ctx" .ctx "node" $node "def" $input.services.APP.greeting "path" $path "target" "qap1" "seen" $seen) | fromYaml).value -}}
 ```
 
+### Documentation
+
+`crdkit.schema.document` is the entry point: one call per format, each
+making one `crdkit.schema.jsonSchema` call and feeding its text to the
+renderer.
+
+| `format` | Output | Renderer |
+|---|---|---|
+| `json` | JSON Schema, draft-07 | `crdkit.schema.jsonSchema` |
+| `html` | one self-contained page | `crdkit.schema.html` |
+| `md` | Markdown reference | `crdkit.schema.docs` |
+
+- Params: `schemaText` (the schema as YAML text), `example`, `sections`,
+  `title`, `htmlLink` (`md` only), `diag`. An unknown `format` records
+  an ERROR and returns an empty string.
+- The schema is passed as text because key order exists only there;
+  the library's schema define is `include`d, not `fromYaml`-ed.
+- `htmlLink`: URL of the HTML reference, linked from the Markdown title.
+- `example`: example values (a dict, usually `.Values` of an example
+  file). Every node gets `examples`, the values found at its path
+  (through a `values` map: every entry; through a switch: the entries
+  whose `by` key equals the case value). A node the example does not
+  reach shows a generated example, marked as generated: `default`, else
+  the first `enum` value, else a value per type.
+- `sections`: `{<node path>: [{title, doc?, columns?, rows?, code?}]}`
+  adds library-written tables and YAML blocks to a node. A node path is
+  a values path with `*` for a `values` key, `[]` for list items and
+  `[<by>=<value>]` for a switch case
+  (`application.services.*[type=greeter]`). crdkit never interprets a
+  section; a malformed one or an unknown path records an ERROR and is
+  dropped.
+- `keys.label` (schema) names a matched key in the tree, tables and
+  skeleton (`<ID>`; default `<key>`).
+
+```gotemplate
+{{- $diag := dict "errors" (list) "warnings" (list) -}}
+{{- $args := dict "schemaText" (include "mylib.schema" .) "example" $example "sections" $sections "title" "My values" "diag" $diag -}}
+{{ include "crdkit.schema.document" (merge (dict "format" "html") $args) }}
+```
+
+### JSON Schema
+
+`crdkit.schema.jsonSchema` turns the schema text into a draft-07 JSON
+Schema for editors and the viewer; the DSL maps keyword by keyword
+(`type`, `properties`, `required`, `additionalProperties`,
+`propertyNames`, `enum`, `pattern`, `default`, `doc` →
+`description`/`markdownDescription`).
+- Key order is emitted as `x-crdkit-order`; flow-map keys sort
+  alphabetically after the positioned ones.
+- Per-target nodes are `anyOf` [type, `tokenDeclaration`, `markers`];
+  an `int`/`number`/`bool` that accepts markers is `anyOf` [type,
+  `markers`]; `markers: false` on a `string`/`scalar` adds a `not`
+  pattern.
+- A switch case is a complete, closed schema under
+  `definitions["<node path>[<by>=<case>]"]`, selected by `allOf`
+  `if/then`; properties identical in every case (two or more) carry
+  `x-crdkit-shared`.
+- `examples` and `x-crdkit-sections` come from `example` and `sections`.
+- An invalid schema records the self-check ERRORs and returns `{}`.
+
+Editor use:
+- Commit the JSON as `input.schema.json` and point consumers at it with
+  `# yaml-language-server: $schema=<URL>` in their values file.
+- Never name it `values.schema.json`: Helm validates a chart's own
+  values against that file on every install and template, so a library
+  chart's copy would be applied to the subchart scope instead of the
+  consumer's root.
+- `x-crdkit-*` keywords are ignored by editors; strict validators (ajv
+  `strict`) reject them — use `strict: false`.
+
+Editor vs render (the render stays the authority; the editor is a typing
+aid):
+
+| Situation | Render | Editor |
+|---|---|---|
+| unknown key / unknown case | WARNING, dropped | error |
+| static scalar type | strict | strict |
+| per-target declaration | resolved and checked per target | accepted unchecked |
+| marker in a non-string scalar | checked after substitution | accepted unchecked |
+| `enum` | compared as strings | compared as typed |
+| `pattern` | RE2 | ECMA-262 (same for the DSL's simple patterns) |
+
+### HTML reference
+
+`crdkit.schema.html` renders the JSON Schema text as one self-contained
+page: no external request, system fonts, light and dark through
+`prefers-color-scheme`, opens from disk.
+- The schema is embedded as `<script type="application/json"
+  id="crdkit-schema">`; the viewer shell is fixed, so a schema or
+  example change changes only the embedded JSON.
+- A tree of keys in schema order (type, required, per-target, default,
+  first line of `doc`), switch cases as rows with their own pages,
+  search, and a URL fragment per node path.
+- Generated examples follow the same rules as the Markdown.
+
 ### Markdown reference
 
-`crdkit.schema.docs` renders the JSON Schema text returned by
-`crdkit.schema.jsonSchema`:
+`crdkit.schema.docs` renders the JSON Schema text:
 
 - `# <title>` (default: the schema's title) and, with `htmlLink`, a link
   to the HTML reference;
@@ -509,7 +605,9 @@ All take a dict.
 - one `## <path>` section per map node: its doc and a table of its keys,
   with only the columns that have content;
 - one `## <node path>` section per switch case: doc, keys table (shared
-  keys marked), the example, its sections.
+  keys marked), the example (matching `example` entries wrapped in their
+  ancestor keys, or a generated one marked `(generated)`), its
+  sections.
 
 ```markdown
 | Key | Type | Per target | Default | Required | Description |
@@ -521,39 +619,6 @@ All take a dict.
 
 - Per target: `yes` (may be a token declaration), `markers` (may hold
   `@NAME@` markers), `no` (static).
-- A `values` child is shown as its key label (`<ID>`, default `<key>`).
-- Keys follow the schema text's order.
-- A case's example is the example values whose switch key equals the case
-  value, wrapped in their ancestor keys; a case the example does not
-  reach gets a generated one (`default`, else the first `enum` value,
-  else a value per type), marked `(generated)`.
-
-### JSON Schema
-
-`crdkit.schema.jsonSchema` turns the schema text into a draft-07 JSON
-Schema for editors and a viewer; the DSL maps keyword by keyword
-(`type`, `properties`, `required`, `additionalProperties`,
-`propertyNames`, `enum`, `pattern`, `default`, `doc` →
-`description`/`markdownDescription`).
-- Takes the schema as text: key order exists only there and is emitted
-  as `x-crdkit-order`; flow-map keys sort alphabetically after the
-  positioned ones.
-- Per-target nodes are `anyOf` [type, `tokenDeclaration`, `markers`];
-  an `int`/`number`/`bool` that accepts markers is `anyOf` [type,
-  `markers`]; `markers: false` on a `string`/`scalar` adds a `not`
-  pattern.
-- A switch case is a complete, closed schema under
-  `definitions["<node path>[<by>=<case>]"]`, selected by `allOf`
-  `if/then`; properties identical in every case (two or more) carry
-  `x-crdkit-shared`.
-- `example` (values) attaches the values found at each node as
-  `examples`; `sections` (`{<node path>: [{title, doc?, columns?,
-  rows?, code?}]}`) attach by node path (`*` for a `values` key, `[]`
-  for list items) as `x-crdkit-sections` and in `markdownDescription`.
-  A malformed section or an unknown path records an ERROR.
-- An invalid schema records the self-check ERRORs and returns `{}`.
-- `x-crdkit-*` keywords are ignored by editors; strict validators (ajv
-  `strict`) reject them — use `strict: false`.
 
 ## Local testing
 

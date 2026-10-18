@@ -1800,3 +1800,91 @@ tests:
     asserts:
       - matchSnapshot:
           path: results[0].text
+
+  - it: 'document: json returns the JSON Schema text'
+    set:
+      schemaOps:
+        - op: document
+          format: json
+          title: Doc
+          schemaText: "type: map\nproperties:\n  target: {type: string}\n"
+          example: {target: prod}
+    asserts:
+      - matchRegex:
+          path: results[0].text
+          pattern: '^\{\n  "\$schema": "http://json-schema.org/draft-07/schema#"'
+      - matchRegex:
+          path: results[0].text
+          pattern: '"title": "Doc"'
+      - matchRegex:
+          path: results[0].text
+          pattern: '"prod"'
+      - equal:
+          path: diag.errors
+          value: []
+
+  - it: 'document: html returns the viewer page embedding the same JSON'
+    set:
+      schemaOps:
+        - op: document
+          format: html
+          title: Doc
+          schemaText: "type: map\nproperties:\n  target: {type: string}\n"
+    asserts:
+      - matchRegex:
+          path: results[0].text
+          pattern: '^<!doctype html>'
+      - matchRegex:
+          path: results[0].text
+          pattern: 'id="crdkit-schema">\{\n  "\$schema"'
+      - matchRegex:
+          path: results[0].text
+          pattern: '"title": "Doc"'
+
+  - it: 'document: md returns the Markdown reference with the HTML link'
+    set:
+      schemaOps:
+        - op: document
+          format: md
+          title: Doc
+          htmlLink: "VALUES.html"
+          schemaText: "type: map\nproperties:\n  target: {type: string}\n"
+    asserts:
+      - matchRegex:
+          path: results[0].text
+          pattern: '^# Doc\n'
+      - matchRegex:
+          path: results[0].text
+          pattern: 'VALUES\.html'
+      - matchRegex:
+          path: results[0].text
+          pattern: '\| `target` \|'
+
+  - it: 'document: an unknown format records an ERROR and renders nothing'
+    set:
+      schemaOps:
+        - op: document
+          format: pdf
+          schemaText: "type: map\n"
+    asserts:
+      - equal:
+          path: results[0].text
+          value: ""
+      - equal:
+          path: diag.errors
+          value:
+            - "crdkit.schema.document: unknown format 'pdf' (json, html or md) — nothing rendered"
+
+  - it: 'document: an invalid schema records the self-check ERRORs in every format'
+    set:
+      schemaOps:
+        - op: document
+          format: json
+          schemaText: "type: nonsense\n"
+    asserts:
+      - matchRegex:
+          path: results[0].text
+          pattern: '^\{\}\s*$'
+      - matchRegex:
+          path: diag.errors[0]
+          pattern: '^schema invalid'
