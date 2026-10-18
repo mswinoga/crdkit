@@ -288,47 +288,222 @@ for the same target overwrites the first.
 ## Values schema
 
 `templates/_schema.tpl` validates a library's consumer values against a
-schema the library supplies (literal YAML from its own defines) and
-renders a Markdown reference from it. Node shape: see the file-level doc
-comment.
+schema the library supplies, normalizes them (defaults, dropped
+invalid nodes), checks per-target values for a target, and renders a
+Markdown values reference. crdkit owns the engine; the schema itself —
+literal YAML, usually from the library's own defines — is the
+library's.
+
+### Schema DSL
+
+A schema is a tree of **nodes**; each node is a dict.
+
+| Key | Applies to | Meaning | Omitted |
+|---|---|---|---|
+| `kind` | all | `scalar` \| `map` \| `list` \| `any` | self-check ERROR (a `switch` node is a map) |
+| `doc` | all | Markdown text for the reference | allowed |
+| `default` | all | value inserted when the key is absent | none |
+| `required` | all | the key must be present | `false` |
+| `type` | `scalar` | `string` \| `int` \| `number` \| `bool` | any scalar |
+| `enum` | `scalar` | list of allowed values (compared as strings) | any |
+| `pattern` | `scalar` | regex on the value's string form, unanchored | any |
+| `markers` | `scalar` | `false` → a `@NAME@` marker is an ERROR | `true` |
+| `tokens` | `scalar`, `list` | `true` → the value may be a token declaration | `true` (see below) |
+| `properties` | `map` | `{<key>: <node>}` for named keys | none |
+| `values` | `map` | node for every key not in `properties` | closed: other keys → WARNING |
+| `keys` | `map` | `{pattern: <regex>}` for keys matched by `values` | any key |
+| `items` | `list` | node for every element | `{kind: any}` |
+| `switch` | node | `{by: <key>, cases: {<value>: <node>}}` | — |
+
+Kinds:
+- `scalar` — string, number or bool.
+- `map` — `properties` and/or `values`; with neither, it accepts no
+  keys.
+- `list` — every element checked against `items`.
+- `any` — accepts every value; nothing below it is checked. A map of
+  anything is `{kind: map, values: {kind: any}}`.
+
+Switch:
+- A node with `switch` validates a map against the case named by the
+  value of its `by` key; each case is a complete node.
+- Every case must declare the `by` key as `kind: scalar, markers:
+  false` — the case is chosen before anything is resolved.
+- No case for the value, or no `by` key → WARNING, node dropped.
+- The key is `by`, never `on`: Helm's `fromYaml` speaks YAML 1.1 and
+  reads an `on:`/`yes:`/`no:` KEY as a boolean.
+
+Per-target values (`tokens`):
+- A per-target node's value may be a plain value or a token declaration
+  (`default`, target keys, `match`), resolved for a target exactly like
+  a token (see "Target escalation").
+- Per-target by default on `scalar` and `list` — except a `markers:
+  false` scalar (static) and any node below a per-target node. An
+  explicit `tokens: false` opts out.
+- Only `scalar`/`list`: a declaration is always a dict, so a dict in a
+  scalar/list field is unambiguously a declaration
+  (`{default: [a], prod: [a, b]}`); in a map field it would not be.
+- At most one per-target node on any path from the root.
+
+Defaults and required:
+- `default` (on a `properties` entry) is inserted, as written, when the
+  key is absent — also after its value was dropped as invalid. It may
+  be a token declaration.
+- `required: true` and `default` exclude each other.
+- A `null` value counts as absent.
+
+Example:
 
 ```yaml
 kind: map
-values: {kind: any}                     # every key not in properties
+values: {kind: any}                       # the consumer chart's own keys
 properties:
-  target: {kind: scalar, type: string, markers: false, required: true, doc: "Render target."}
+  target:     {kind: scalar, type: string, markers: false, required: true, doc: "Render target."}
+  renderMode: {kind: scalar, markers: false, enum: [validate, deploy], default: deploy}
   services:
     kind: map
+    keys: {pattern: "^[A-Z][A-Z0-9_-]*$"}
     values:
       switch:
-        by: type                        # not "on": YAML 1.1 reads it as true
+        by: type
         cases:
           greeter:
             kind: map
             properties:
-              type: {kind: scalar, markers: false}
-              greeting: {kind: scalar, type: string, tokens: true, default: hi}
+              type:     {kind: scalar, markers: false, required: true}
+              enabled:  {kind: scalar, type: bool, markers: false, default: true}
+              greeting: {kind: scalar, type: string, doc: "File content."}   # per-target
+              ports:    {kind: list, items: {kind: scalar, type: int}}      # per-target list
 ```
 
-- Omitted keys: `required` false, `markers` true, `type` any scalar,
-  `items` any, a map without `values` closed; `tokens` true on scalars
-  and lists, except a `markers: false` scalar and anything below a
-  per-target node; `kind` must be written (except on a switch node).
-- `crdkit.schema.check` — self-check; `true` or an empty string, each
-  problem an `# ERROR: schema invalid: …`.
-- `crdkit.schema.validate` — structural pass, before the chain:
-  `{value: <normalized values>}` with defaults applied and failing
-  nodes dropped. Kind mismatch, unknown key, unmatched switch →
-  WARNING; required/type/enum/pattern/markers → ERROR.
-- `crdkit.schema.validateValues` — value pass for one target: every
-  `tokens: true` value (resolved like a token) and every string with
-  `@NAME@` markers (substituted), checked "parses as" (`"5"` is an
-  int). Messages name the target.
-- `crdkit.schema.value` — one field for any target, resolved and
-  checked; `crdkit.schema.node` finds a field's node (follows switches).
-  A shared `seen` dict reports each path/target pair once.
-- `crdkit.schema.docs` — Markdown reference: one table for the root,
-  one per switch case.
+### Self-check
+
+`crdkit.schema.check` runs before every pass; an invalid schema skips
+validation (values pass through unchanged). Each problem →
+`# ERROR: schema invalid: <schema path>: <reason>`, recorded once
+however often the schema is checked:
+- a schema that failed to parse (Helm's `fromYaml` error dict);
+- unknown node key, unknown `kind`/`type`, a key on a kind it doesn't
+  apply to, a non-bool flag, a non-list `enum`, malformed
+  `keys`/`switch`;
+- `tokens: true` on `map`/`any`, below a per-target node, or with
+  `markers: false`; `default` with `required: true`;
+- a switch case not declaring its `by` key as a static scalar.
+
+An invalid regex in `pattern`/`keys.pattern` aborts the render
+(`mustRegexMatch`), like a `match:` rule.
+
+### Passes
+
+```
+crdkit.schema.validate        values as written → normalized values      (before the chain)
+crdkit.schema.validateValues  per-target values, for one target          (after the chain)
+crdkit.schema.value           one field, any target, resolved + checked  (from an integration)
+```
+
+Structural pass (`crdkit.schema.validate`):
+- Checks kinds, unknown keys, `required`, switches, `keys.pattern`, and
+  `type`/`enum`/`pattern`/`markers` of static values.
+- Returns `{value: <normalized>}`: defaults applied, every failing node
+  dropped (so its default applies instead).
+- Leaves per-target values for the value pass: a token declaration is
+  kept as written; a string holding `@NAME@` markers skips
+  `type`/`enum`/`pattern`.
+- `type` is checked strictly on values as written (`"5"` is not an
+  `int`; Helm decodes every number as float64, so an integral number
+  is).
+
+Value pass (`crdkit.schema.validateValues`):
+- Resolves every per-target value (`crdkit.tokenDef.value`, field id =
+  values path) and substitutes every string holding markers
+  (`crdkit.tokens.substitute`), for one target, then checks the result.
+- Checks "parses as": a native value or a string spelling the type
+  (`"5"` and `"@BASE@0"` → `"40"` pass `int`; `true|false` pass
+  `bool`; every scalar passes `string`).
+- Skips a value whose resolution already recorded an ERROR (e.g. "no
+  value found") or left a marker unresolved.
+- Only follows what the structural pass keeps; pass it normalized
+  values.
+- Resolution substitutes markers at call time — tokens added later are
+  not seen — and caches onto the declarations in the values (`_value`/
+  `_gen`).
+
+Single field (`crdkit.schema.value`):
+- For library code that needs a field's value for a target other than
+  the render's own (`qap1` while rendering `qa`): resolves it and checks
+  it for that target. A static value is returned as written.
+- Takes the field's node from `crdkit.schema.node`, which follows
+  `properties`/`values`/list indices/switches through the values and
+  makes the node's per-target state explicit.
+- Pass the same `seen` dict to `crdkit.schema.validateValues` and every
+  `crdkit.schema.value` call: each `<path>|<target>` pair is checked and
+  reported once.
+
+### Diagnostics
+
+Paths are dotted values paths; a key containing `.` goes in brackets,
+list elements are indexed: `services["a.b"].ports[0]`.
+
+| Check | Level | Message |
+|---|---|---|
+| kind mismatch | WARNING | `'<path>' must be a map — ignored` |
+| unknown key | WARNING | `'<path>' is not a known key — ignored` |
+| key pattern | WARNING (kept) | `key '<path>' must match '<re>'` |
+| switch, no key | WARNING | `'<path>' has no '<by>' — ignored` |
+| switch, no case | WARNING | `'<path>.<by>' has unknown value '<v>' — ignored` |
+| required | ERROR | `'<path>' is required` |
+| type / enum / pattern | ERROR | `'<path>' must be of type 'int' — ignored` |
+| markers | ERROR | `'<path>' must not contain '@NAME@' markers — ignored` |
+| value pass | ERROR | `'<path>' for target '<t>' must be of type 'int' — got '<v>'` |
+
+In the value pass every violation except an unknown key is an ERROR.
+
+### Templates
+
+All take a dict.
+
+| Template | Params | Returns |
+|---|---|---|
+| `crdkit.schema.check` | `{schema, diag}` | `true` or an empty string |
+| `crdkit.schema.validate` | `{schema, values, diag, path?}` | YAML `{value: <normalized>}` |
+| `crdkit.schema.validateValues` | `{ctx, schema, values, path?, target?, seen?}` | nothing |
+| `crdkit.schema.node` | `{schema, values, keys}` | YAML `{value: <node>}` or `{}` |
+| `crdkit.schema.value` | `{ctx, node, def, path, target?, seen?}` | YAML `{value: <resolved>}` |
+| `crdkit.schema.docs` | `{schema, title?}` | Markdown text |
+
+- `path`: values path prefix of `values` in the consumer's input (e.g.
+  `application`); messages are relative to the root otherwise.
+- `target` defaults to `ctx.target`.
+- `seen`: pass a dict you keep; an empty one is fine.
+
+```gotemplate
+{{- $schema := include "mylib.schema" . | fromYaml -}}
+{{- $values := .Values | toYaml | fromYaml -}}
+{{- $input := (include "crdkit.schema.validate" (dict "schema" $schema "values" $values "diag" $diag) | fromYaml).value -}}
+
+{{/* later, from an integration */}}
+{{- include "crdkit.schema.validateValues" (dict "ctx" .ctx "schema" $schema "values" $input "seen" $seen) -}}
+{{- $node := (include "crdkit.schema.node" (dict "schema" $schema "values" $input "keys" (list "services" "APP" "greeting")) | fromYaml).value -}}
+{{- $greeting := (include "crdkit.schema.value" (dict "ctx" .ctx "node" $node "def" $input.services.APP.greeting "path" "services.APP.greeting" "target" "qap1" "seen" $seen) | fromYaml).value -}}
+```
+
+### Markdown reference
+
+`crdkit.schema.docs` renders `# <title>` (default `Values`), one table
+for the root, then one `## <path> with <by>: <case>` table per switch
+case:
+
+```markdown
+| Key | Kind | Per target | Default | Required | Description |
+| --- | --- | --- | --- | --- | --- |
+| `renderMode` | scalar, one of: validate, deploy | no | `"deploy"` |  |  |
+| `services.<key>` | map, by `type`: greeter |  |  |  |  |
+| `target` | scalar (string) | no |  | yes | Render target. |
+```
+
+- Per target: `yes` (may be a token declaration), `markers` (may hold
+  `@NAME@` markers), `no` (static).
+- A `values` child shows as `<path>.<key>`, list items as `<path>[]`.
+- Keys are sorted alphabetically — Go maps keep no order.
 
 ## Local testing
 
