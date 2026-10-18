@@ -821,23 +821,23 @@ tests:
         - op: docs
           schema:
             switch:
-              by: kind
+              by: flavor
               cases:
                 a:
                   type: map
                   properties:
-                    kind: {type: scalar, markers: false}
+                    flavor: {type: scalar, markers: false}
     asserts:
       - equal:
           path: results[0].text
           value: |
             # Values
 
-            ## (root) with `kind: a`
+            ## (root) with `flavor: a`
 
             | Key | Type | Per target | Default | Required | Description |
             | --- | --- | --- | --- | --- | --- |
-            | `kind` | scalar | no |  |  |  |
+            | `flavor` | scalar | no |  |  |  |
 
   # --- omitted DSL keys ---
 
