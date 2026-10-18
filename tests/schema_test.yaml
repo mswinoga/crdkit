@@ -1,0 +1,466 @@
+suite: crdkit values schema
+templates:
+  - schema_test.yaml
+tests:
+
+  # --- self-check ---
+
+  - it: a valid schema passes the self-check
+    set:
+      schemaOps:
+        - op: check
+          schema:
+            kind: map
+            properties:
+              name: {kind: scalar, type: string, required: true, doc: "Name."}
+              tags: {kind: list, items: {kind: scalar}}
+              extra: {kind: map, values: {kind: any}, keys: {pattern: "^[a-z]+$"}}
+              host: {kind: scalar, tokens: true}
+    asserts:
+      - equal:
+          path: results[0].ok
+          value: "true"
+      - lengthEqual:
+          path: diag.errors
+          count: 0
+
+  - it: every self-check rule records its own ERROR and the check fails
+    set:
+      schemaOps:
+        - op: check
+          schema:
+            kind: map
+            properties:
+              a: {kind: thing}
+              b: {kind: map, type: string}
+              c: {kind: scalar, type: date}
+              d: {kind: map, tokens: true}
+              e: {kind: list, tokens: true, items: {kind: scalar, tokens: true}}
+              f: {kind: scalar, tokens: true, markers: false}
+              g: {kind: scalar, default: x, required: true}
+              h: {kind: scalar, requried: true}
+              i: {kind: scalar, enum: a}
+              j: {kind: map, keys: {}}
+              k: "not-a-node"
+              l: {kind: scalar, required: "yes"}
+    asserts:
+      - equal:
+          path: results[0].ok
+          value: ""
+      - equal:
+          path: diag.errors
+          value:
+            - "schema invalid: properties.a: unknown kind 'thing'"
+            - "schema invalid: properties.b: 'type' does not apply to kind 'map'"
+            - "schema invalid: properties.c: unknown type 'date'"
+            - "schema invalid: properties.d: 'tokens' does not apply to kind 'map'"
+            - "schema invalid: properties.e.items: 'tokens: true' below another 'tokens: true'"
+            - "schema invalid: properties.f: 'tokens: true' and 'markers: false' exclude each other"
+            - "schema invalid: properties.g: 'default' and 'required: true' exclude each other"
+            - "schema invalid: properties.h: unknown schema key 'requried'"
+            - "schema invalid: properties.i: 'enum' must be a list"
+            - "schema invalid: properties.j: 'keys' must be {pattern: <regex>}"
+            - "schema invalid: properties.k: node must be a map"
+            - "schema invalid: properties.l: 'required' must be a bool"
+
+  - it: a switch case must declare the switch key as a static scalar
+    set:
+      schemaOps:
+        - op: check
+          schema:
+            kind: map
+            values:
+              switch:
+                by: type
+                cases:
+                  good:
+                    kind: map
+                    properties:
+                      type: {kind: scalar, markers: false}
+                  bad:
+                    kind: map
+                    properties:
+                      type: {kind: scalar}
+                  missing:
+                    kind: map
+    asserts:
+      - equal:
+          path: diag.errors
+          value:
+            - "schema invalid: values: case 'bad' must declare 'type' as kind 'scalar' with 'markers: false'"
+            - "schema invalid: values: case 'missing' must declare 'type' as kind 'scalar' with 'markers: false'"
+
+  - it: a schema that failed to parse is reported once, however often it is checked
+    set:
+      schemaOps:
+        - op: check
+          schema: {Error: "error converting YAML to JSON: yaml: line 2"}
+        - op: check
+          schema: {Error: "error converting YAML to JSON: yaml: line 2"}
+    asserts:
+      - equal:
+          path: diag.errors
+          value:
+            - "schema invalid: (root): does not parse: error converting YAML to JSON: yaml: line 2"
+
+  - it: an invalid schema skips validation and returns the values unchanged
+    set:
+      schemaOps:
+        - op: validate
+          schema: {kind: map, properties: {a: {kind: bogus}}, values: {kind: scalar}}
+          values: {a: 1, b: [x]}
+    asserts:
+      - equal:
+          path: results[0].value
+          value: {a: 1, b: [x]}
+      - lengthEqual:
+          path: diag.warnings
+          count: 0
+
+  # --- kinds ---
+
+  - it: values matching every kind pass through unchanged, with no diagnostics
+    set:
+      schemaOps:
+        - op: validate
+          schema:
+            kind: map
+            properties:
+              name: {kind: scalar, type: string}
+              count: {kind: scalar, type: int}
+              ratio: {kind: scalar, type: number}
+              flag: {kind: scalar, type: bool}
+              tags: {kind: list, items: {kind: scalar, type: string}}
+              labels: {kind: map, values: {kind: any}}
+              blob: {kind: any}
+          values:
+            name: app
+            count: 3
+            ratio: 0.5
+            flag: true
+            tags: [a, b]
+            labels: {x: {y: [1]}}
+            blob: [1, {z: 2}]
+    asserts:
+      - equal:
+          path: results[0].value
+          value:
+            name: app
+            count: 3
+            ratio: 0.5
+            flag: true
+            tags: [a, b]
+            labels: {x: {y: [1]}}
+            blob: [1, {z: 2}]
+      - lengthEqual:
+          path: diag.errors
+          count: 0
+      - lengthEqual:
+          path: diag.warnings
+          count: 0
+
+  - it: a kind mismatch is a WARNING and the node is dropped
+    set:
+      schemaOps:
+        - op: validate
+          schema:
+            kind: map
+            properties:
+              m: {kind: map}
+              l: {kind: list}
+              s: {kind: scalar}
+              keep: {kind: scalar}
+          values: {m: "x", l: {a: 1}, s: [1], keep: ok}
+    asserts:
+      - equal:
+          path: results[0].value
+          value: {keep: ok}
+      - equal:
+          path: diag.warnings
+          value:
+            - "'l' must be a list — ignored"
+            - "'m' must be a map — ignored"
+            - "'s' must be a scalar — ignored"
+      - lengthEqual:
+          path: diag.errors
+          count: 0
+
+  - it: a root value of the wrong kind comes back as an empty map
+    set:
+      schemaOps:
+        - op: validate
+          schema: {kind: map}
+          values: "not-a-map"
+          path: application
+    asserts:
+      - equal:
+          path: results[0].value
+          value: {}
+      - equal:
+          path: diag.warnings
+          value:
+            - "'application' must be a map — ignored"
+
+  - it: an unknown key is a WARNING with its full path and is dropped; a map with "values" accepts every other key
+    set:
+      schemaOps:
+        - op: validate
+          schema:
+            kind: map
+            properties:
+              application:
+                kind: map
+                properties:
+                  services:
+                    kind: map
+                    values:
+                      kind: map
+                      properties:
+                        greeting: {kind: scalar}
+            values: {kind: any}
+          values:
+            global: {x: 1}
+            application:
+              services:
+                APP: {greting: hi, greeting: hello}
+                "a.b": {other: 1}
+              extra: true
+    asserts:
+      - equal:
+          path: results[0].value
+          value:
+            global: {x: 1}
+            application:
+              services:
+                APP: {greeting: hello}
+                "a.b": {}
+      - equal:
+          path: diag.warnings
+          value:
+            - "'application.extra' is not a known key — ignored"
+            - "'application.services.APP.greting' is not a known key — ignored"
+            - "'application.services[\"a.b\"].other' is not a known key — ignored"
+
+  - it: a key failing "keys.pattern" is a WARNING and is kept
+    set:
+      schemaOps:
+        - op: validate
+          schema:
+            kind: map
+            keys: {pattern: "^[A-Z][A-Z0-9_]*$"}
+            values: {kind: scalar}
+          values: {GOOD: 1, bad: 2}
+          path: environment
+    asserts:
+      - equal:
+          path: results[0].value
+          value: {GOOD: 1, bad: 2}
+      - equal:
+          path: diag.warnings
+          value:
+            - "key 'environment.bad' must match '^[A-Z][A-Z0-9_]*$'"
+
+  - it: list elements are validated with indexed paths; a failing element is dropped
+    set:
+      schemaOps:
+        - op: validate
+          schema:
+            kind: map
+            properties:
+              ports: {kind: list, items: {kind: scalar, type: int}}
+          values: {ports: [80, "http", 443]}
+    asserts:
+      - equal:
+          path: results[0].value
+          value: {ports: [80, 443]}
+      - equal:
+          path: diag.errors
+          value:
+            - "'ports[1]' must be of type 'int' — ignored"
+
+  # --- scalar rules ---
+
+  - it: type, enum, pattern and markers violations are ERRORs and the value is dropped
+    set:
+      schemaOps:
+        - op: validate
+          schema:
+            kind: map
+            properties:
+              enabled: {kind: scalar, type: bool}
+              count: {kind: scalar, type: int}
+              ratio: {kind: scalar, type: number}
+              name: {kind: scalar, type: string}
+              mode: {kind: scalar, enum: [validate, deploy]}
+              id: {kind: scalar, pattern: "^[a-z]+$"}
+              type: {kind: scalar, markers: false}
+          values:
+            enabled: "false"
+            count: 1.5
+            ratio: "0.5"
+            name: 5
+            mode: deploi
+            id: ABC
+            type: "@KIND@"
+    asserts:
+      - equal:
+          path: results[0].value
+          value: {}
+      - equal:
+          path: diag.errors
+          value:
+            - "'count' must be of type 'int' — ignored"
+            - "'enabled' must be of type 'bool' — ignored"
+            - "'id' must match '^[a-z]+$' — ignored"
+            - "'mode' must be one of 'validate', 'deploy' — ignored"
+            - "'name' must be of type 'string' — ignored"
+            - "'ratio' must be of type 'number' — ignored"
+            - "'type' must not contain '@NAME@' markers — ignored"
+
+  - it: a string holding markers skips type/enum/pattern (the value pass checks it)
+    set:
+      schemaOps:
+        - op: validate
+          schema:
+            kind: map
+            properties:
+              count: {kind: scalar, type: int, enum: [1, 2]}
+          values: {count: "@COUNT@"}
+    asserts:
+      - equal:
+          path: results[0].value
+          value: {count: "@COUNT@"}
+      - lengthEqual:
+          path: diag.errors
+          count: 0
+
+  - it: 'a token declaration in a "tokens: true" field is kept as written; a plain value is checked as usual'
+    set:
+      schemaOps:
+        - op: validate
+          schema:
+            kind: map
+            properties:
+              greeting: {kind: scalar, type: string, tokens: true}
+              hosts: {kind: list, tokens: true, items: {kind: scalar}}
+              plain: {kind: scalar, type: int, tokens: true}
+          values:
+            greeting: {default: hi, prod: hello}
+            hosts: {default: [a], prod: [a, b]}
+            plain: "x"
+    asserts:
+      - equal:
+          path: results[0].value
+          value:
+            greeting: {default: hi, prod: hello}
+            hosts: {default: [a], prod: [a, b]}
+      - equal:
+          path: diag.errors
+          value:
+            - "'plain' must be of type 'int' — ignored"
+
+  # --- required / defaults ---
+
+  - it: a missing required key is an ERROR; a present but dropped one is not reported twice
+    set:
+      schemaOps:
+        - op: validate
+          schema:
+            kind: map
+            properties:
+              target: {kind: scalar, required: true}
+              name: {kind: scalar, type: string, required: true}
+          values: {name: 5}
+    asserts:
+      - equal:
+          path: diag.errors
+          value:
+            - "'name' must be of type 'string' — ignored"
+            - "'target' is required"
+
+  - it: a default is applied when the key is absent, never over a present key, and also after a dropped value
+    set:
+      schemaOps:
+        - op: validate
+          schema:
+            kind: map
+            properties:
+              enabled: {kind: scalar, type: bool, default: true}
+              mode: {kind: scalar, default: deploy}
+              level: {kind: scalar, type: int, default: 1}
+              greeting: {kind: scalar, tokens: true, default: {default: hi, prod: hello}}
+          values: {mode: validate, enabled: "no"}
+    asserts:
+      - equal:
+          path: results[0].value
+          value:
+            enabled: true
+            mode: validate
+            level: 1
+            greeting: {default: hi, prod: hello}
+      - equal:
+          path: diag.errors
+          value:
+            - "'enabled' must be of type 'bool' — ignored"
+
+  - it: a null value counts as absent
+    set:
+      schemaOps:
+        - op: validate
+          schema:
+            kind: map
+            properties:
+              mode: {kind: scalar, default: deploy}
+              target: {kind: scalar, required: true}
+          values: {mode: null, target: null}
+    asserts:
+      - equal:
+          path: results[0].value
+          value: {mode: deploy}
+      - equal:
+          path: diag.errors
+          value:
+            - "'target' is required"
+
+  # --- switch ---
+
+  - it: a switch validates a map against the case its key selects; unknown or missing values are WARNINGs and the node is dropped
+    set:
+      schemaOps:
+        - op: validate
+          path: services
+          schema:
+            kind: map
+            values:
+              switch:
+                by: type
+                cases:
+                  greeter:
+                    kind: map
+                    properties:
+                      type: {kind: scalar, markers: false, required: true}
+                      greeting: {kind: scalar}
+                  leader:
+                    kind: map
+                    properties:
+                      type: {kind: scalar, markers: false, required: true}
+                      greeter: {kind: scalar}
+          values:
+            A: {type: greeter, greeting: hi, greeter: B}
+            B: {type: leader, greeter: A}
+            C: {type: other}
+            D: {greeting: hi}
+            E: "x"
+    asserts:
+      - equal:
+          path: results[0].value
+          value:
+            A: {type: greeter, greeting: hi}
+            B: {type: leader, greeter: A}
+      - equal:
+          path: diag.warnings
+          value:
+            - "'services.A.greeter' is not a known key — ignored"
+            - "'services.C.type' has unknown value 'other' — ignored"
+            - "'services.D' has no 'type' — ignored"
+            - "'services.E' must be a map — ignored"

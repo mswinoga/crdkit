@@ -1,0 +1,57 @@
+{{/*
+Exercises crdkit's schema engine (templates/_schema.tpl) directly.
+
+.Values.schemaOps is a data-driven list run in order against ONE ctx
+(built like test.yaml's: tokens/system/defaults merged, target,
+"harness.parentTarget" as the escalation hook) and ONE shared "seen"
+dict, so de-duplication across ops is observable. Each op appends one
+entry to "results":
+  - {op: check, schema}                         → {ok: "true" | ""}
+  - {op: validate, schema, values, path?}       → {value: <normalized>}
+  - {op: validateValues, schema, values, target?, path?} → {}
+  - {op: value, node, def, path, target?}       → {value: <resolved>}
+  - {op: node, schema, values, keys}            → {found, value}
+  - {op: docs, schema, title?}                  → {text: <Markdown>}
+"values"/"def" are passed through `toYaml | fromYaml`, like a library
+reading .Values. Renders `results`, `seen`, `diag`. With no schemaOps
+it renders empty lists — never interferes with a bare `helm template`.
+*/}}
+{{- $diag := dict "errors" (list) "warnings" (list) -}}
+{{- $target := .Values.target | default "" -}}
+{{- $reservedKeys := (include "crdkit.reservedKeys.internal" (dict
+      "annotations" (.Values.annotations | default (list)) "diag" $diag) | fromYaml).value -}}
+{{- $tokens := include "crdkit.tokens.merge.internal" (dict
+      "tokens" (.Values.tokens | default dict)
+      "diag" $diag
+      "system" (.Values.system | default dict)
+      "defaults" (.Values.defaults | default dict)) | fromYaml -}}
+{{- $ctx := dict "root" $ "diag" $diag "model" (dict) "tokens" $tokens "target" $target "parentTargetTemplate" "harness.parentTarget" "reservedKeys" $reservedKeys "gen" 0 -}}
+{{- $seen := dict -}}
+{{- $results := list -}}
+{{- range $op := .Values.schemaOps | default (list) -}}
+  {{- $values := (dict "v" $op.values | toYaml | fromYaml).v -}}
+  {{- if eq $op.op "check" -}}
+    {{- $results = append $results (dict "ok" (include "crdkit.schema.check" (dict "schema" $op.schema "diag" $diag))) -}}
+  {{- else if eq $op.op "validate" -}}
+    {{- $r := include "crdkit.schema.validate" (dict "schema" $op.schema "values" $values "path" ($op.path | default "") "diag" $diag) | fromYaml -}}
+    {{- $results = append $results (dict "value" $r.value) -}}
+  {{- else if eq $op.op "validateValues" -}}
+    {{- include "crdkit.schema.validateValues" (dict "ctx" $ctx "schema" $op.schema "values" $values "path" ($op.path | default "") "target" ($op.target | default "") "seen" $seen) -}}
+    {{- $results = append $results (dict) -}}
+  {{- else if eq $op.op "value" -}}
+    {{- $def := (dict "v" $op.def | toYaml | fromYaml).v -}}
+    {{- $r := include "crdkit.schema.value" (dict "ctx" $ctx "node" $op.node "def" $def "path" $op.path "target" ($op.target | default "") "seen" $seen) | fromYaml -}}
+    {{- $results = append $results (dict "value" $r.value) -}}
+  {{- else if eq $op.op "node" -}}
+    {{- $r := include "crdkit.schema.node" (dict "schema" $op.schema "values" $values "keys" $op.keys) | fromYaml -}}
+    {{- $results = append $results (dict "found" (hasKey $r "value") "value" $r.value) -}}
+  {{- else if eq $op.op "docs" -}}
+    {{- $results = append $results (dict "text" (include "crdkit.schema.docs" (dict "schema" $op.schema "title" ($op.title | default "")))) -}}
+  {{- end -}}
+{{- end -}}
+results:
+{{ $results | toYaml | indent 2 }}
+seen:
+{{ $seen | toYaml | indent 2 }}
+diag:
+{{ $diag | toYaml | indent 2 }}
