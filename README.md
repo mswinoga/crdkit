@@ -477,6 +477,7 @@ All take a dict.
 | `crdkit.schema.value` | `{ctx, node, def, path, target?, seen?}` | YAML `{value: <resolved>}` |
 | `crdkit.schema.path` | `{keys, path?}` | the dotted path as text |
 | `crdkit.schema.docs` | `{schema, title?}` | Markdown text |
+| `crdkit.schema.jsonSchema` | `{schemaText, example?, sections?, title?, diag}` | JSON Schema text (draft-07) |
 
 - `path`: values path prefix of `values` in the consumer's input (e.g.
   `application`); messages are relative to the root otherwise.
@@ -513,6 +514,33 @@ case:
   `@NAME@` markers), `no` (static).
 - A `values` child shows as `<path>.<key>`, list items as `<path>[]`.
 - Keys are sorted alphabetically — Go maps keep no order.
+
+### JSON Schema
+
+`crdkit.schema.jsonSchema` turns the schema text into a draft-07 JSON
+Schema for editors and a viewer; the DSL maps keyword by keyword
+(`type`, `properties`, `required`, `additionalProperties`,
+`propertyNames`, `enum`, `pattern`, `default`, `doc` →
+`description`/`markdownDescription`).
+- Takes the schema as text: key order exists only there and is emitted
+  as `x-crdkit-order`; flow-map keys sort alphabetically after the
+  positioned ones.
+- Per-target nodes are `anyOf` [type, `tokenDeclaration`, `markers`];
+  an `int`/`number`/`bool` that accepts markers is `anyOf` [type,
+  `markers`]; `markers: false` on a `string`/`scalar` adds a `not`
+  pattern.
+- A switch case is a complete, closed schema under
+  `definitions["<node path>[<by>=<case>]"]`, selected by `allOf`
+  `if/then`; properties identical in every case (two or more) carry
+  `x-crdkit-shared`.
+- `example` (values) attaches the values found at each node as
+  `examples`; `sections` (`{<node path>: [{title, doc?, columns?,
+  rows?, code?}]}`) attach by node path (`*` for a `values` key, `[]`
+  for list items) as `x-crdkit-sections` and in `markdownDescription`.
+  A malformed section or an unknown path records an ERROR.
+- An invalid schema records the self-check ERRORs and returns `{}`.
+- `x-crdkit-*` keywords are ignored by editors; strict validators (ajv
+  `strict`) reject them — use `strict: false`.
 
 ## Local testing
 

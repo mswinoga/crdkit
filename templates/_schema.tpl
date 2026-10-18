@@ -50,6 +50,15 @@ Dependency graph (who calls whom):
   crdkit.schema.path (public) -> crdkit.schema.path.internal
   crdkit.schema.docs (public) -> crdkit.schema.docsNode.internal
   crdkit.schema.order.internal (internal) -> crdkit.schema.path.internal
+  crdkit.schema.jsonSchema (public)
+    -> crdkit.schema.check (public)
+    -> crdkit.schema.order.internal
+    -> crdkit.schema.sectionProblem.internal
+    -> crdkit.schema.jsonNode.internal      (recursive)
+         -> crdkit.schema.orderedKeys.internal
+         -> crdkit.schema.examples.internal
+         -> crdkit.schema.sectionMarkdown.internal
+         -> crdkit.schema.ref.internal
 */}}
 
 {{/*
@@ -979,3 +988,480 @@ Implementation notes:
 value:
 {{ $out | toYaml | indent 2 }}
 {{- end -}}
+
+{{/*
+crdkit.schema.orderedKeys.internal (internal)
+
+Sorts map keys into schema text order.
+
+Interface:
+- Params (dict): { "keys": <list of strings>, "parentPath": <schema path
+  of the map holding them>, "order": <crdkit.schema.order.internal's
+  value> }
+- Returns: YAML `{value: [<key>…]}` — keys with a text position by
+  position, then the rest alphabetically.
+*/}}
+{{- define "crdkit.schema.orderedKeys.internal" -}}
+{{- $parent := .parentPath -}}
+{{- $order := .order -}}
+{{- $tagged := list -}}
+{{- range $key := .keys -}}
+  {{- $at := include "crdkit.schema.path.internal" (dict "path" $parent "key" $key) -}}
+  {{- $index := ternary (index $order $at | int) 99999999 (hasKey $order $at) -}}
+  {{- $tagged = append $tagged (printf "%08d|%s" $index $key) -}}
+{{- end -}}
+{{- $sorted := list -}}
+{{- range $item := sortAlpha $tagged -}}
+  {{- $sorted = append $sorted (regexReplaceAll "^[0-9]{8}\\|" $item "") -}}
+{{- end -}}
+value: {{ $sorted | toYaml | nindent 2 }}
+{{- end -}}
+
+{{/*
+crdkit.schema.ref.internal (internal)
+
+Spells a definitions key as a JSON Schema `$ref`.
+
+Interface:
+- Params (dict): { "key": <definitions key> }
+- Returns: `#/definitions/<key>` as plain text, the key escaped as a
+  JSON Pointer segment (`~0`, `~1`) and a URI fragment (`%25`, `%5B`,
+  `%5D`, `%22`, `%20`, `%23`, `%3C`, `%3E`).
+*/}}
+{{- define "crdkit.schema.ref.internal" -}}
+{{- $key := .key | replace "~" "~0" | replace "/" "~1" | replace "%" "%25" | replace "[" "%5B" | replace "]" "%5D" | replace "\"" "%22" | replace " " "%20" | replace "#" "%23" | replace "<" "%3C" | replace ">" "%3E" -}}
+{{- printf "#/definitions/%s" $key -}}
+{{- end -}}
+
+{{/*
+crdkit.schema.examples.internal (internal)
+
+Selects the example values that reach a child of a node.
+
+Interface:
+- Params (dict): { "node": <schema node>, "instances": <list of the
+  example values found at the node>, "via": "property" | "values" |
+  "items" | "case", "key": <property name / case value, for property
+  and case>, "out": <dict, "instances" is set in place> }
+- Returns: nothing (mutating helper).
+
+Implementation notes:
+- property: the value under `key` of every map instance; values: every
+  entry of every map instance whose key is not a property of the node;
+  items: every element of every list instance; case: the map instances
+  whose `switch.by` value equals `key`.
+- Null values are skipped; entries keep the maps' alphabetical order.
+*/}}
+{{- define "crdkit.schema.examples.internal" -}}
+{{- $node := .node -}}
+{{- $key := .key | default "" | toString -}}
+{{- $found := list -}}
+{{- range $inst := .instances -}}
+  {{- if eq $.via "items" -}}
+    {{- if kindIs "slice" $inst -}}
+      {{- range $element := $inst -}}
+        {{- if not (kindIs "invalid" $element) -}}
+          {{- $found = append $found $element -}}
+        {{- end -}}
+      {{- end -}}
+    {{- end -}}
+  {{- else if kindIs "map" $inst -}}
+    {{- if eq $.via "property" -}}
+      {{- if and (hasKey $inst $key) (not (kindIs "invalid" (index $inst $key))) -}}
+        {{- $found = append $found (index $inst $key) -}}
+      {{- end -}}
+    {{- else if eq $.via "values" -}}
+      {{- range $entryKey, $entry := $inst -}}
+        {{- if and (not (hasKey ($node.properties | default dict) $entryKey)) (not (kindIs "invalid" $entry)) -}}
+          {{- $found = append $found $entry -}}
+        {{- end -}}
+      {{- end -}}
+    {{- else if eq $.via "case" -}}
+      {{- if and (hasKey $inst $node.switch.by) (eq (toString (index $inst $node.switch.by)) $key) -}}
+        {{- $found = append $found $inst -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- $_ := set .out "instances" $found -}}
+{{- end -}}
+
+{{/*
+crdkit.schema.sectionProblem.internal (internal)
+
+Checks the shape of one documentation section.
+
+Interface:
+- Params (dict): { "section": <any> }
+- Returns: the first problem as plain text, or an EMPTY string for a
+  valid `{title, doc?, columns?, rows?, code?}` (`columns` strings,
+  `rows` lists of strings as long as `columns`, `doc`/`code` strings).
+*/}}
+{{- define "crdkit.schema.sectionProblem.internal" -}}
+{{- $section := .section -}}
+{{- $found := list -}}
+{{- if not (kindIs "map" $section) -}}
+  {{- $found = append $found "a section must be a map" -}}
+{{- else -}}
+  {{- range $key, $_ := $section -}}
+    {{- if not (has $key (list "title" "doc" "columns" "rows" "code")) -}}
+      {{- $found = append $found (printf "unknown section key '%s'" $key) -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if not (and (kindIs "string" $section.title) (ne $section.title "")) -}}
+    {{- $found = append $found "'title' must be a non-empty string" -}}
+  {{- end -}}
+  {{- range $key := list "doc" "code" -}}
+    {{- if and (hasKey $section $key) (not (kindIs "string" (index $section $key))) -}}
+      {{- $found = append $found (printf "'%s' must be a string" $key) -}}
+    {{- end -}}
+  {{- end -}}
+  {{- $columns := 0 -}}
+  {{- if hasKey $section "columns" -}}
+    {{- if not (kindIs "slice" $section.columns) -}}
+      {{- $found = append $found "'columns' must be a list of strings" -}}
+    {{- else -}}
+      {{- $columns = len $section.columns -}}
+      {{- range $column := $section.columns -}}
+        {{- if not (kindIs "string" $column) -}}
+          {{- $found = append $found "'columns' must be a list of strings" -}}
+        {{- end -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if hasKey $section "rows" -}}
+    {{- if not (and (kindIs "slice" $section.rows) (kindIs "slice" $section.columns)) -}}
+      {{- $found = append $found "'rows' must be a list and need 'columns'" -}}
+    {{- else -}}
+      {{- range $i, $row := $section.rows -}}
+        {{- $ok := kindIs "slice" $row -}}
+        {{- if $ok -}}
+          {{- range $cell := $row -}}
+            {{- if not (kindIs "string" $cell) -}}
+              {{- $ok = false -}}
+            {{- end -}}
+          {{- end -}}
+        {{- end -}}
+        {{- if not (and $ok (eq (len $row) $columns)) -}}
+          {{- $found = append $found (printf "row %d must be a list of %d strings" $i $columns) -}}
+        {{- end -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- first (append $found "") -}}
+{{- end -}}
+
+{{/*
+crdkit.schema.sectionMarkdown.internal (internal)
+
+Renders one valid documentation section as Markdown.
+
+Interface:
+- Params (dict): { "section": <valid section> }
+- Returns: Markdown text — `**title**`, the doc, a table, a `yaml` code
+  block; absent parts are skipped.
+*/}}
+{{- define "crdkit.schema.sectionMarkdown.internal" -}}
+{{- $section := .section -}}
+{{- $parts := list (printf "**%s**" $section.title) -}}
+{{- if $section.doc -}}
+  {{- $parts = append $parts ($section.doc | trim) -}}
+{{- end -}}
+{{- if $section.columns -}}
+  {{- $rows := list -}}
+  {{- $header := list -}}
+  {{- $rule := list -}}
+  {{- range $column := $section.columns -}}
+    {{- $header = append $header ($column | replace "|" "\\|" | replace "\n" " ") -}}
+    {{- $rule = append $rule "---" -}}
+  {{- end -}}
+  {{- $rows = list (printf "| %s |" (join " | " $header)) (printf "| %s |" (join " | " $rule)) -}}
+  {{- range $row := $section.rows | default (list) -}}
+    {{- $cells := list -}}
+    {{- range $cell := $row -}}
+      {{- $cells = append $cells ($cell | replace "|" "\\|" | replace "\n" " ") -}}
+    {{- end -}}
+    {{- $rows = append $rows (printf "| %s |" (join " | " $cells)) -}}
+  {{- end -}}
+  {{- $parts = append $parts (join "\n" $rows) -}}
+{{- end -}}
+{{- if $section.code -}}
+  {{- $parts = append $parts (printf "```yaml\n%s\n```" ($section.code | trimSuffix "\n")) -}}
+{{- end -}}
+{{- join "\n\n" $parts -}}
+{{- end -}}
+
+{{/*
+crdkit.schema.jsonNode.internal (internal)
+
+Converts one schema node (and, recursively, its descendants) to a JSON
+Schema node, see crdkit.schema.jsonSchema.
+
+Interface:
+- Params (dict): { "node": <checked node>, "schemaPath": <YAML key
+  chain of the node in the schema text>, "nodePath": <node path: values
+  path with `*` for a `values` key, `[]` for list items and
+  `[<by>=<value>]` for a case>, "inTokens": <bool, an ancestor is
+  per-target>, "instances": <list of example values at the node>,
+  "order": <crdkit.schema.order.internal's value>, "sections": <{<node
+  path>: [<valid section>]}>, "acc": <dict with "definitions" and
+  "paths", appended to in place>, "shared": <list of property names
+  flagged x-crdkit-shared, optional>, "out": <dict, "result" is set to
+  the JSON Schema node> }
+- Returns: nothing (mutating helper).
+
+Implementation notes:
+- Structural keywords (`type`, `enum`, `pattern`, `not`, `items`,
+  `properties` …) and annotation keywords (`description`, `default`,
+  `examples`, `x-crdkit-*`) are collected apart. A per-target scalar or
+  list, and a marker-accepting int/number/bool, wrap the structural part
+  in `anyOf`; the annotations stay on the outer node.
+- Each switch case is stored in acc.definitions under its node path.
+*/}}
+{{- define "crdkit.schema.jsonNode.internal" -}}
+{{- $node := .node -}}
+{{- $sp := .schemaPath -}}
+{{- $path := .nodePath -}}
+{{- $acc := .acc -}}
+{{- $order := .order -}}
+{{- $sections := .sections -}}
+{{- $instances := .instances | default (list) -}}
+{{- $shared := .shared | default (list) -}}
+{{- $inTokens := .inTokens -}}
+{{- $_ := set $acc.paths $path true -}}
+{{- $shape := include "crdkit.schema.shape.internal" (dict "node" $node) -}}
+{{- $isSwitch := hasKey $node "switch" -}}
+{{- $type := $node.type | default "map" | toString -}}
+{{- $tokens := include "crdkit.schema.tokens.internal" (dict "node" $node "inTokens" $inTokens) -}}
+{{- $childInTokens := or $inTokens (ne $tokens "") -}}
+{{- $meta := dict "x-crdkit-type" $type -}}
+{{- $core := dict -}}
+{{- if hasKey $node "default" -}}
+  {{- $_ := set $meta "default" (index $node "default") -}}
+{{- end -}}
+{{- $nodeSections := ternary (index $sections $path) (list) (hasKey $sections $path) -}}
+{{- $doc := $node.doc | default "" | toString | trim -}}
+{{- if $doc -}}
+  {{- $_ := set $meta "description" (regexReplaceAll "\\[([^\\]]*)\\]\\([^)]*\\)" $doc "${1}" | replace "`" "") -}}
+{{- end -}}
+{{- if or $doc $nodeSections -}}
+  {{- $parts := ternary (list $doc) (list) (ne $doc "") -}}
+  {{- range $section := $nodeSections -}}
+    {{- $parts = append $parts (include "crdkit.schema.sectionMarkdown.internal" (dict "section" $section)) -}}
+  {{- end -}}
+  {{- $_ := set $meta "markdownDescription" (join "\n\n" $parts) -}}
+{{- end -}}
+{{- if $nodeSections -}}
+  {{- $_ := set $meta "x-crdkit-sections" $nodeSections -}}
+{{- end -}}
+{{- if $instances -}}
+  {{- $seenExamples := dict -}}
+  {{- $examples := list -}}
+  {{- range $instance := $instances -}}
+    {{- $id := toJson $instance -}}
+    {{- if not (hasKey $seenExamples $id) -}}
+      {{- $_ := set $seenExamples $id true -}}
+      {{- $examples = append $examples $instance -}}
+    {{- end -}}
+  {{- end -}}
+  {{- $_ := set $meta "examples" $examples -}}
+{{- end -}}
+{{- if $isSwitch -}}
+  {{- $by := $node.switch.by -}}
+  {{- $cases := $node.switch.cases -}}
+  {{- $caseValues := (include "crdkit.schema.orderedKeys.internal" (dict "keys" (keys $cases) "parentPath" (include "crdkit.schema.path.internal" (dict "path" (include "crdkit.schema.path.internal" (dict "path" $sp "key" "switch")) "key" "cases")) "order" $order) | fromYaml).value -}}
+  {{- $sharedKeys := list -}}
+  {{- $first := ternary (index $cases (first $caseValues)) (dict) (gt (len $caseValues) 0) -}}
+  {{- if and (gt (len $caseValues) 1) (kindIs "map" $first.properties) -}}
+    {{- range $name, $property := $first.properties -}}
+      {{- $same := true -}}
+      {{- range $caseValue := $caseValues -}}
+        {{- $other := index $cases $caseValue -}}
+        {{- if not (and (kindIs "map" $other.properties) (hasKey $other.properties $name) (eq (toJson (index $other.properties $name)) (toJson $property))) -}}
+          {{- $same = false -}}
+        {{- end -}}
+      {{- end -}}
+      {{- if $same -}}
+        {{- $sharedKeys = append $sharedKeys $name -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+  {{- $allOf := list -}}
+  {{- $refs := dict -}}
+  {{- range $caseValue := $caseValues -}}
+    {{- $caseKey := printf "%s[%s=%s]" $path $by $caseValue -}}
+    {{- $ref := include "crdkit.schema.ref.internal" (dict "key" $caseKey) -}}
+    {{- $caseInstances := dict -}}
+    {{- include "crdkit.schema.examples.internal" (dict "node" $node "instances" $instances "via" "case" "key" $caseValue "out" $caseInstances) -}}
+    {{- $caseOut := dict -}}
+    {{- include "crdkit.schema.jsonNode.internal" (dict "node" (index $cases $caseValue) "schemaPath" (include "crdkit.schema.path.internal" (dict "path" (include "crdkit.schema.path.internal" (dict "path" (include "crdkit.schema.path.internal" (dict "path" $sp "key" "switch")) "key" "cases")) "key" $caseValue)) "nodePath" $caseKey "inTokens" $inTokens "instances" $caseInstances.instances "order" $order "sections" $sections "acc" $acc "shared" $sharedKeys "out" $caseOut) -}}
+    {{- $_ := set $caseOut.result "x-crdkit-path" $caseKey -}}
+    {{- $_ := set $acc.definitions $caseKey $caseOut.result -}}
+    {{- $_ := set $refs $caseValue $ref -}}
+    {{- $allOf = append $allOf (dict "if" (dict "properties" (dict $by (dict "const" $caseValue)) "required" (list $by)) "then" (dict "$ref" $ref)) -}}
+  {{- end -}}
+  {{- $_ := set $core "type" "object" -}}
+  {{- $_ := set $core "required" (list $by) -}}
+  {{- $_ := set $core "properties" (dict $by (dict "enum" $caseValues)) -}}
+  {{- $_ := set $core "allOf" $allOf -}}
+  {{- $_ := set $meta "x-crdkit-switch" (dict "by" $by "cases" $caseValues "refs" $refs) -}}
+{{- else if eq $shape "map" -}}
+  {{- $_ := set $core "type" "object" -}}
+  {{- $props := $node.properties | default dict -}}
+  {{- if $props -}}
+    {{- $propsSp := include "crdkit.schema.path.internal" (dict "path" $sp "key" "properties") -}}
+    {{- $names := (include "crdkit.schema.orderedKeys.internal" (dict "keys" (keys $props) "parentPath" $propsSp "order" $order) | fromYaml).value -}}
+    {{- $jsonProps := dict -}}
+    {{- $required := list -}}
+    {{- range $name := $names -}}
+      {{- $child := index $props $name -}}
+      {{- $childInstances := dict -}}
+      {{- include "crdkit.schema.examples.internal" (dict "node" $node "instances" $instances "via" "property" "key" $name "out" $childInstances) -}}
+      {{- $childOut := dict -}}
+      {{- include "crdkit.schema.jsonNode.internal" (dict "node" $child "schemaPath" (include "crdkit.schema.path.internal" (dict "path" $propsSp "key" $name)) "nodePath" (include "crdkit.schema.path.internal" (dict "path" $path "key" $name)) "inTokens" $childInTokens "instances" $childInstances.instances "order" $order "sections" $sections "acc" $acc "out" $childOut) -}}
+      {{- if has $name $shared -}}
+        {{- $_ := set $childOut.result "x-crdkit-shared" true -}}
+      {{- end -}}
+      {{- $_ := set $jsonProps $name $childOut.result -}}
+      {{- if eq (toString $child.required) "true" -}}
+        {{- $required = append $required $name -}}
+      {{- end -}}
+    {{- end -}}
+    {{- $_ := set $core "properties" $jsonProps -}}
+    {{- if $required -}}
+      {{- $_ := set $core "required" $required -}}
+    {{- end -}}
+    {{- $_ := set $meta "x-crdkit-order" $names -}}
+  {{- end -}}
+  {{- if hasKey $node "values" -}}
+    {{- $childInstances := dict -}}
+    {{- include "crdkit.schema.examples.internal" (dict "node" $node "instances" $instances "via" "values" "out" $childInstances) -}}
+    {{- $childOut := dict -}}
+    {{- include "crdkit.schema.jsonNode.internal" (dict "node" $node.values "schemaPath" (include "crdkit.schema.path.internal" (dict "path" $sp "key" "values")) "nodePath" (include "crdkit.schema.path.internal" (dict "path" $path "key" "*")) "inTokens" $childInTokens "instances" $childInstances.instances "order" $order "sections" $sections "acc" $acc "out" $childOut) -}}
+    {{- $_ := set $core "additionalProperties" $childOut.result -}}
+    {{- $_ := set $meta "x-crdkit-keyLabel" (($node.keys | default dict).label | default "<key>") -}}
+  {{- else -}}
+    {{- $_ := set $core "additionalProperties" false -}}
+  {{- end -}}
+  {{- if hasKey $node "keys" -}}
+    {{- $_ := set $core "propertyNames" (dict "pattern" $node.keys.pattern) -}}
+  {{- end -}}
+{{- else if eq $shape "list" -}}
+  {{- $_ := set $core "type" "array" -}}
+  {{- $childInstances := dict -}}
+  {{- include "crdkit.schema.examples.internal" (dict "node" $node "instances" $instances "via" "items" "out" $childInstances) -}}
+  {{- $childOut := dict -}}
+  {{- include "crdkit.schema.jsonNode.internal" (dict "node" ($node.items | default (dict "type" "any")) "schemaPath" (include "crdkit.schema.path.internal" (dict "path" $sp "key" "items")) "nodePath" (printf "%s[]" $path) "inTokens" $childInTokens "instances" $childInstances.instances "order" $order "sections" $sections "acc" $acc "out" $childOut) -}}
+  {{- $_ := set $core "items" $childOut.result -}}
+  {{- $_ := set $meta "x-crdkit-perTarget" (ternary "yes" "no" (ne $tokens "")) -}}
+{{- else if eq $shape "scalar" -}}
+  {{- if eq $type "scalar" -}}
+    {{- $_ := set $core "type" (list "string" "number" "boolean") -}}
+  {{- else -}}
+    {{- $_ := set $core "type" (get (dict "string" "string" "int" "integer" "number" "number" "bool" "boolean") $type) -}}
+  {{- end -}}
+  {{- range $key := list "enum" "pattern" -}}
+    {{- if hasKey $node $key -}}
+      {{- $_ := set $core $key (index $node $key) -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if and (eq (toString $node.markers) "false") (has $type (list "string" "scalar")) -}}
+    {{- $_ := set $core "not" (dict "pattern" "@[A-Za-z0-9_]+@") -}}
+  {{- end -}}
+  {{- $_ := set $meta "x-crdkit-perTarget" (ternary "yes" (ternary "no" "markers" (eq (toString $node.markers) "false")) (ne $tokens "")) -}}
+{{- end -}}
+{{- $result := $meta -}}
+{{- $wrapped := list -}}
+{{- if and $tokens (has $shape (list "scalar" "list")) -}}
+  {{- $wrapped = list $core (dict "$ref" "#/definitions/tokenDeclaration") (dict "$ref" "#/definitions/markers") -}}
+{{- else if and (eq $shape "scalar") (ne (toString $node.markers) "false") (has $type (list "int" "number" "bool")) -}}
+  {{- $wrapped = list $core (dict "$ref" "#/definitions/markers") -}}
+{{- end -}}
+{{- if $wrapped -}}
+  {{- $_ := set $result "anyOf" $wrapped -}}
+{{- else -}}
+  {{- range $key, $value := $core -}}
+    {{- $_ := set $result $key $value -}}
+  {{- end -}}
+{{- end -}}
+{{- $_ := set .out "result" $result -}}
+{{- end -}}
+
+{{/*
+crdkit.schema.jsonSchema (public)
+
+Generates the JSON Schema (draft-07, `x-crdkit-*` extensions) of a
+values schema, for editors and the HTML viewer.
+
+Interface:
+- Params (dict): { "schemaText": <schema as YAML text>, "example":
+  <example values, optional>, "sections": <{<node path>: [<section>]}>,
+  optional>, "title": <root title, optional — default "Values">,
+  "diag": <dict> }
+- Returns: the JSON Schema as pretty-printed JSON text; `{}` when the
+  schema fails crdkit.schema.check (its ERRORs are recorded).
+
+Implementation notes:
+- The schema arrives as text because key order lives only there
+  (crdkit.schema.order.internal); the text is parsed here.
+- Examples: every node gets `examples`, the unique example values found
+  at its path (see crdkit.schema.examples.internal). Generated examples
+  for unreached nodes are not stored: the viewer and the Markdown derive
+  them.
+- Sections attach to the node named by their node path (values path with
+  `*` for a `values` key, `[]` for list items, `[<by>=<value>]` for a
+  case). A malformed section or a path naming no node records an ERROR
+  and is dropped. crdkit never interprets a section's content.
+- Output is encoded by toPrettyJson: `<`, `>` and `&` appear as
+  `<`, `>` and `&` (valid JSON).
+*/}}
+{{- define "crdkit.schema.jsonSchema" -}}
+{{- $diag := .diag -}}
+{{- $schema := .schemaText | default "" | fromYaml -}}
+{{- $root := dict -}}
+{{- if include "crdkit.schema.check" (dict "schema" $schema "diag" $diag) -}}
+  {{- $order := (include "crdkit.schema.order.internal" (dict "text" .schemaText) | fromYaml).value -}}
+  {{- $example := (dict "v" .example | toYaml | fromYaml).v -}}
+  {{- $given := (dict "v" (.sections | default dict) | toYaml | fromYaml).v -}}
+  {{- $sections := dict -}}
+  {{- $problems := list -}}
+  {{- range $sectionPath := keys $given | sortAlpha -}}
+    {{- $list := index $given $sectionPath -}}
+    {{- if not (kindIs "slice" $list) -}}
+      {{- $problems = append $problems (printf "sections: '%s' must be a list of sections — dropped" $sectionPath) -}}
+    {{- else -}}
+      {{- $valid := list -}}
+      {{- range $i, $section := $list -}}
+        {{- $why := include "crdkit.schema.sectionProblem.internal" (dict "section" $section) -}}
+        {{- if $why -}}
+          {{- $problems = append $problems (printf "sections: '%s'[%d]: %s — dropped" $sectionPath $i $why) -}}
+        {{- else -}}
+          {{- $valid = append $valid $section -}}
+        {{- end -}}
+      {{- end -}}
+      {{- $_ := set $sections $sectionPath $valid -}}
+    {{- end -}}
+  {{- end -}}
+  {{- $acc := dict "definitions" (dict "tokenDeclaration" (dict "type" "object" "minProperties" 1) "markers" (dict "type" "string" "pattern" "@[A-Za-z0-9_]+@")) "paths" (dict) -}}
+  {{- $out := dict -}}
+  {{- include "crdkit.schema.jsonNode.internal" (dict "node" $schema "schemaPath" "" "nodePath" "" "inTokens" false "instances" (ternary (list $example) (list) (kindIs "map" $example)) "order" $order "sections" $sections "acc" $acc "out" $out) -}}
+  {{- range $sectionPath := keys $sections | sortAlpha -}}
+    {{- if not (hasKey $acc.paths $sectionPath) -}}
+      {{- $problems = append $problems (printf "sections: '%s' names no node — dropped" $sectionPath) -}}
+    {{- end -}}
+  {{- end -}}
+  {{- range $problem := $problems -}}
+    {{- if not (has $problem $diag.errors) -}}
+      {{- $_ := set $diag "errors" (append $diag.errors $problem) -}}
+    {{- end -}}
+  {{- end -}}
+  {{- $_ := set $root "$schema" "http://json-schema.org/draft-07/schema#" -}}
+  {{- $_ := set $root "title" (.title | default "Values") -}}
+  {{- range $key, $value := $out.result -}}
+    {{- $_ := set $root $key $value -}}
+  {{- end -}}
+  {{- $_ := set $root "definitions" $acc.definitions -}}
+{{- end -}}
+{{ $root | toPrettyJson }}
+{{ end -}}

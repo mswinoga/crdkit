@@ -1084,3 +1084,614 @@ tests:
             switch.cases.alpha.type: 6
             switch.cases.alpha.properties: 7
             switch.cases.alpha.properties["a.b"]: 8
+
+  # --- JSON Schema ---
+
+  - it: 'jsonSchema emits the draft-07 root and the shared definitions'
+    set:
+      schemaOps:
+        - op: jsonSchema
+          title: Example values
+          schemaText: |
+            type: map
+            properties:
+              name: {type: string}
+    asserts:
+      - equal:
+          path: results[0].json["$schema"]
+          value: "http://json-schema.org/draft-07/schema#"
+      - equal:
+          path: results[0].json.title
+          value: Example values
+      - equal:
+          path: results[0].json.definitions
+          value:
+            tokenDeclaration: {type: object, minProperties: 1}
+            markers: {type: string, pattern: "@[A-Za-z0-9_]+@"}
+      - equal:
+          path: results[0].json["x-crdkit-type"]
+          value: map
+      - lengthEqual:
+          path: diag.errors
+          count: 0
+
+  - it: 'jsonSchema title defaults to Values and the text is pretty JSON'
+    set:
+      schemaOps:
+        - op: jsonSchema
+          schemaText: |
+            type: map
+    asserts:
+      - equal:
+          path: results[0].json.title
+          value: Values
+      - matchRegex:
+          path: results[0].text
+          pattern: '^\{\n  "\$schema": '
+
+  - it: 'jsonSchema maps each scalar type, enum, pattern and default (markers: false)'
+    set:
+      schemaOps:
+        - op: jsonSchema
+          schemaText: |
+            type: map
+            properties:
+              s: {type: string, markers: false, pattern: "^a", enum: [ab, ac], default: ab}
+              i: {type: int, markers: false}
+              num: {type: number, markers: false}
+              flag: {type: bool, markers: false}
+              c: {type: scalar, markers: false}
+    asserts:
+      - equal:
+          path: results[0].json.properties.s
+          value:
+            type: string
+            pattern: "^a"
+            enum: [ab, ac]
+            default: ab
+            not: {pattern: "@[A-Za-z0-9_]+@"}
+            x-crdkit-type: string
+            x-crdkit-perTarget: "no"
+      - equal:
+          path: results[0].json.properties.i
+          value: {type: integer, x-crdkit-type: int, x-crdkit-perTarget: "no"}
+      - equal:
+          path: results[0].json.properties.num
+          value: {type: number, x-crdkit-type: number, x-crdkit-perTarget: "no"}
+      - equal:
+          path: results[0].json.properties.flag
+          value: {type: boolean, x-crdkit-type: bool, x-crdkit-perTarget: "no"}
+      - equal:
+          path: results[0].json.properties.c
+          value:
+            type: [string, number, boolean]
+            not: {pattern: "@[A-Za-z0-9_]+@"}
+            x-crdkit-type: scalar
+            x-crdkit-perTarget: "no"
+
+  - it: 'jsonSchema: markers allowed on an int/number/bool wrap it in anyOf with the markers definition'
+    set:
+      schemaOps:
+        - op: jsonSchema
+          schemaText: |
+            type: map
+            properties:
+              i: {type: int, tokens: false}
+              num: {type: number, tokens: false}
+              flag: {type: bool, tokens: false}
+              s: {type: string, tokens: false}
+    asserts:
+      - equal:
+          path: results[0].json.properties.i
+          value:
+            anyOf:
+              - {type: integer}
+              - {"$ref": "#/definitions/markers"}
+            x-crdkit-type: int
+            x-crdkit-perTarget: markers
+      - equal:
+          path: results[0].json.properties.num.anyOf[0]
+          value: {type: number}
+      - equal:
+          path: results[0].json.properties.flag.anyOf[0]
+          value: {type: boolean}
+      - equal:
+          path: results[0].json.properties.s
+          value: {type: string, x-crdkit-type: string, x-crdkit-perTarget: markers}
+
+  - it: 'jsonSchema: a per-target scalar or list is anyOf [type, declaration, markers]'
+    set:
+      schemaOps:
+        - op: jsonSchema
+          schemaText: |
+            type: map
+            properties:
+              host: {type: string, tokens: true}
+              ports: {type: list, items: {type: int}}
+    asserts:
+      - equal:
+          path: results[0].json.properties.host
+          value:
+            anyOf:
+              - {type: string}
+              - {"$ref": "#/definitions/tokenDeclaration"}
+              - {"$ref": "#/definitions/markers"}
+            x-crdkit-type: string
+            x-crdkit-perTarget: "yes"
+      - equal:
+          path: results[0].json.properties.ports.anyOf[0]
+          value:
+            type: array
+            items:
+              anyOf:
+                - {type: integer}
+                - {"$ref": "#/definitions/markers"}
+              x-crdkit-type: int
+              x-crdkit-perTarget: markers
+      - equal:
+          path: results[0].json.properties.ports.anyOf[1]
+          value: {"$ref": "#/definitions/tokenDeclaration"}
+      - equal:
+          path: results[0].json.properties.ports["x-crdkit-perTarget"]
+          value: "yes"
+
+  - it: 'jsonSchema: a list without tokens is a plain array, items default to any'
+    set:
+      schemaOps:
+        - op: jsonSchema
+          schemaText: |
+            type: map
+            properties:
+              plain: {type: list, tokens: false}
+              free: {type: any}
+    asserts:
+      - equal:
+          path: results[0].json.properties.plain
+          value:
+            type: array
+            items: {x-crdkit-type: any}
+            x-crdkit-type: list
+            x-crdkit-perTarget: "no"
+      - equal:
+          path: results[0].json.properties.free
+          value: {x-crdkit-type: any}
+
+  - it: 'jsonSchema: closed map, open map, required, keys pattern and label, order'
+    set:
+      schemaOps:
+        - op: jsonSchema
+          schemaText: |
+            type: map
+            properties:
+              closed:
+                type: map
+                properties:
+                  zeta: {type: string, markers: false, required: true}
+                  alpha: {type: string, markers: false}
+              open:
+                type: map
+                keys: {pattern: "^[A-Z]+$", label: "<ID>"}
+                values: {type: any}
+              bare:
+                type: map
+                values: {type: any}
+    asserts:
+      - equal:
+          path: results[0].json.properties.closed.additionalProperties
+          value: false
+      - equal:
+          path: results[0].json.properties.closed.required
+          value: [zeta]
+      - equal:
+          path: results[0].json.properties.closed["x-crdkit-order"]
+          value: [zeta, alpha]
+      - equal:
+          path: results[0].json.properties.open.additionalProperties
+          value: {x-crdkit-type: any}
+      - equal:
+          path: results[0].json.properties.open.propertyNames
+          value: {pattern: "^[A-Z]+$"}
+      - equal:
+          path: results[0].json.properties.open["x-crdkit-keyLabel"]
+          value: "<ID>"
+      - equal:
+          path: results[0].json.properties.bare["x-crdkit-keyLabel"]
+          value: "<key>"
+      - notExists:
+          path: results[0].json.properties.closed["x-crdkit-keyLabel"]
+      - notExists:
+          path: results[0].json.properties.bare.propertyNames
+      - equal:
+          path: results[0].json["x-crdkit-order"]
+          value: [closed, open, bare]
+
+  - it: 'jsonSchema: flow-map properties are ordered after the positioned ones, alphabetically'
+    set:
+      schemaOps:
+        - op: jsonSchema
+          schemaText: |
+            type: map
+            properties: {zz: {type: string}, aa: {type: string}}
+            values: {type: any}
+    asserts:
+      - equal:
+          path: results[0].json["x-crdkit-order"]
+          value: [aa, zz]
+
+  - it: 'jsonSchema: doc becomes a plain description and a Markdown description'
+    set:
+      schemaOps:
+        - op: jsonSchema
+          schemaText: |
+            type: map
+            properties:
+              a: {type: string, markers: false, doc: "Use `x`, see [the docs](http://e.x/d)."}
+              b: {type: string, markers: false}
+    asserts:
+      - equal:
+          path: results[0].json.properties.a.description
+          value: "Use x, see the docs."
+      - equal:
+          path: results[0].json.properties.a.markdownDescription
+          value: "Use `x`, see [the docs](http://e.x/d)."
+      - notExists:
+          path: results[0].json.properties.b.description
+      - notExists:
+          path: results[0].json.properties.b.markdownDescription
+
+  - it: 'jsonSchema: switch cases are complete definitions with allOf, enum and refs'
+    set:
+      schemaOps:
+        - op: jsonSchema
+          schemaText: |
+            type: map
+            values:
+              switch:
+                by: type
+                cases:
+                  zeta:
+                    type: map
+                    properties:
+                      type: {type: string, markers: false, required: true}
+                      z: {type: string, markers: false}
+                  alpha:
+                    type: map
+                    properties:
+                      type: {type: string, markers: false, required: true}
+                      a: {type: int, markers: false}
+    asserts:
+      - equal:
+          path: results[0].json.additionalProperties.type
+          value: object
+      - equal:
+          path: results[0].json.additionalProperties.required
+          value: [type]
+      - equal:
+          path: results[0].json.additionalProperties.properties
+          value:
+            type: {enum: [zeta, alpha]}
+      - equal:
+          path: results[0].json.additionalProperties.allOf
+          value:
+            - if: {properties: {type: {const: zeta}}, required: [type]}
+              then: {"$ref": "#/definitions/*%5Btype=zeta%5D"}
+            - if: {properties: {type: {const: alpha}}, required: [type]}
+              then: {"$ref": "#/definitions/*%5Btype=alpha%5D"}
+      - equal:
+          path: results[0].json.additionalProperties["x-crdkit-switch"]
+          value:
+            by: type
+            cases: [zeta, alpha]
+            refs:
+              zeta: "#/definitions/*%5Btype=zeta%5D"
+              alpha: "#/definitions/*%5Btype=alpha%5D"
+      - equal:
+          path: results[0].json.additionalProperties["x-crdkit-type"]
+          value: map
+      - equal:
+          path: results[0].json.definitions["*[type=alpha]"].additionalProperties
+          value: false
+      - equal:
+          path: results[0].json.definitions["*[type=alpha]"]["x-crdkit-path"]
+          value: "*[type=alpha]"
+      - equal:
+          path: results[0].json.definitions["*[type=alpha]"].properties.a.type
+          value: integer
+      - equal:
+          path: results[0].json.definitions["*[type=zeta]"]["x-crdkit-order"]
+          value: [type, z]
+
+  - it: 'jsonSchema: x-crdkit-shared marks only properties identical in every case'
+    set:
+      schemaOps:
+        - op: jsonSchema
+          schemaText: |
+            switch:
+              by: kind
+              cases:
+                one:
+                  type: map
+                  properties:
+                    kind: {type: string, markers: false, required: true}
+                    same: {type: int, markers: false}
+                    differs: {type: int, markers: false}
+                    only: {type: int, markers: false}
+                two:
+                  type: map
+                  properties:
+                    kind: {type: string, markers: false, required: true}
+                    same: {type: int, markers: false}
+                    differs: {type: string, markers: false}
+    asserts:
+      - equal:
+          path: results[0].json.definitions["[kind=one]"].properties.same["x-crdkit-shared"]
+          value: true
+      - equal:
+          path: results[0].json.definitions["[kind=two]"].properties.kind["x-crdkit-shared"]
+          value: true
+      - notExists:
+          path: results[0].json.definitions["[kind=one]"].properties.differs["x-crdkit-shared"]
+      - notExists:
+          path: results[0].json.definitions["[kind=one]"].properties.only["x-crdkit-shared"]
+      - notExists:
+          path: results[0].json.definitions["[kind=two]"].properties.differs["x-crdkit-shared"]
+
+  - it: 'jsonSchema: a single case shares nothing'
+    set:
+      schemaOps:
+        - op: jsonSchema
+          schemaText: |
+            switch:
+              by: kind
+              cases:
+                only:
+                  type: map
+                  properties:
+                    kind: {type: string, markers: false, required: true}
+    asserts:
+      - notExists:
+          path: results[0].json.definitions["[kind=only]"].properties.kind["x-crdkit-shared"]
+
+  - it: 'jsonSchema: examples come through a values map and a switch, unique, per node'
+    set:
+      schemaOps:
+        - op: jsonSchema
+          schemaText: |
+            type: map
+            properties:
+              target: {type: string, markers: false}
+              services:
+                type: map
+                values:
+                  switch:
+                    by: type
+                    cases:
+                      a:
+                        type: map
+                        properties:
+                          type: {type: string, markers: false, required: true}
+                          size: {type: int, markers: false}
+                      b:
+                        type: map
+                        properties:
+                          type: {type: string, markers: false, required: true}
+                          size: {type: int, markers: false}
+              untouched: {type: string, markers: false}
+          example:
+            target: prod
+            services:
+              X: {type: a, size: 1}
+              Y: {type: b, size: 1}
+              Z: {type: a, size: 2}
+    asserts:
+      - equal:
+          path: results[0].json.properties.target.examples
+          value: [prod]
+      - notExists:
+          path: results[0].json.properties.untouched.examples
+      - equal:
+          path: results[0].json.properties.services.additionalProperties.examples
+          value:
+            - {type: a, size: 1}
+            - {type: b, size: 1}
+            - {type: a, size: 2}
+      - equal:
+          path: results[0].json.definitions["services.*[type=a]"].examples
+          value:
+            - {type: a, size: 1}
+            - {type: a, size: 2}
+      - equal:
+          path: results[0].json.definitions["services.*[type=a]"].properties.size.examples
+          value: [1, 2]
+      - equal:
+          path: results[0].json.definitions["services.*[type=b]"].properties.size.examples
+          value: [1]
+      - equal:
+          path: results[0].json.definitions["services.*[type=b]"].properties.type.examples
+          value: [b]
+      - equal:
+          path: results[0].json.properties.services.examples[0].Y
+          value: {type: b, size: 1}
+
+  - it: 'jsonSchema: examples also reach list items and a values entry outside the properties'
+    set:
+      schemaOps:
+        - op: jsonSchema
+          schemaText: |
+            type: map
+            properties:
+              named: {type: string, markers: false}
+            values: {type: string, markers: false}
+          example:
+            named: n
+            other: o
+            more: m
+    asserts:
+      - equal:
+          path: results[0].json.additionalProperties.examples
+          value: [m, o]
+      - equal:
+          path: results[0].json.properties.named.examples
+          value: [n]
+
+  - it: 'jsonSchema: a list example reaches the items node'
+    set:
+      schemaOps:
+        - op: jsonSchema
+          schemaText: |
+            type: map
+            properties:
+              ports: {type: list, items: {type: int}}
+          example:
+            ports: [80, 443, 80]
+    asserts:
+      - equal:
+          path: results[0].json.properties.ports.examples
+          value:
+            - [80, 443, 80]
+      - equal:
+          path: results[0].json.properties.ports.anyOf[0].items.examples
+          value: [80, 443]
+
+  - it: 'jsonSchema: sections attach to a case and to a key, as x-crdkit-sections and Markdown'
+    set:
+      schemaOps:
+        - op: jsonSchema
+          schemaText: |
+            type: map
+            properties:
+              target: {type: string, markers: false, doc: "Render target."}
+              services:
+                type: map
+                values:
+                  switch:
+                    by: type
+                    cases:
+                      a:
+                        type: map
+                        properties:
+                          type: {type: string, markers: false, required: true}
+          sections:
+            "services.*[type=a]":
+              - title: Variables
+                doc: Generated.
+                columns: [Name, Value]
+                rows:
+                  - [A_X, "1|2"]
+                code: "env:\n  A_X: 1\n"
+            target:
+              - {title: Note}
+    asserts:
+      - equal:
+          path: results[0].json.definitions["services.*[type=a]"]["x-crdkit-sections"]
+          value:
+            - title: Variables
+              doc: Generated.
+              columns: [Name, Value]
+              rows:
+                - [A_X, "1|2"]
+              code: "env:\n  A_X: 1\n"
+      - equal:
+          path: results[0].json.definitions["services.*[type=a]"].markdownDescription
+          value: "**Variables**\n\nGenerated.\n\n| Name | Value |\n| --- | --- |\n| A_X | 1\\|2 |\n\n```yaml\nenv:\n  A_X: 1\n```"
+      - equal:
+          path: results[0].json.properties.target.markdownDescription
+          value: "Render target.\n\n**Note**"
+      - equal:
+          path: results[0].json.properties.target.description
+          value: Render target.
+      - lengthEqual:
+          path: diag.errors
+          count: 0
+
+  - it: 'jsonSchema: a malformed section or an unknown node path is an ERROR and dropped'
+    set:
+      schemaOps:
+        - op: jsonSchema
+          schemaText: |
+            type: map
+            properties:
+              a: {type: string, markers: false}
+          sections:
+            a:
+              - {title: ""}
+              - {title: Ok}
+              - {title: Cols, rows: [[x]]}
+              - {title: Width, columns: [A, B], rows: [[x]]}
+              - {title: Extra, color: red}
+              - plain
+            b: [{title: T}]
+            c: not-a-list
+    asserts:
+      - equal:
+          path: results[0].json.properties.a["x-crdkit-sections"]
+          value:
+            - title: Ok
+      - equal:
+          path: diag.errors
+          value:
+            - "sections: 'a'[0]: 'title' must be a non-empty string — dropped"
+            - "sections: 'a'[2]: 'rows' must be a list and need 'columns' — dropped"
+            - "sections: 'a'[3]: row 0 must be a list of 2 strings — dropped"
+            - "sections: 'a'[4]: unknown section key 'color' — dropped"
+            - "sections: 'a'[5]: a section must be a map — dropped"
+            - "sections: 'c' must be a list of sections — dropped"
+            - "sections: 'b' names no node — dropped"
+
+  - it: 'jsonSchema: an invalid schema records the self-check ERRORs and returns {}'
+    set:
+      schemaOps:
+        - op: jsonSchema
+          schemaText: |
+            type: thing
+    asserts:
+      - equal:
+          path: results[0].json
+          value: {}
+      - equal:
+          path: diag.errors
+          value:
+            - "schema invalid: (root): unknown type 'thing'"
+
+  - it: 'jsonSchema: the README example schema'
+    set:
+      schemaOps:
+        - op: jsonSchema
+          title: Example values
+          schemaText: |
+            type: map
+            values: {type: any}                       # the consumer chart's own keys
+            properties:
+              target:     {type: string, markers: false, required: true, doc: "Render target."}
+              renderMode: {type: scalar, markers: false, enum: [validate, deploy], default: deploy}
+              services:
+                type: map
+                keys: {pattern: "^[A-Z0-9_]+$", label: "<ID>"}
+                values:
+                  switch:
+                    by: type
+                    cases:
+                      greeter:
+                        type: map
+                        properties:
+                          type:     {type: scalar, markers: false, required: true}
+                          enabled:  {type: bool, markers: false, default: true}
+                          greeting: {type: string, doc: "File content."}
+                          ports:    {type: list, items: {type: int}}
+                      environment:
+                        type: map
+                        properties:
+                          type:     {type: scalar, markers: false, required: true}
+                          enabled:  {type: bool, markers: false, default: true}
+                          environment: {type: map, keys: {pattern: "^[A-Z]+$"}, values: {type: scalar}}
+          example:
+            target: prod
+            services:
+              APP: {type: greeter, greeting: hi, ports: [80]}
+              VARS: {type: environment, environment: {A: x}}
+          sections:
+            "services.*[type=greeter]":
+              - {title: Generated variables, columns: [Variable, Value], rows: [[APP_GREETER, APP]]}
+    asserts:
+      - matchSnapshot:
+          path: results[0].text

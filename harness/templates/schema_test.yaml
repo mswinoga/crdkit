@@ -14,6 +14,8 @@ entry to "results":
   - {op: path, keys, path?}                     → {text: <path>}
   - {op: docs, schema, title?}                  → {text: <Markdown>}
   - {op: order, text}                           → {order: {<schema path>: <index>}}
+  - {op: jsonSchema, schemaText, example?, sections?, title?}
+                                                → {text: <JSON text>, json: <decoded>}
 "values"/"def" are passed through `toYaml | fromYaml`, like a library
 reading .Values. Renders `results`, `seen`, `diag`. With no schemaOps
 it renders empty lists — never interferes with a bare `helm template`.
@@ -54,6 +56,9 @@ it renders empty lists — never interferes with a bare `helm template`.
   {{- else if eq $op.op "order" -}}
     {{- $r := include "crdkit.schema.order.internal" (dict "text" $op.text) | fromYaml -}}
     {{- $results = append $results (dict "order" $r.value) -}}
+  {{- else if eq $op.op "jsonSchema" -}}
+    {{- $text := include "crdkit.schema.jsonSchema" (dict "schemaText" $op.schemaText "example" $op.example "sections" $op.sections "title" ($op.title | default "") "diag" $diag) -}}
+    {{- $results = append $results (dict "text" $text "json" ($text | fromJson)) -}}
   {{- end -}}
 {{- end -}}
 results:
