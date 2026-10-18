@@ -1,32 +1,91 @@
-crdkit.schema.docs renders one table for the root and one per switch case:
+'docs: skeleton in schema order, then a table per map node and a section per case':
   1: |
     |
       # Example values
 
+      [HTML reference](VALUES.html)
+
+      ```yaml
+      target:  # string, required
+      renderMode:  # string
+      services:  # map
+        <ID>:  # map, by type
+          # type: greeter
+          # type:  # string, required
+          # greeting:  # string, per target
+          # ports:  # list of int, per target
+          #   - # int
+          # type: environment
+          # type:  # string, required
+          # environment:  # map
+          #   <key>:  # scalar, per target
+      <key>:  # any
+      ```
+
+      ## (root)
+
       | Key | Type | Per target | Default | Required | Description |
       | --- | --- | --- | --- | --- | --- |
-      | `renderMode` | string, one of: validate, deploy | no | `"deploy"` |  | Mode \| see README. |
-      | `services` | map |  |  |  | Services by ID. |
-      | `services.<key>` | map, by `type`: environment, greeter |  |  |  |  |
       | `target` | string | no |  | yes | Render target. |
+      | `renderMode` | string, one of: validate, deploy | no | `"deploy"` |  | Mode \| see README. |
+      | `services` | map, keys match `^[A-Z]+$` |  |  |  | Services by ID. |
       | `<key>` | any |  |  |  | The consumer chart's own keys. |
 
-      ## `services.<key>` with `type: environment`
+      ## `services`
 
-      | Key | Type | Per target | Default | Required | Description |
-      | --- | --- | --- | --- | --- | --- |
-      | `services.<key>.environment` | map, keys match `^[A-Z]+$` |  |  |  |  |
-      | `services.<key>.environment.<key>` | scalar | yes |  |  |  |
-      | `services.<key>.type` | string | no |  | yes |  |
+      Services by ID.
 
-      ## `services.<key>` with `type: greeter`
+      | Key | Type |
+      | --- | --- |
+      | `<ID>` | map, by `type`: greeter, environment |
 
-      | Key | Type | Per target | Default | Required | Description |
-      | --- | --- | --- | --- | --- | --- |
-      | `services.<key>.greeting` | string | yes |  |  | File content. |
-      | `services.<key>.ports` | list | yes |  |  |  |
-      | `services.<key>.ports[]` | int | markers |  |  |  |
-      | `services.<key>.type` | string | no |  | yes |  |
+      ## `services.*[type=greeter]`
+
+      Writes a greeting.
+
+      | Key | Type | Per target | Required | Description |
+      | --- | --- | --- | --- | --- |
+      | `type` (shared) | string | no | yes |  |
+      | `greeting` | string | yes |  | File content. |
+      | `ports` | list of int | yes |  |  |
+
+      **Example** (generated)
+
+      ```yaml
+      services:
+        <ID>:
+          greeting:
+            default: text
+            prod: text
+          ports:
+            default:
+            - 1
+            prod:
+            - 1
+          type: greeter
+      ```
+
+      ## `services.*[type=environment]`
+
+      | Key | Type | Per target | Required |
+      | --- | --- | --- | --- |
+      | `type` (shared) | string | no | yes |
+      | `environment` | map, keys match `^[A-Z]+$` |  |  |
+
+      **Example** (generated)
+
+      ```yaml
+      services:
+        <ID>:
+          environment: {}
+          type: environment
+      ```
+
+      ## `services.*[type=environment].environment`
+
+      | Key | Type | Per target |
+      | --- | --- | --- |
+      | `<key>` | scalar | yes |
 'jsonSchema: the README example schema':
   1: |
     |

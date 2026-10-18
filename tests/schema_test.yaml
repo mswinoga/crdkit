@@ -776,12 +776,13 @@ tests:
 
   # --- docs ---
 
-  - it: 'crdkit.schema.docs renders one table for the root and one per switch case'
+  - it: 'docs: skeleton in schema order, then a table per map node and a section per case'
     set:
       schemaOps:
         - op: docs
           title: Example values
-          schema:
+          htmlLink: VALUES.html
+          schemaText: |
             type: map
             values: {type: any, doc: "The consumer chart's own keys."}
             properties:
@@ -790,12 +791,14 @@ tests:
               services:
                 type: map
                 doc: "Services by ID."
+                keys: {pattern: "^[A-Z]+$", label: "<ID>"}
                 values:
                   switch:
                     by: type
                     cases:
                       greeter:
                         type: map
+                        doc: "Writes a greeting."
                         properties:
                           type: {type: string, markers: false, required: true}
                           greeting: {type: string, tokens: true, doc: "File\ncontent."}
@@ -813,16 +816,115 @@ tests:
           pattern: "\\| `renderMode` \\| string, one of: validate, deploy \\| no \\| `\"deploy\"` \\|  \\| Mode \\\\\\| see README\\. \\|"
       - matchRegex:
           path: results[0].text
-          pattern: "## `services.<key>` with `type: greeter`"
+          pattern: "## `services.\\*\\[type=greeter\\]`"
       - matchRegex:
           path: results[0].text
-          pattern: "\\| `services.<key>.greeting` \\| string \\| yes \\|  \\|  \\| File content\\. \\|"
+          pattern: "\\| `greeting` \\| string \\| yes \\|  \\| File content\\. \\|"
+      - matchRegex:
+          path: results[0].text
+          pattern: "^# Example values\\n\\n\\[HTML reference\\]\\(VALUES.html\\)\\n\\n```yaml\\ntarget:  # string, required\\nrenderMode:  # string\\nservices:  # map\\n  <ID>:  # map, by type\\n    # type: greeter\\n    # type:  # string, required\\n    # greeting:  # string, per target\\n    # ports:  # list of int, per target\\n    #   - # int\\n"
 
-  - it: 'a schema with only a switch at the root renders the case tables'
+  - it: 'docs: a column with no content is omitted'
     set:
       schemaOps:
         - op: docs
           schema:
+            type: map
+            properties:
+              a: {type: string, markers: false}
+              b: {type: int, markers: false, default: 3}
+    asserts:
+      - matchRegex:
+          path: results[0].text
+          pattern: "\\| Key \\| Type \\| Per target \\| Default \\|\\n\\| --- \\| --- \\| --- \\| --- \\|\\n\\| `a` \\| string \\| no \\|  \\|\\n\\| `b` \\| int \\| no \\| `3` \\|\\n"
+      - notMatchRegex:
+          path: results[0].text
+          pattern: "Required|Description"
+
+  - it: 'docs: a case section has the shared marker, the matching example entries and the sections'
+    set:
+      schemaOps:
+        - op: docs
+          example:
+            services:
+              APP: {type: greeter, greeting: hello}
+              OTHER: {type: greeter, greeting: bye}
+              SHARED: {type: environment}
+          sections:
+            "services.*[type=greeter]":
+              - title: Generated variables
+                columns: [Pattern, Value]
+                rows:
+                  - ["<ID>_GREETER", "<ID>"]
+              - title: Example output
+                code: "type: greeter\n"
+          schemaText: |
+            type: map
+            properties:
+              services:
+                type: map
+                values:
+                  switch:
+                    by: type
+                    cases:
+                      greeter:
+                        type: map
+                        doc: "Writes a greeting."
+                        properties:
+                          type: {type: string, markers: false, required: true}
+                          greeting: {type: string}
+                      environment:
+                        type: map
+                        properties:
+                          type: {type: string, markers: false, required: true}
+    asserts:
+      - equal:
+          path: diag.errors
+          value: []
+      - matchRegex:
+          path: results[0].text
+          pattern: "## `services.\\*\\[type=greeter\\]`\\n\\nWrites a greeting\\.\\n\\n\\| Key \\| Type \\| Per target \\| Required \\|\\n\\| --- \\| --- \\| --- \\| --- \\|\\n\\| `type` \\(shared\\) \\| string \\| no \\| yes \\|\\n\\| `greeting` \\| string \\| yes \\|  \\|\\n\\n\\*\\*Example\\*\\*\\n\\n```yaml\\nservices:\\n  APP:\\n    greeting: hello\\n    type: greeter\\n  OTHER:\\n    greeting: bye\\n    type: greeter\\n```\\n\\n\\*\\*Generated variables\\*\\*\\n\\n\\| Pattern \\| Value \\|\\n\\| --- \\| --- \\|\\n\\| <ID>_GREETER \\| <ID> \\|\\n\\n\\*\\*Example output\\*\\*\\n\\n```yaml\\ntype: greeter\\n```"
+      - matchRegex:
+          path: results[0].text
+          pattern: "## `services.\\*\\[type=environment\\]`\\n\\n\\| Key \\| Type \\| Per target \\| Required \\|\\n\\| --- \\| --- \\| --- \\| --- \\|\\n\\| `type` \\(shared\\) \\| string \\| no \\| yes \\|\\n\\n\\*\\*Example\\*\\*\\n\\n```yaml\\nservices:\\n  SHARED:"
+      - notMatchRegex:
+          path: results[0].text
+          pattern: "\\(generated\\)"
+
+  - it: 'docs: an unreached case gets a generated example, marked, wrapped in the key labels'
+    set:
+      schemaOps:
+        - op: docs
+          schemaText: |
+            type: map
+            properties:
+              services:
+                type: map
+                keys: {pattern: "^[A-Z]+$", label: "<ID>"}
+                values:
+                  switch:
+                    by: type
+                    cases:
+                      greeter:
+                        type: map
+                        properties:
+                          type: {type: string, markers: false, required: true}
+                          greeting: {type: string}
+                          mode: {type: string, markers: false, enum: [fast, slow]}
+                          port: {type: int, default: 80}
+                          name: {type: string, markers: false, pattern: "^[a-z]+$"}
+                          hosts: {type: list, tokens: false, items: {type: scalar, markers: false}}
+                          flag: {type: bool, markers: false}
+    asserts:
+      - matchRegex:
+          path: results[0].text
+          pattern: "\\*\\*Example\\*\\* \\(generated\\)\\n\\n```yaml\\nservices:\\n  <ID>:\\n    flag: true\\n    greeting:\\n      default: text\\n      prod: text\\n    hosts:\\n    - text\\n    mode: fast\\n    port:\\n      default: 80\\n      prod: 80\\n    type: greeter\\n```"
+
+  - it: 'docs: a schema with only a switch at the root renders the case sections'
+    set:
+      schemaOps:
+        - op: docs
+          schemaText: |
             switch:
               by: flavor
               cases:
@@ -836,11 +938,39 @@ tests:
           value: |
             # Values
 
-            ## (root) with `flavor: a`
+            ```yaml
+            # flavor: a
+            # flavor:  # scalar
+            ```
 
-            | Key | Type | Per target | Default | Required | Description |
-            | --- | --- | --- | --- | --- | --- |
-            | `flavor` | scalar | no |  |  |  |
+            ## `[flavor=a]`
+
+            | Key | Type | Per target |
+            | --- | --- | --- |
+            | `flavor` | scalar | no |
+
+            **Example** (generated)
+
+            ```yaml
+            flavor: a
+            ```
+
+  - it: 'docs: a section on a non-map node gets a section of its own'
+    set:
+      schemaOps:
+        - op: docs
+          sections:
+            name:
+              - title: Notes
+                doc: "Plain."
+          schemaText: |
+            type: map
+            properties:
+              name: {type: string, doc: "The name."}
+    asserts:
+      - matchRegex:
+          path: results[0].text
+          pattern: "## `name`\\n\\nThe name\\.\\n\\n\\*\\*Notes\\*\\*\\n\\nPlain\\.\\n$"
 
   # --- omitted DSL keys ---
 
@@ -936,31 +1066,6 @@ tests:
           path: diag.warnings
           value:
             - "'other' is not a known key — ignored"
-
-  - it: 'the docs Per target column shows the effective default'
-    set:
-      schemaOps:
-        - op: docs
-          schema:
-            type: map
-            properties:
-              greeting: {type: scalar}
-              hosts: {type: list, items: {type: scalar}}
-              type: {type: scalar, markers: false}
-              pinned: {type: scalar, tokens: false}
-    asserts:
-      - equal:
-          path: results[0].text
-          value: |
-            # Values
-
-            | Key | Type | Per target | Default | Required | Description |
-            | --- | --- | --- | --- | --- | --- |
-            | `greeting` | scalar | yes |  |  |  |
-            | `hosts` | list | yes |  |  |  |
-            | `hosts[]` | scalar | markers |  |  |  |
-            | `pinned` | scalar | markers |  |  |  |
-            | `type` | scalar | no |  |  |  |
 
   # --- key order ---
 

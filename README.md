@@ -476,7 +476,7 @@ All take a dict.
 | `crdkit.schema.node` | `{schema, values, keys}` | YAML `{value: <node>}` or `{}` |
 | `crdkit.schema.value` | `{ctx, node, def, path, target?, seen?}` | YAML `{value: <resolved>}` |
 | `crdkit.schema.path` | `{keys, path?}` | the dotted path as text |
-| `crdkit.schema.docs` | `{schema, title?}` | Markdown text |
+| `crdkit.schema.docs` | `{schema, title?, htmlLink?}` — `schema` is the JSON Schema text | Markdown text |
 | `crdkit.schema.jsonSchema` | `{schemaText, example?, sections?, title?, diag}` | JSON Schema text (draft-07) |
 
 - `path`: values path prefix of `values` in the consumer's input (e.g.
@@ -498,22 +498,35 @@ All take a dict.
 
 ### Markdown reference
 
-`crdkit.schema.docs` renders `# <title>` (default `Values`), one table
-for the root, then one `## <path> with <by>: <case>` table per switch
-case:
+`crdkit.schema.docs` renders the JSON Schema text returned by
+`crdkit.schema.jsonSchema`:
+
+- `# <title>` (default: the schema's title) and, with `htmlLink`, a link
+  to the HTML reference;
+- a commented YAML skeleton: keys in schema order, type, `required` and
+  `per target` as trailing comments, switch cases as `# <by>: <value>`
+  blocks;
+- one `## <path>` section per map node: its doc and a table of its keys,
+  with only the columns that have content;
+- one `## <node path>` section per switch case: doc, keys table (shared
+  keys marked), the example, its sections.
 
 ```markdown
 | Key | Type | Per target | Default | Required | Description |
 | --- | --- | --- | --- | --- | --- |
-| `renderMode` | scalar, one of: validate, deploy | no | `"deploy"` |  |  |
-| `services.<key>` | map, by `type`: greeter |  |  |  |  |
 | `target` | string | no |  | yes | Render target. |
+| `renderMode` | string, one of: validate, deploy | no | `"deploy"` |  |  |
+| `services` | map, keys match `^[A-Z]+$` |  |  |  | Services by ID. |
 ```
 
 - Per target: `yes` (may be a token declaration), `markers` (may hold
   `@NAME@` markers), `no` (static).
-- A `values` child shows as `<path>.<key>`, list items as `<path>[]`.
-- Keys are sorted alphabetically — Go maps keep no order.
+- A `values` child is shown as its key label (`<ID>`, default `<key>`).
+- Keys follow the schema text's order.
+- A case's example is the example values whose switch key equals the case
+  value, wrapped in their ancestor keys; a case the example does not
+  reach gets a generated one (`default`, else the first `enum` value,
+  else a value per type), marked `(generated)`.
 
 ### JSON Schema
 
