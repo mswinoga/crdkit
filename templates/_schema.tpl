@@ -42,6 +42,7 @@ Dependency graph (who calls whom):
               -> crdkit.schema.walk.internal (mode "resolved")
   crdkit.schema.value (public) -> crdkit.schema.resolveAndCheck.internal
   crdkit.schema.node (public)
+  crdkit.schema.path (public) -> crdkit.schema.path.internal
   crdkit.schema.docs (public) -> crdkit.schema.docsNode.internal
 */}}
 
@@ -65,6 +66,33 @@ Interface:
 {{- else -}}
 {{- .key -}}
 {{- end -}}
+{{- end -}}
+
+{{/*
+crdkit.schema.path (public)
+
+Builds the dotted values path of a location, as every schema
+diagnostic and the "seen" dict spell it.
+
+Interface:
+- Params (dict): { "keys": <list of map keys / list indices from the
+  root>, "path": <prefix, optional — "" at the root> }
+- Returns: the path as plain text (`a.b`, `a["b.c"]`, `a.b[0]`).
+
+Implementation notes:
+- A number is a list index, anything else a map key (a string "0" is a
+  key).
+*/}}
+{{- define "crdkit.schema.path" -}}
+{{- $path := .path | default "" -}}
+{{- range $key := .keys | default (list) -}}
+  {{- if or (kindIs "int" $key) (kindIs "int64" $key) (kindIs "float64" $key) -}}
+    {{- $path = include "crdkit.schema.path.internal" (dict "path" $path "index" (int $key)) -}}
+  {{- else -}}
+    {{- $path = include "crdkit.schema.path.internal" (dict "path" $path "key" (toString $key)) -}}
+  {{- end -}}
+{{- end -}}
+{{- $path -}}
 {{- end -}}
 
 {{/*
@@ -631,8 +659,9 @@ than the render's own.
 Interface:
 - Params (dict): { "ctx": <ctx>, "node": <the field's node, see
   crdkit.schema.node>, "def": <the field's value as written>, "path":
-  <its values path>, "target": <optional — defaults to ctx.target>,
-  "seen": <dict shared with crdkit.schema.validateValues, optional> }
+  <its values path, see crdkit.schema.path>, "target": <optional —
+  defaults to ctx.target>, "seen": <dict shared with
+  crdkit.schema.validateValues, optional> }
 - Returns YAML: { "value": <resolved value> }
 
 Implementation notes:

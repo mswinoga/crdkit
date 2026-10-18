@@ -436,7 +436,8 @@ Single field (`crdkit.schema.value`):
   makes the node's per-target state explicit.
 - Pass the same `seen` dict to `crdkit.schema.validateValues` and every
   `crdkit.schema.value` call: each `<path>|<target>` pair is checked and
-  reported once.
+  reported once. Build `path` with `crdkit.schema.path` (same `keys` as
+  `crdkit.schema.node`), so it is spelled as the value pass spells it.
 
 ### Diagnostics
 
@@ -468,6 +469,7 @@ All take a dict.
 | `crdkit.schema.validateValues` | `{ctx, schema, values, path?, target?, seen?}` | nothing |
 | `crdkit.schema.node` | `{schema, values, keys}` | YAML `{value: <node>}` or `{}` |
 | `crdkit.schema.value` | `{ctx, node, def, path, target?, seen?}` | YAML `{value: <resolved>}` |
+| `crdkit.schema.path` | `{keys, path?}` | the dotted path as text |
 | `crdkit.schema.docs` | `{schema, title?}` | Markdown text |
 
 - `path`: values path prefix of `values` in the consumer's input (e.g.
@@ -483,7 +485,8 @@ All take a dict.
 {{/* later, from an integration */}}
 {{- include "crdkit.schema.validateValues" (dict "ctx" .ctx "schema" $schema "values" $input "seen" $seen) -}}
 {{- $node := (include "crdkit.schema.node" (dict "schema" $schema "values" $input "keys" (list "services" "APP" "greeting")) | fromYaml).value -}}
-{{- $greeting := (include "crdkit.schema.value" (dict "ctx" .ctx "node" $node "def" $input.services.APP.greeting "path" "services.APP.greeting" "target" "qap1" "seen" $seen) | fromYaml).value -}}
+{{- $path := include "crdkit.schema.path" (dict "keys" (list "services" "APP" "greeting")) -}}
+{{- $greeting := (include "crdkit.schema.value" (dict "ctx" .ctx "node" $node "def" $input.services.APP.greeting "path" $path "target" "qap1" "seen" $seen) | fromYaml).value -}}
 ```
 
 ### Markdown reference

@@ -11,6 +11,7 @@ entry to "results":
   - {op: validateValues, schema, values, target?, path?} → {}
   - {op: value, node, def, path, target?}       → {value: <resolved>}
   - {op: node, schema, values, keys}            → {found, value}
+  - {op: path, keys, path?}                     → {text: <path>}
   - {op: docs, schema, title?}                  → {text: <Markdown>}
 "values"/"def" are passed through `toYaml | fromYaml`, like a library
 reading .Values. Renders `results`, `seen`, `diag`. With no schemaOps
@@ -45,6 +46,8 @@ it renders empty lists — never interferes with a bare `helm template`.
   {{- else if eq $op.op "node" -}}
     {{- $r := include "crdkit.schema.node" (dict "schema" $op.schema "values" $values "keys" $op.keys) | fromYaml -}}
     {{- $results = append $results (dict "found" (hasKey $r "value") "value" $r.value) -}}
+  {{- else if eq $op.op "path" -}}
+    {{- $results = append $results (dict "text" (include "crdkit.schema.path" (dict "keys" $op.keys "path" ($op.path | default "")))) -}}
   {{- else if eq $op.op "docs" -}}
     {{- $results = append $results (dict "text" (include "crdkit.schema.docs" (dict "schema" $op.schema "title" ($op.title | default "")))) -}}
   {{- end -}}

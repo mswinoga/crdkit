@@ -811,6 +811,27 @@ tests:
 
   # --- omitted DSL keys ---
 
+  - it: 'crdkit.schema.path spells keys dotted, keys with "." in brackets, numbers as indices'
+    set:
+      schemaOps:
+        - op: path
+          keys: [application, services, APP, greeting]
+        - op: path
+          keys: [a.b, c]
+        - op: path
+          keys: [hosts, 0, "1"]
+          path: services.APP
+        - op: path
+          keys: []
+    asserts:
+      - equal:
+          path: results
+          value:
+            - {text: application.services.APP.greeting}
+            - {text: '["a.b"].c'}
+            - {text: 'services.APP.hosts[0].1'}
+            - {text: ""}
+
   - it: 'tokens omitted = per-target on scalars and lists, static on markers:false scalars, never below a per-target node'
     set:
       target: prod
