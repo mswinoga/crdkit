@@ -310,7 +310,7 @@ A schema is a tree of **nodes**; each node is a dict.
 | `tokens` | scalar types, `list` | `true` → the value may be a token declaration | `true` (see below) |
 | `properties` | `map` | `{<key>: <node>}` for named keys | none |
 | `values` | `map` | node for every key not in `properties` | closed: other keys → WARNING |
-| `keys` | `map` | `{pattern: <regex>}` for keys matched by `values` | any key |
+| `keys` | `map` | `{pattern: <regex>, label?: <string>}` for keys matched by `values`; `label` is a documentation-only placeholder for a matched key (e.g. `<ID>`) | any key |
 | `items` | `list` | node for every element | `{type: any}` |
 | `switch` | node | `{by: <key>, cases: {<value>: <node>}}` | — |
 

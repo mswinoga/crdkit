@@ -41,6 +41,8 @@ tests:
               h: {type: scalar, requried: true}
               i: {type: scalar, enum: a}
               j: {type: map, keys: {}}
+              o: {type: map, values: {type: any}, keys: {pattern: "^[A-Z]+$", label: 5}}
+              p: {type: map, values: {type: any}, keys: {pattern: "^[A-Z]+$", label: "<ID>"}}
               k: "not-a-node"
               l: {type: scalar, required: "yes"}
               m: {kind: scalar}
@@ -67,6 +69,7 @@ tests:
             - "schema invalid: properties.m: unknown schema key 'kind'"
             - "schema invalid: properties.m: unknown type ''"
             - "schema invalid: properties.n: 'items' does not apply to type 'int'"
+            - "schema invalid: properties.o: 'keys.label' must be a string"
 
   - it: a switch case must declare the switch key as a static scalar
     set:

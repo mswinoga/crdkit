@@ -22,8 +22,9 @@ Schema node (a dict):
   "markers: false" scalar and below a node that is per-target (see
   crdkit.schema.tokens.internal)
 - map: properties ({key: node}), values (node for every other key;
-  omitted = every other key is unknown), keys ({pattern} for keys
-  matched by "values")
+  omitted = every other key is unknown), keys ({pattern, label?} for keys
+  matched by "values"; label = documentation-only placeholder for a
+  matched key, e.g. "<ID>")
 - list: items (node for every element; omitted = {type: any})
 - switch: {by: <key>, cases: {<value>: <node>}} — picks the node for a
   map by the value of one of its keys ("by", not "on": YAML 1.1, which
@@ -234,6 +235,8 @@ Interface:
   {{- end -}}
   {{- if and (hasKey $node "keys") (not (and (kindIs "map" $node.keys) (kindIs "string" $node.keys.pattern))) -}}
     {{- $found = append $found "'keys' must be {pattern: <regex>}" -}}
+  {{- else if and (hasKey $node "keys") (hasKey $node.keys "label") (not (kindIs "string" $node.keys.label)) -}}
+    {{- $found = append $found "'keys.label' must be a string" -}}
   {{- end -}}
   {{- $childInTokens := or $inTokens (ne (include "crdkit.schema.tokens.internal" (dict "node" $node "inTokens" $inTokens)) "") -}}
   {{- if hasKey $node "properties" -}}
