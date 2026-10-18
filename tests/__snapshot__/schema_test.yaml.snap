@@ -24,6 +24,6 @@ crdkit.schema.docs renders one table for the root and one per switch case:
       | Key | Kind | Per target | Default | Required | Description |
       | --- | --- | --- | --- | --- | --- |
       | `services.<key>.greeting` | scalar (string) | yes |  |  | File content. |
-      | `services.<key>.ports` | list |  |  |  |  |
+      | `services.<key>.ports` | list | yes |  |  |  |
       | `services.<key>.ports[]` | scalar (int) | markers |  |  |  |
       | `services.<key>.type` | scalar (string) | no |  | yes |  |

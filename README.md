@@ -310,6 +310,10 @@ properties:
               greeting: {kind: scalar, type: string, tokens: true, default: hi}
 ```
 
+- Omitted keys: `required` false, `markers` true, `type` any scalar,
+  `items` any, a map without `values` closed; `tokens` true on scalars
+  and lists, except a `markers: false` scalar and anything below a
+  per-target node; `kind` must be written (except on a switch node).
 - `crdkit.schema.check` — self-check; `true` or an empty string, each
   problem an `# ERROR: schema invalid: …`.
 - `crdkit.schema.validate` — structural pass, before the chain:

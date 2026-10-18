@@ -9,12 +9,17 @@ Schema node (a dict):
 - doc: Markdown text for the reference
 - default: inserted when the key is absent (map properties only)
 - required: bool — the key must be present
-- scalar: type (string | int | number | bool), enum (list), pattern
-  (regex, unanchored), markers (false → "@NAME@" markers rejected)
+- required omitted = false; doc and default are optional
+- scalar: type (string | int | number | bool; omitted = any scalar),
+  enum (list), pattern (regex, unanchored), markers (false → "@NAME@"
+  markers rejected; omitted = true)
 - scalar/list: tokens (true → the value may be a token declaration,
-  resolved per target)
-- map: properties ({key: node}), values (node for every other key),
-  keys ({pattern} for keys matched by "values")
+  resolved per target). Omitted = true, except on a "markers: false"
+  scalar and below a node that is per-target (see
+  crdkit.schema.tokens.internal)
+- map: properties ({key: node}), values (node for every other key;
+  omitted = every other key is unknown), keys ({pattern} for keys
+  matched by "values")
 - list: items (node for every element; omitted = {kind: any})
 - switch: {by: <key>, cases: {<value>: <node>}} — picks the node for a
   map by the value of one of its keys ("by", not "on": YAML 1.1, which
@@ -63,6 +68,34 @@ Interface:
 {{- end -}}
 
 {{/*
+crdkit.schema.tokens.internal (internal)
+
+Whether a node is per-target (its value may be a token declaration).
+
+Interface:
+- Params (dict): { "node": <node>, "inTokens": <bool, an ancestor is
+  per-target> }
+- Returns: the plain string `true`, or an EMPTY string.
+
+Implementation notes:
+- Only scalar/list nodes, never below a per-target ancestor.
+- An explicit `tokens:` wins; omitted = true, except on a
+  `markers: false` scalar (static by declaration).
+*/}}
+{{- define "crdkit.schema.tokens.internal" -}}
+{{- $node := .node -}}
+{{- if and (kindIs "map" $node) (has (toString $node.kind) (list "scalar" "list")) (not .inTokens) -}}
+  {{- if hasKey $node "tokens" -}}
+    {{- if eq (toString $node.tokens) "true" -}}
+true
+    {{- end -}}
+  {{- else if ne (toString $node.markers) "false" -}}
+true
+  {{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 crdkit.schema.checkNode.internal (internal)
 
 Recursive self-check of one schema node; collects every problem.
@@ -105,7 +138,7 @@ Interface:
         {{- if and (kindIs "map" $caseNode) (kindIs "map" $caseNode.properties) -}}
           {{- $onNode = index $caseNode.properties $switch.by -}}
         {{- end -}}
-        {{- if not (and (kindIs "map" $onNode) (eq (toString $onNode.kind) "scalar") (eq (toString $onNode.markers) "false") (not $onNode.tokens)) -}}
+        {{- if not (and (kindIs "map" $onNode) (eq (toString $onNode.kind) "scalar") (eq (toString $onNode.markers) "false") (ne (toString $onNode.tokens) "true")) -}}
           {{- $found = append $found (printf "case '%s' must declare '%s' as kind 'scalar' with 'markers: false'" $caseValue $switch.by) -}}
         {{- end -}}
       {{- end -}}
@@ -149,7 +182,7 @@ Interface:
   {{- if and (hasKey $node "keys") (not (and (kindIs "map" $node.keys) (kindIs "string" $node.keys.pattern))) -}}
     {{- $found = append $found "'keys' must be {pattern: <regex>}" -}}
   {{- end -}}
-  {{- $childInTokens := or $inTokens (eq (toString $node.tokens) "true") -}}
+  {{- $childInTokens := or $inTokens (ne (include "crdkit.schema.tokens.internal" (dict "node" $node "inTokens" $inTokens)) "") -}}
   {{- if hasKey $node "properties" -}}
     {{- if not (kindIs "map" $node.properties) -}}
       {{- $found = append $found "'properties' must be a map" -}}
@@ -271,7 +304,8 @@ Interface:
 - Params (dict): { "node": <checked node>, "value": <any, never nil>,
   "path": <values path>, "diag": <dict>, "mode": "structural" |
   "resolved", "suffix": <text after the path in resolved-mode messages,
-  e.g. " for target 'qa'">, "out": <dict, written in place> }
+  e.g. " for target 'qa'">, "inTokens": <bool, an ancestor is
+  per-target>, "out": <dict, written in place> }
 - Returns: nothing; sets out.keep (bool) and out.value (structural:
   the normalized value — defaults applied, failing nodes dropped).
 
@@ -281,8 +315,8 @@ Implementation notes:
 - structural mode: kind mismatch / unknown key / unmatched switch →
   WARNING; required / type / enum / pattern / markers → ERROR; a node
   that fails is dropped (its parent's default then applies); a key
-  failing "keys.pattern" → WARNING, kept. A "tokens: true" node holding
-  a dict is a token declaration: kept as written, checked by the value
+  failing "keys.pattern" → WARNING, kept. A per-target node holding a
+  dict is a token declaration: kept as written, checked by the value
   pass. A string holding "@NAME@" markers skips type/enum/pattern —
   it is checked by the value pass once substituted.
 - resolved mode: the value is a resolved per-target value; every
@@ -304,7 +338,10 @@ Implementation notes:
 {{- $_ := set $out "keep" true -}}
 {{- $_ := set $out "value" $value -}}
 {{- $kind := $node.kind | default "" | toString -}}
-{{- $isDeclaration := and (not $resolved) (eq (toString $node.tokens) "true") (kindIs "map" $value) -}}
+{{- $inTokens := .inTokens -}}
+{{- $tokens := include "crdkit.schema.tokens.internal" (dict "node" $node "inTokens" $inTokens) -}}
+{{- $childInTokens := or $inTokens (ne $tokens "") -}}
+{{- $isDeclaration := and (not $resolved) $tokens (kindIs "map" $value) -}}
 {{- if hasKey $node "switch" -}}
   {{- $switch := $node.switch -}}
   {{- $onPath := include "crdkit.schema.path.internal" (dict "path" $path "key" $switch.by) -}}
@@ -318,7 +355,7 @@ Implementation notes:
     {{- $_ := set $diag $kindLevel (append (index $diag $kindLevel) (printf "'%s'%s has unknown value '%v'%s" $onPath $suffix (index $value $switch.by) $tail)) -}}
     {{- $_ := set $out "keep" false -}}
   {{- else -}}
-    {{- include "crdkit.schema.walk.internal" (dict "node" (index $switch.cases (toString (index $value $switch.by))) "value" $value "path" $path "diag" $diag "mode" $mode "suffix" $suffix "out" $out) -}}
+    {{- include "crdkit.schema.walk.internal" (dict "node" (index $switch.cases (toString (index $value $switch.by))) "value" $value "path" $path "diag" $diag "mode" $mode "suffix" $suffix "inTokens" $inTokens "out" $out) -}}
   {{- end -}}
 {{- else if or (eq $kind "any") $isDeclaration -}}
   {{/* kept as written */}}
@@ -356,7 +393,7 @@ Implementation notes:
         {{- $result = append $result $element -}}
       {{- else -}}
         {{- $elementOut := dict -}}
-        {{- include "crdkit.schema.walk.internal" (dict "node" $items "value" $element "path" $elementPath "diag" $diag "mode" $mode "suffix" $suffix "out" $elementOut) -}}
+        {{- include "crdkit.schema.walk.internal" (dict "node" $items "value" $element "path" $elementPath "diag" $diag "mode" $mode "suffix" $suffix "inTokens" $childInTokens "out" $elementOut) -}}
         {{- if $elementOut.keep -}}
           {{- $result = append $result $elementOut.value -}}
         {{- end -}}
@@ -387,7 +424,7 @@ Implementation notes:
           {{- $_ := set $diag "warnings" (append $diag.warnings (printf "'%s'%s is not a known key%s" $childPath $suffix $tail)) -}}
         {{- else -}}
           {{- $childOut := dict -}}
-          {{- include "crdkit.schema.walk.internal" (dict "node" $childNode "value" $child "path" $childPath "diag" $diag "mode" $mode "suffix" $suffix "out" $childOut) -}}
+          {{- include "crdkit.schema.walk.internal" (dict "node" $childNode "value" $child "path" $childPath "diag" $diag "mode" $mode "suffix" $suffix "inTokens" $childInTokens "out" $childOut) -}}
           {{- if $childOut.keep -}}
             {{- $_ := set $result $key $childOut.value -}}
           {{- end -}}
@@ -454,12 +491,13 @@ Resolves one per-target value for a target and checks the result.
 Interface:
 - Params (dict): { "ctx": <ctx>, "node": <checked node>, "def": <the
   value as written: a token declaration, a plain value or a string with
-  markers>, "path": <values path>, "target": <string>, "seen": <dict>,
-  "out": <dict, written in place> }
+  markers>, "tokens": <bool, the node is per-target>, "path": <values
+  path>, "target": <string>, "seen": <dict>, "out": <dict, written in
+  place> }
 - Returns: nothing; sets out.value to the resolved value.
 
 Implementation notes:
-- A "tokens: true" node resolves through crdkit.tokenDef.value (field
+- A per-target node resolves through crdkit.tokenDef.value (field
   id = the values path); any other value through
   crdkit.tokens.substitute.
 - Checked at most once per `<path>|<target>` (recorded in "seen").
@@ -473,7 +511,7 @@ Implementation notes:
 {{- $target := .target -}}
 {{- $errorsBefore := len $ctx.diag.errors -}}
 {{- $value := "" -}}
-{{- if eq (toString $node.tokens) "true" -}}
+{{- if .tokens -}}
   {{- $value = (include "crdkit.tokenDef.value" (list $ctx .path .def $target) | fromYaml).value -}}
 {{- else -}}
   {{- $value = include "crdkit.tokens.substitute" (list $ctx .def $target) -}}
@@ -497,12 +535,14 @@ checks it for one target.
 
 Interface:
 - Params (dict): { "ctx": <ctx>, "node": <checked node>, "value":
-  <any>, "path": <values path>, "target": <string>, "seen": <dict> }
+  <any>, "path": <values path>, "target": <string>, "seen": <dict>,
+  "inTokens": <bool, an ancestor is per-target> }
 - Returns: nothing.
 
 Implementation notes:
-- Per-target values: anything under a "tokens: true" node, and every
-  string holding "@NAME@" markers.
+- Per-target values: the value of every per-target node
+  (crdkit.schema.tokens.internal), and every string holding "@NAME@"
+  markers.
 - Follows only what the structural pass would keep: an unmatched switch,
   a kind mismatch or an unknown key is skipped silently (already
   reported there).
@@ -512,21 +552,24 @@ Implementation notes:
 {{- $value := .value -}}
 {{- $path := .path -}}
 {{- $kind := $node.kind | default "" | toString -}}
+{{- $inTokens := .inTokens -}}
+{{- $tokens := include "crdkit.schema.tokens.internal" (dict "node" $node "inTokens" $inTokens) -}}
+{{- $childInTokens := or $inTokens (ne $tokens "") -}}
 {{- $common := dict "ctx" .ctx "target" .target "seen" .seen -}}
 {{- if kindIs "invalid" $value -}}
 {{- else if hasKey $node "switch" -}}
   {{- if kindIs "map" $value -}}
     {{- $selected := toString (index $value $node.switch.by) -}}
     {{- if and (not (kindIs "invalid" (index $value $node.switch.by))) (hasKey $node.switch.cases $selected) -}}
-      {{- include "crdkit.schema.valuesWalk.internal" (merge (dict "node" (index $node.switch.cases $selected) "value" $value "path" $path) $common) -}}
+      {{- include "crdkit.schema.valuesWalk.internal" (merge (dict "node" (index $node.switch.cases $selected) "value" $value "path" $path "inTokens" $inTokens) $common) -}}
     {{- end -}}
   {{- end -}}
 {{- else if eq $kind "any" -}}
-{{- else if or (eq (toString $node.tokens) "true") (and (eq $kind "scalar") (kindIs "string" $value) (regexMatch "@[A-Za-z0-9_]+@" $value)) -}}
-  {{- include "crdkit.schema.resolveAndCheck.internal" (merge (dict "node" $node "def" $value "path" $path "out" (dict)) $common) -}}
+{{- else if or $tokens (and (eq $kind "scalar") (kindIs "string" $value) (regexMatch "@[A-Za-z0-9_]+@" $value)) -}}
+  {{- include "crdkit.schema.resolveAndCheck.internal" (merge (dict "node" $node "def" $value "tokens" (ne $tokens "") "path" $path "out" (dict)) $common) -}}
 {{- else if and (eq $kind "list") (kindIs "slice" $value) -}}
   {{- range $i, $element := $value -}}
-    {{- include "crdkit.schema.valuesWalk.internal" (merge (dict "node" ($node.items | default (dict "kind" "any")) "value" $element "path" (include "crdkit.schema.path.internal" (dict "path" $path "index" $i))) $common) -}}
+    {{- include "crdkit.schema.valuesWalk.internal" (merge (dict "node" ($node.items | default (dict "kind" "any")) "value" $element "path" (include "crdkit.schema.path.internal" (dict "path" $path "index" $i)) "inTokens" $childInTokens) $common) -}}
   {{- end -}}
 {{- else if and (eq $kind "map") (kindIs "map" $value) -}}
   {{- $properties := $node.properties | default dict -}}
@@ -538,7 +581,7 @@ Implementation notes:
       {{- $childNode = $node.values -}}
     {{- end -}}
     {{- if $childNode -}}
-      {{- include "crdkit.schema.valuesWalk.internal" (merge (dict "node" $childNode "value" $child "path" (include "crdkit.schema.path.internal" (dict "path" $path "key" $key))) $common) -}}
+      {{- include "crdkit.schema.valuesWalk.internal" (merge (dict "node" $childNode "value" $child "path" (include "crdkit.schema.path.internal" (dict "path" $path "key" $key)) "inTokens" $childInTokens) $common) -}}
     {{- end -}}
   {{- end -}}
 {{- end -}}
@@ -558,8 +601,8 @@ Interface:
 - Returns: nothing (records into ctx.diag, marks "seen").
 
 Implementation notes:
-- Per-target values: values under a "tokens: true" node (resolved like
-  a token) and strings holding "@NAME@" markers (substituted).
+- Per-target values: values of per-target nodes (resolved like a
+  token) and strings holding "@NAME@" markers (substituted).
 - Every violation is an ERROR naming the target: `'<path>' for target
   '<t>' must be of type 'int' — got '<v>'`; scalars are checked "parses
   as" (see crdkit.schema.scalarReason.internal).
@@ -593,17 +636,20 @@ Interface:
 - Returns YAML: { "value": <resolved value> }
 
 Implementation notes:
-- A "tokens: true" node or a string with markers is resolved and
+- A per-target node or a string with markers is resolved and
   checked (once per path and target, see "seen"); any other value is
   returned as written — the structural pass already checked it.
-- The node must come from a schema that passed crdkit.schema.check.
+- The node must come from a schema that passed crdkit.schema.check,
+  through crdkit.schema.node (which makes its per-target state
+  explicit — "node" alone cannot know its ancestors).
 */}}
 {{- define "crdkit.schema.value" -}}
 {{- $ctx := .ctx -}}
 {{- $node := .node | default dict -}}
 {{- $out := dict "value" .def -}}
-{{- if or (eq (toString $node.tokens) "true") (and (kindIs "string" .def) (regexMatch "@[A-Za-z0-9_]+@" .def)) -}}
-  {{- include "crdkit.schema.resolveAndCheck.internal" (dict "ctx" $ctx "node" $node "def" .def "path" .path "target" (.target | default $ctx.target) "seen" (ternary .seen (dict) (kindIs "map" .seen)) "out" $out) -}}
+{{- $tokens := include "crdkit.schema.tokens.internal" (dict "node" $node "inTokens" false) -}}
+{{- if or $tokens (and (kindIs "string" .def) (regexMatch "@[A-Za-z0-9_]+@" .def)) -}}
+  {{- include "crdkit.schema.resolveAndCheck.internal" (dict "ctx" $ctx "node" $node "def" .def "tokens" (ne $tokens "") "path" .path "target" (.target | default $ctx.target) "seen" (ternary .seen (dict) (kindIs "map" .seen)) "out" $out) -}}
 {{- end -}}
 value: {{ $out.value | toYaml | nindent 2 }}
 {{- end -}}
@@ -620,6 +666,8 @@ Interface:
 - Returns YAML: { "value": <node> } when found, `{}` otherwise.
 
 Implementation notes:
+- A returned scalar/list node carries an explicit `tokens:` — its
+  per-target state depends on its ancestors.
 - A switch is followed by the value of its "by" key at that location; a
   final switch node is returned as its selected case.
 */}}
@@ -628,6 +676,7 @@ Implementation notes:
 {{- $value := .values -}}
 {{- $none := index (dict) "none" -}}
 {{- $found := true -}}
+{{- $inTokens := false -}}
 {{- range $key := concat (.keys | default (list)) (list "") -}}
   {{- if $found -}}
     {{- if and (kindIs "map" $node) (hasKey $node "switch") -}}
@@ -643,6 +692,7 @@ Implementation notes:
     {{- end -}}
   {{- end -}}
   {{- if and $found (ne (toString $key) "") -}}
+    {{- $inTokens = or $inTokens (ne (include "crdkit.schema.tokens.internal" (dict "node" $node "inTokens" $inTokens)) "") -}}
     {{- $kind := $node.kind | default "" | toString -}}
     {{- if eq $kind "map" -}}
       {{- $properties := $node.properties | default dict -}}
@@ -672,6 +722,9 @@ Implementation notes:
   {{- end -}}
 {{- end -}}
 {{- if $found -}}
+  {{- if has (toString $node.kind) (list "scalar" "list") -}}
+    {{- $node = merge (dict "tokens" (ne (include "crdkit.schema.tokens.internal" (dict "node" $node "inTokens" $inTokens)) "")) (omit $node "tokens") -}}
+  {{- end -}}
 value: {{ $node | toYaml | nindent 2 }}
 {{- end -}}
 {{- end -}}
@@ -683,7 +736,8 @@ Collects reference-table rows for one node and its descendants.
 
 Interface:
 - Params (dict): { "node": <checked node>, "path": <docs path>,
-  "self": <bool, emit a row for the node itself>, "acc": <dict with
+  "inTokens": <bool, an ancestor is per-target>, "self": <bool, emit a
+  row for the node itself>, "acc": <dict with
   "rows" and "sections" lists, appended to in place> }
 - Returns: nothing.
 
@@ -698,6 +752,9 @@ Implementation notes:
 {{- $path := .path -}}
 {{- $acc := .acc -}}
 {{- $kind := $node.kind | default "" | toString -}}
+{{- $inTokens := .inTokens -}}
+{{- $tokens := include "crdkit.schema.tokens.internal" (dict "node" $node "inTokens" $inTokens) -}}
+{{- $childInTokens := or $inTokens (ne $tokens "") -}}
 {{- if .self -}}
   {{- $kindText := $kind -}}
   {{- if hasKey $node "switch" -}}
@@ -715,7 +772,7 @@ Implementation notes:
     {{- $kindText = printf "%s, keys match `%s`" $kindText $node.keys.pattern -}}
   {{- end -}}
   {{- $perTarget := "" -}}
-  {{- if eq (toString $node.tokens) "true" -}}
+  {{- if $tokens -}}
     {{- $perTarget = "yes" -}}
   {{- else if eq (toString $node.markers) "false" -}}
     {{- $perTarget = "no" -}}
@@ -733,17 +790,17 @@ Implementation notes:
 {{- end -}}
 {{- if hasKey $node "switch" -}}
   {{- range $caseValue := keys $node.switch.cases | sortAlpha -}}
-    {{- $_ := set $acc "sections" (append $acc.sections (dict "path" $path "by" $node.switch.by "case" $caseValue "node" (index $node.switch.cases $caseValue))) -}}
+    {{- $_ := set $acc "sections" (append $acc.sections (dict "path" $path "by" $node.switch.by "case" $caseValue "node" (index $node.switch.cases $caseValue) "inTokens" $inTokens)) -}}
   {{- end -}}
 {{- else if eq $kind "map" -}}
   {{- range $key, $child := $node.properties | default dict -}}
-    {{- include "crdkit.schema.docsNode.internal" (dict "node" $child "path" (include "crdkit.schema.path.internal" (dict "path" $path "key" $key)) "self" true "acc" $acc) -}}
+    {{- include "crdkit.schema.docsNode.internal" (dict "node" $child "path" (include "crdkit.schema.path.internal" (dict "path" $path "key" $key)) "inTokens" $childInTokens "self" true "acc" $acc) -}}
   {{- end -}}
   {{- if hasKey $node "values" -}}
-    {{- include "crdkit.schema.docsNode.internal" (dict "node" $node.values "path" (include "crdkit.schema.path.internal" (dict "path" $path "key" "<key>")) "self" true "acc" $acc) -}}
+    {{- include "crdkit.schema.docsNode.internal" (dict "node" $node.values "path" (include "crdkit.schema.path.internal" (dict "path" $path "key" "<key>")) "inTokens" $childInTokens "self" true "acc" $acc) -}}
   {{- end -}}
 {{- else if and (eq $kind "list") (hasKey $node "items") -}}
-  {{- include "crdkit.schema.docsNode.internal" (dict "node" $node.items "path" (printf "%s[]" $path) "self" true "acc" $acc) -}}
+  {{- include "crdkit.schema.docsNode.internal" (dict "node" $node.items "path" (printf "%s[]" $path) "inTokens" $childInTokens "self" true "acc" $acc) -}}
 {{- end -}}
 {{- end -}}
 
@@ -781,7 +838,7 @@ Implementation notes:
   {{- if lt $i (len $acc.sections) -}}
     {{- $section := index $acc.sections $i -}}
     {{- $_ := set $acc "rows" (list) -}}
-    {{- include "crdkit.schema.docsNode.internal" (dict "node" $section.node "path" $section.path "self" false "acc" $acc) -}}
+    {{- include "crdkit.schema.docsNode.internal" (dict "node" $section.node "path" $section.path "inTokens" $section.inTokens "self" false "acc" $acc) -}}
     {{- if ne (last $lines) "" -}}
       {{- $lines = append $lines "" -}}
     {{- end -}}

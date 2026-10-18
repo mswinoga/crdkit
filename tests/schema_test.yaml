@@ -167,7 +167,7 @@ tests:
             kind: map
             properties:
               m: {kind: map}
-              l: {kind: list}
+              l: {kind: list, tokens: false}
               s: {kind: scalar}
               keep: {kind: scalar}
           values: {m: "x", l: {a: 1}, s: [1], keep: ok}
@@ -730,7 +730,7 @@ tests:
           value: {found: true, value: {kind: scalar, tokens: true}}
       - equal:
           path: results[1]
-          value: {found: true, value: {kind: scalar, type: int}}
+          value: {found: true, value: {kind: scalar, type: int, tokens: false}}
       - equal:
           path: results[2].value.properties.type
           value: {kind: scalar, markers: false}
@@ -808,3 +808,102 @@ tests:
             | Key | Kind | Per target | Default | Required | Description |
             | --- | --- | --- | --- | --- | --- |
             | `kind` | scalar | no |  |  |  |
+
+  # --- omitted DSL keys ---
+
+  - it: 'tokens omitted = per-target on scalars and lists, static on markers:false scalars, never below a per-target node'
+    set:
+      target: prod
+      schemaOps:
+        - op: validate
+          schema: &defaults
+            kind: map
+            properties:
+              greeting: {kind: scalar, type: string}
+              hosts: {kind: list, items: {kind: scalar, type: int}}
+              type: {kind: scalar, markers: false}
+              pinned: {kind: scalar, tokens: false}
+          values: &defaultsValues
+            greeting: {default: hi, prod: hello}
+            hosts: {default: [1], prod: [2, x]}
+            type: {prod: a}
+            pinned: {prod: a}
+        - op: validateValues
+          schema: *defaults
+          values: *defaultsValues
+    asserts:
+      - equal:
+          path: results[0].value
+          value:
+            greeting: {default: hi, prod: hello}
+            hosts: {default: [1], prod: [2, x]}
+      - equal:
+          path: diag.warnings
+          value:
+            - "'pinned' must be a scalar — ignored"
+            - "'type' must be a scalar — ignored"
+      - equal:
+          path: diag.errors
+          value:
+            - "'hosts[1]' for target 'prod' must be of type 'int' — got 'x'"
+
+  - it: 'an explicit tokens:true below an implicitly per-target list is a nested-tokens ERROR'
+    set:
+      schemaOps:
+        - op: check
+          schema:
+            kind: map
+            properties:
+              hosts: {kind: list, items: {kind: scalar, tokens: true}}
+              static: {kind: list, tokens: false, items: {kind: scalar, tokens: true}}
+    asserts:
+      - equal:
+          path: diag.errors
+          value:
+            - "schema invalid: properties.hosts.items: 'tokens: true' below another 'tokens: true'"
+
+  - it: 'kind omitted is a self-check ERROR except on a switch node; a closed map warns, an absent type accepts any scalar'
+    set:
+      schemaOps:
+        - op: check
+          schema: {kind: map, properties: {a: {doc: "no kind"}}}
+        - op: validate
+          schema: {kind: map, properties: {any: {kind: scalar}}}
+          values: {any: 5, other: 1}
+    asserts:
+      - equal:
+          path: results[1].value
+          value: {any: 5}
+      - equal:
+          path: diag.errors
+          value:
+            - "schema invalid: properties.a: unknown kind ''"
+      - equal:
+          path: diag.warnings
+          value:
+            - "'other' is not a known key — ignored"
+
+  - it: 'the docs Per target column shows the effective default'
+    set:
+      schemaOps:
+        - op: docs
+          schema:
+            kind: map
+            properties:
+              greeting: {kind: scalar}
+              hosts: {kind: list, items: {kind: scalar}}
+              type: {kind: scalar, markers: false}
+              pinned: {kind: scalar, tokens: false}
+    asserts:
+      - equal:
+          path: results[0].text
+          value: |
+            # Values
+
+            | Key | Kind | Per target | Default | Required | Description |
+            | --- | --- | --- | --- | --- | --- |
+            | `greeting` | scalar | yes |  |  |  |
+            | `hosts` | list | yes |  |  |  |
+            | `hosts[]` | scalar | markers |  |  |  |
+            | `pinned` | scalar | markers |  |  |  |
+            | `type` | scalar | no |  |  |  |
