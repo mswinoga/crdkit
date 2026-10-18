@@ -961,3 +961,126 @@ tests:
             | `hosts[]` | scalar | markers |  |  |  |
             | `pinned` | scalar | markers |  |  |  |
             | `type` | scalar | no |  |  |  |
+
+  # --- key order ---
+
+  - it: 'order records nested block keys in text order'
+    set:
+      schemaOps:
+        - op: order
+          text: |
+            type: map
+            properties:
+              zeta:
+                type: string
+              alpha:
+                type: map
+                properties:
+                  inner: {type: string}
+                  first:
+                    type: int
+            values:
+              type: any
+    asserts:
+      - equal:
+          path: results[0].order
+          value:
+            type: 0
+            properties: 1
+            properties.zeta: 2
+            properties.zeta.type: 3
+            properties.alpha: 4
+            properties.alpha.type: 5
+            properties.alpha.properties: 6
+            properties.alpha.properties.inner: 7
+            properties.alpha.properties.first: 8
+            properties.alpha.properties.first.type: 9
+            values: 10
+            values.type: 11
+
+  - it: 'order has no entry for keys inside a flow map, also across lines'
+    set:
+      schemaOps:
+        - op: order
+          text: |
+            properties:
+              a: {type: string, doc: x}
+              b: {type: map, properties: {c: {type: string},
+                  d: {type: int}}}
+              e:
+                type: string
+    asserts:
+      - equal:
+          path: results[0].order
+          value:
+            properties: 0
+            properties.a: 1
+            properties.b: 2
+            properties.e: 3
+            properties.e.type: 4
+
+  - it: 'order ignores key-looking lines in block scalars and list items'
+    set:
+      schemaOps:
+        - op: order
+          text: |
+            properties:
+              a:
+                doc: |
+                  fake: 1
+                  properties:
+                    nested: x
+
+                  more: 2
+                type: string
+              b:
+                doc: >-
+                  other: 3
+                default:
+                - k: 1
+                  j: 2
+                - k: 3
+                enum:
+                - x
+                type: list
+    asserts:
+      - equal:
+          path: results[0].order
+          value:
+            properties: 0
+            properties.a: 1
+            properties.a.doc: 2
+            properties.a.type: 3
+            properties.b: 4
+            properties.b.doc: 5
+            properties.b.default: 6
+            properties.b.enum: 7
+            properties.b.type: 8
+
+  - it: 'order keeps a switch cases in text order'
+    set:
+      schemaOps:
+        - op: order
+          text: |
+            switch:
+              by: type
+              cases:
+                zeta:
+                  type: map
+                alpha:
+                  type: map
+                  properties:
+                    "a.b": {type: string}
+    asserts:
+      - equal:
+          path: results[0].order
+          value:
+            switch: 0
+            switch.by: 1
+            switch.cases: 2
+            switch.cases.zeta: 3
+            switch.cases.zeta.type: 4
+            switch.cases.alpha: 5
+            switch.cases.alpha.type: 6
+            switch.cases.alpha.properties: 7
+            switch.cases.alpha.properties["a.b"]: 8

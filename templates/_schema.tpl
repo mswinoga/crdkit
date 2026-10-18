@@ -49,6 +49,7 @@ Dependency graph (who calls whom):
   crdkit.schema.node (public)
   crdkit.schema.path (public) -> crdkit.schema.path.internal
   crdkit.schema.docs (public) -> crdkit.schema.docsNode.internal
+  crdkit.schema.order.internal (internal) -> crdkit.schema.path.internal
 */}}
 
 {{/*
@@ -905,3 +906,76 @@ Implementation notes:
 {{- end -}}
 {{- join "\n" $lines }}
 {{ end -}}
+
+{{/*
+crdkit.schema.order.internal (internal)
+
+Derives the text position of every block-style key of a schema written
+as YAML. Helm's fromYaml decodes into Go maps, so a parsed schema has no
+key order; the text keeps it.
+
+Interface:
+- Params (dict): { "text": <schema as YAML text> }
+- Returns: `{value: {<schema path>: <index>}}` — the path is the chain of
+  YAML keys from the root (`properties.application.properties.services`,
+  spelled by crdkit.schema.path.internal), the index counts block keys in
+  text order from 0.
+
+Implementation notes:
+- Line scanner with an indentation stack. A key written inside a flow
+  map or flow list (`{a: 1, b: 2}`, also across lines) has no entry.
+- Lines inside a block scalar (`doc: |`, `>`) and lines of a block list
+  item (`- …` with its continuation) are skipped, so `key:`-looking
+  text there is never recorded.
+- Expects the text of a schema that passed crdkit.schema.check; quoted
+  multi-line scalars are not recognized.
+*/}}
+{{- define "crdkit.schema.order.internal" -}}
+{{- $out := dict -}}
+{{- $st := dict "indents" (list) "keys" (list) "skipAbove" -1 "flow" 0 "count" 0 -}}
+{{- range $line := splitList "\n" (.text | default "") -}}
+  {{- $content := regexReplaceAll "^ +" $line "" -}}
+  {{- $indent := sub (len $line) (len $content) | int -}}
+  {{- if or (eq $content "") (hasPrefix "#" $content) -}}
+    {{/* blank or comment */}}
+  {{- else if and (ge (int $st.skipAbove) 0) (gt $indent (int $st.skipAbove)) -}}
+    {{/* inside a block scalar or a list item */}}
+  {{- else -}}
+    {{- $_ := set $st "skipAbove" -1 -}}
+    {{- if gt (int $st.flow) 0 -}}
+      {{- $bare := regexReplaceAll "\"[^\"]*\"|'[^']*'" $content "" -}}
+      {{- $_ := set $st "flow" (sub (add (int $st.flow) (len (regexFindAll "[{\\[]" $bare -1))) (len (regexFindAll "[}\\]]" $bare -1)) | int) -}}
+    {{- else if hasPrefix "-" $content -}}
+      {{- $_ := set $st "skipAbove" $indent -}}
+    {{- else if regexMatch "^(\"[^\"]*\"|'[^']*'|[^\\s\"'#{\\[|>-][^:]*?)\\s*:(\\s|$)" $content -}}
+      {{- $key := regexReplaceAll "^(\"[^\"]*\"|'[^']*'|[^\\s\"'#{\\[|>-][^:]*?)\\s*:(\\s.*|)$" $content "${1}" | trimAll "\"'" -}}
+      {{- $rest := regexReplaceAll "^(\"[^\"]*\"|'[^']*'|[^\\s\"'#{\\[|>-][^:]*?)\\s*:" $content "" -}}
+      {{- $indents := list -}}
+      {{- $keys := list -}}
+      {{- range $i, $ind := $st.indents -}}
+        {{- if lt (int $ind) $indent -}}
+          {{- $indents = append $indents $ind -}}
+          {{- $keys = append $keys (index $st.keys $i) -}}
+        {{- end -}}
+      {{- end -}}
+      {{- $path := "" -}}
+      {{- range $k := $keys -}}
+        {{- $path = include "crdkit.schema.path.internal" (dict "path" $path "key" $k) -}}
+      {{- end -}}
+      {{- $path = include "crdkit.schema.path.internal" (dict "path" $path "key" $key) -}}
+      {{- $_ := set $out $path $st.count -}}
+      {{- $_ := set $st "count" (add (int $st.count) 1) -}}
+      {{- $_ := set $st "indents" (append $indents $indent) -}}
+      {{- $_ := set $st "keys" (append $keys $key) -}}
+      {{- if regexMatch "^\\s*[|>][-+0-9]*\\s*(#.*)?$" $rest -}}
+        {{- $_ := set $st "skipAbove" $indent -}}
+      {{- else -}}
+        {{- $bare := regexReplaceAll "\"[^\"]*\"|'[^']*'" $rest "" -}}
+        {{- $_ := set $st "flow" (max 0 (sub (len (regexFindAll "[{\\[]" $bare -1)) (len (regexFindAll "[}\\]]" $bare -1))) | int) -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+value:
+{{ $out | toYaml | indent 2 }}
+{{- end -}}
