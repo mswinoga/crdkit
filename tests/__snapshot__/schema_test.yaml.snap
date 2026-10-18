@@ -3,27 +3,27 @@ crdkit.schema.docs renders one table for the root and one per switch case:
     |
       # Example values
 
-      | Key | Kind | Per target | Default | Required | Description |
+      | Key | Type | Per target | Default | Required | Description |
       | --- | --- | --- | --- | --- | --- |
-      | `renderMode` | scalar (string), one of: validate, deploy | no | `"deploy"` |  | Mode \| see README. |
+      | `renderMode` | string, one of: validate, deploy | no | `"deploy"` |  | Mode \| see README. |
       | `services` | map |  |  |  | Services by ID. |
       | `services.<key>` | map, by `type`: environment, greeter |  |  |  |  |
-      | `target` | scalar (string) | no |  | yes | Render target. |
+      | `target` | string | no |  | yes | Render target. |
       | `<key>` | any |  |  |  | The consumer chart's own keys. |
 
       ## `services.<key>` with `type: environment`
 
-      | Key | Kind | Per target | Default | Required | Description |
+      | Key | Type | Per target | Default | Required | Description |
       | --- | --- | --- | --- | --- | --- |
       | `services.<key>.environment` | map, keys match `^[A-Z]+$` |  |  |  |  |
       | `services.<key>.environment.<key>` | scalar | yes |  |  |  |
-      | `services.<key>.type` | scalar (string) | no |  | yes |  |
+      | `services.<key>.type` | string | no |  | yes |  |
 
       ## `services.<key>` with `type: greeter`
 
-      | Key | Kind | Per target | Default | Required | Description |
+      | Key | Type | Per target | Default | Required | Description |
       | --- | --- | --- | --- | --- | --- |
-      | `services.<key>.greeting` | scalar (string) | yes |  |  | File content. |
+      | `services.<key>.greeting` | string | yes |  |  | File content. |
       | `services.<key>.ports` | list | yes |  |  |  |
-      | `services.<key>.ports[]` | scalar (int) | markers |  |  |  |
-      | `services.<key>.type` | scalar (string) | no |  | yes |  |
+      | `services.<key>.ports[]` | int | markers |  |  |  |
+      | `services.<key>.type` | string | no |  | yes |  |

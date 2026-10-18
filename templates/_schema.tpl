@@ -5,22 +5,26 @@ defines); crdkit validates values against it, normalizes them, checks
 per-target values and renders a Markdown reference.
 
 Schema node (a dict):
-- kind: scalar | map | list | any (omitted only on a "switch" node)
+- type: the value's shape and scalar type (omitted only on a "switch"
+  node, a map):
+  - string | int | number | bool — a scalar of that type
+  - scalar — any scalar
+  - map, list — that shape
+  - any — everything, nothing below checked
 - doc: Markdown text for the reference
 - default: inserted when the key is absent (map properties only)
 - required: bool — the key must be present
 - required omitted = false; doc and default are optional
-- scalar: type (string | int | number | bool; omitted = any scalar),
-  enum (list), pattern (regex, unanchored), markers (false → "@NAME@"
-  markers rejected; omitted = true)
-- scalar/list: tokens (true → the value may be a token declaration,
-  resolved per target). Omitted = true, except on a "markers: false"
-  scalar and below a node that is per-target (see
+- scalar types: enum (list), pattern (regex, unanchored), markers
+  (false → "@NAME@" markers rejected; omitted = true)
+- scalar types and list: tokens (true → the value may be a token
+  declaration, resolved per target). Omitted = true, except on a
+  "markers: false" scalar and below a node that is per-target (see
   crdkit.schema.tokens.internal)
 - map: properties ({key: node}), values (node for every other key;
   omitted = every other key is unknown), keys ({pattern} for keys
   matched by "values")
-- list: items (node for every element; omitted = {kind: any})
+- list: items (node for every element; omitted = {type: any})
 - switch: {by: <key>, cases: {<value>: <node>}} — picks the node for a
   map by the value of one of its keys ("by", not "on": YAML 1.1, which
   Helm's fromYaml speaks, reads an `on:` key as the boolean true)
@@ -96,6 +100,29 @@ Implementation notes:
 {{- end -}}
 
 {{/*
+crdkit.schema.shape.internal (internal)
+
+Maps a node's type to the shape of the value it describes — the one
+place that knows which types are scalars.
+
+Interface:
+- Params (dict): { "node": <node> }
+- Returns: `scalar`, `map`, `list` or `any` as plain text; an EMPTY
+  string for a non-map node, an unknown or an omitted type (a switch
+  node).
+*/}}
+{{- define "crdkit.schema.shape.internal" -}}
+{{- if kindIs "map" .node -}}
+  {{- $type := .node.type | default "" | toString -}}
+  {{- if has $type (list "string" "int" "number" "bool" "scalar") -}}
+scalar
+  {{- else if has $type (list "map" "list" "any") -}}
+{{- $type -}}
+  {{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 crdkit.schema.tokens.internal (internal)
 
 Whether a node is per-target (its value may be a token declaration).
@@ -106,13 +133,13 @@ Interface:
 - Returns: the plain string `true`, or an EMPTY string.
 
 Implementation notes:
-- Only scalar/list nodes, never below a per-target ancestor.
+- Only scalar-type and list nodes, never below a per-target ancestor.
 - An explicit `tokens:` wins; omitted = true, except on a
   `markers: false` scalar (static by declaration).
 */}}
 {{- define "crdkit.schema.tokens.internal" -}}
 {{- $node := .node -}}
-{{- if and (kindIs "map" $node) (has (toString $node.kind) (list "scalar" "list")) (not .inTokens) -}}
+{{- if and (has (include "crdkit.schema.shape.internal" (dict "node" $node)) (list "scalar" "list")) (not .inTokens) -}}
   {{- if hasKey $node "tokens" -}}
     {{- if eq (toString $node.tokens) "true" -}}
 true
@@ -144,16 +171,17 @@ Interface:
 {{- if not (kindIs "map" $node) -}}
   {{- $found = append $found "node must be a map" -}}
 {{- else -}}
-  {{- $allowed := list "kind" "doc" "default" "required" "type" "enum" "pattern" "markers" "tokens" "properties" "values" "keys" "items" "switch" -}}
+  {{- $allowed := list "doc" "default" "required" "type" "enum" "pattern" "markers" "tokens" "properties" "values" "keys" "items" "switch" -}}
   {{- range $key, $_ := $node -}}
     {{- if not (has $key $allowed) -}}
       {{- $found = append $found (printf "unknown schema key '%s'" $key) -}}
     {{- end -}}
   {{- end -}}
-  {{- $kind := $node.kind | default "" | toString -}}
+  {{- $type := $node.type | default "" | toString -}}
+  {{- $shape := include "crdkit.schema.shape.internal" (dict "node" $node) -}}
   {{- if hasKey $node "switch" -}}
-    {{- if and $kind (ne $kind "map") -}}
-      {{- $found = append $found (printf "'switch' requires kind 'map', got '%s'" $kind) -}}
+    {{- if and $type (ne $type "map") -}}
+      {{- $found = append $found (printf "'switch' requires type 'map', got '%s'" $type) -}}
     {{- end -}}
     {{- $switch := $node.switch -}}
     {{- if not (and (kindIs "map" $switch) (kindIs "string" $switch.by) (kindIs "map" $switch.cases) (eq (len $switch) 2)) -}}
@@ -166,24 +194,21 @@ Interface:
         {{- if and (kindIs "map" $caseNode) (kindIs "map" $caseNode.properties) -}}
           {{- $onNode = index $caseNode.properties $switch.by -}}
         {{- end -}}
-        {{- if not (and (kindIs "map" $onNode) (eq (toString $onNode.kind) "scalar") (eq (toString $onNode.markers) "false") (ne (toString $onNode.tokens) "true")) -}}
-          {{- $found = append $found (printf "case '%s' must declare '%s' as kind 'scalar' with 'markers: false'" $caseValue $switch.by) -}}
+        {{- if not (and (eq (include "crdkit.schema.shape.internal" (dict "node" $onNode)) "scalar") (eq (toString $onNode.markers) "false") (ne (toString $onNode.tokens) "true")) -}}
+          {{- $found = append $found (printf "case '%s' must declare '%s' as a scalar type with 'markers: false'" $caseValue $switch.by) -}}
         {{- end -}}
       {{- end -}}
     {{- end -}}
-  {{- else if not (has $kind (list "scalar" "map" "list" "any")) -}}
-    {{- $found = append $found (printf "unknown kind '%s'" $kind) -}}
+  {{- else if not $shape -}}
+    {{- $found = append $found (printf "unknown type '%s'" $type) -}}
   {{- end -}}
-  {{- $appliesTo := dict "type" (list "scalar") "enum" (list "scalar") "pattern" (list "scalar") "markers" (list "scalar") "tokens" (list "scalar" "list") "properties" (list "map") "values" (list "map") "keys" (list "map") "items" (list "list") -}}
-  {{- if $kind -}}
-    {{- range $key, $kinds := $appliesTo -}}
-      {{- if and (hasKey $node $key) (not (has $kind $kinds)) -}}
-        {{- $found = append $found (printf "'%s' does not apply to kind '%s'" $key $kind) -}}
+  {{- $appliesTo := dict "enum" (list "scalar") "pattern" (list "scalar") "markers" (list "scalar") "tokens" (list "scalar" "list") "properties" (list "map") "values" (list "map") "keys" (list "map") "items" (list "list") -}}
+  {{- if $shape -}}
+    {{- range $key, $shapes := $appliesTo -}}
+      {{- if and (hasKey $node $key) (not (has $shape $shapes)) -}}
+        {{- $found = append $found (printf "'%s' does not apply to type '%s'" $key $type) -}}
       {{- end -}}
     {{- end -}}
-  {{- end -}}
-  {{- if and (hasKey $node "type") (not (has (toString $node.type) (list "string" "int" "number" "bool"))) -}}
-    {{- $found = append $found (printf "unknown type '%v'" $node.type) -}}
   {{- end -}}
   {{- if and (hasKey $node "enum") (not (kindIs "slice" $node.enum)) -}}
     {{- $found = append $found "'enum' must be a list" -}}
@@ -246,11 +271,11 @@ Implementation notes:
   <reason>` — once per message, however often the schema is checked.
 - A schema that failed to parse (Helm's `fromYaml` error dict, a single
   `Error` key) is reported as such.
-- Rules: known node keys only; a known kind (or a switch); each key on a
-  kind it applies to; `tokens: true` only on scalar/list, never below
-  another one, never with `markers: false`; never `default` together
-  with `required: true`; every switch case declares the switch key as
-  `kind: scalar, markers: false`.
+- Rules: known node keys only; a known type (or a switch); each key on a
+  type it applies to; `tokens: true` only on a scalar type or `list`,
+  never below another one, never with `markers: false`; never `default`
+  together with `required: true`; every switch case declares the switch
+  key as a scalar type with `markers: false`.
 */}}
 {{- define "crdkit.schema.check" -}}
 {{- $diag := .diag -}}
@@ -276,7 +301,7 @@ crdkit.schema.scalarReason.internal (internal)
 Checks one scalar value against a node's type/enum/pattern.
 
 Interface:
-- Params (dict): { "node": <scalar node>, "value": <scalar>, "strict":
+- Params (dict): { "node": <scalar-type node>, "value": <scalar>, "strict":
   <bool> }
 - Returns: the first violated rule as plain text (`must be of type
   'int'`, `must be one of 'a', 'b'`, `must match '<re>'`), or an EMPTY
@@ -340,7 +365,7 @@ Interface:
 Implementation notes:
 - Results travel through "out", not YAML: a YAML round-trip would turn
   every value into its decoded form at each level.
-- structural mode: kind mismatch / unknown key / unmatched switch →
+- structural mode: shape mismatch / unknown key / unmatched switch →
   WARNING; required / type / enum / pattern / markers / keys.pattern →
   ERROR; a node that fails is dropped (its parent's default then
   applies), a key failing "keys.pattern" with its value. A per-target
@@ -361,11 +386,11 @@ Implementation notes:
 {{- $mode := .mode -}}
 {{- $suffix := .suffix | default "" -}}
 {{- $resolved := eq $mode "resolved" -}}
-{{- $kindLevel := ternary "errors" "warnings" $resolved -}}
+{{- $shapeLevel := ternary "errors" "warnings" $resolved -}}
 {{- $tail := ternary "" " — ignored" $resolved -}}
 {{- $_ := set $out "keep" true -}}
 {{- $_ := set $out "value" $value -}}
-{{- $kind := $node.kind | default "" | toString -}}
+{{- $shape := include "crdkit.schema.shape.internal" (dict "node" $node) -}}
 {{- $inTokens := .inTokens -}}
 {{- $tokens := include "crdkit.schema.tokens.internal" (dict "node" $node "inTokens" $inTokens) -}}
 {{- $childInTokens := or $inTokens (ne $tokens "") -}}
@@ -374,22 +399,22 @@ Implementation notes:
   {{- $switch := $node.switch -}}
   {{- $onPath := include "crdkit.schema.path.internal" (dict "path" $path "key" $switch.by) -}}
   {{- if not (kindIs "map" $value) -}}
-    {{- $_ := set $diag $kindLevel (append (index $diag $kindLevel) (printf "'%s'%s must be a map%s" $path $suffix $tail)) -}}
+    {{- $_ := set $diag $shapeLevel (append (index $diag $shapeLevel) (printf "'%s'%s must be a map%s" $path $suffix $tail)) -}}
     {{- $_ := set $out "keep" false -}}
   {{- else if kindIs "invalid" (index $value $switch.by) -}}
-    {{- $_ := set $diag $kindLevel (append (index $diag $kindLevel) (printf "'%s'%s has no '%s'%s" $path $suffix $switch.by $tail)) -}}
+    {{- $_ := set $diag $shapeLevel (append (index $diag $shapeLevel) (printf "'%s'%s has no '%s'%s" $path $suffix $switch.by $tail)) -}}
     {{- $_ := set $out "keep" false -}}
   {{- else if not (hasKey $switch.cases (toString (index $value $switch.by))) -}}
-    {{- $_ := set $diag $kindLevel (append (index $diag $kindLevel) (printf "'%s'%s has unknown value '%v'%s" $onPath $suffix (index $value $switch.by) $tail)) -}}
+    {{- $_ := set $diag $shapeLevel (append (index $diag $shapeLevel) (printf "'%s'%s has unknown value '%v'%s" $onPath $suffix (index $value $switch.by) $tail)) -}}
     {{- $_ := set $out "keep" false -}}
   {{- else -}}
     {{- include "crdkit.schema.walk.internal" (dict "node" (index $switch.cases (toString (index $value $switch.by))) "value" $value "path" $path "diag" $diag "mode" $mode "suffix" $suffix "inTokens" $inTokens "out" $out) -}}
   {{- end -}}
-{{- else if or (eq $kind "any") $isDeclaration -}}
+{{- else if or (eq $shape "any") $isDeclaration -}}
   {{/* kept as written */}}
-{{- else if eq $kind "scalar" -}}
+{{- else if eq $shape "scalar" -}}
   {{- if or (kindIs "map" $value) (kindIs "slice" $value) -}}
-    {{- $_ := set $diag $kindLevel (append (index $diag $kindLevel) (printf "'%s'%s must be a scalar%s" $path $suffix $tail)) -}}
+    {{- $_ := set $diag $shapeLevel (append (index $diag $shapeLevel) (printf "'%s'%s must be a scalar%s" $path $suffix $tail)) -}}
     {{- $_ := set $out "keep" false -}}
   {{- else -}}
     {{- $hasMarkers := and (not $resolved) (kindIs "string" $value) (regexMatch "@[A-Za-z0-9_]+@" $value) -}}
@@ -408,12 +433,12 @@ Implementation notes:
       {{- end -}}
     {{- end -}}
   {{- end -}}
-{{- else if eq $kind "list" -}}
+{{- else if eq $shape "list" -}}
   {{- if not (kindIs "slice" $value) -}}
-    {{- $_ := set $diag $kindLevel (append (index $diag $kindLevel) (printf "'%s'%s must be a list%s" $path $suffix $tail)) -}}
+    {{- $_ := set $diag $shapeLevel (append (index $diag $shapeLevel) (printf "'%s'%s must be a list%s" $path $suffix $tail)) -}}
     {{- $_ := set $out "keep" false -}}
   {{- else -}}
-    {{- $items := $node.items | default (dict "kind" "any") -}}
+    {{- $items := $node.items | default (dict "type" "any") -}}
     {{- $result := list -}}
     {{- range $i, $element := $value -}}
       {{- $elementPath := include "crdkit.schema.path.internal" (dict "path" $path "index" $i) -}}
@@ -429,9 +454,9 @@ Implementation notes:
     {{- end -}}
     {{- $_ := set $out "value" $result -}}
   {{- end -}}
-{{- else if eq $kind "map" -}}
+{{- else if eq $shape "map" -}}
   {{- if not (kindIs "map" $value) -}}
-    {{- $_ := set $diag $kindLevel (append (index $diag $kindLevel) (printf "'%s'%s must be a map%s" $path $suffix $tail)) -}}
+    {{- $_ := set $diag $shapeLevel (append (index $diag $shapeLevel) (printf "'%s'%s must be a map%s" $path $suffix $tail)) -}}
     {{- $_ := set $out "keep" false -}}
   {{- else -}}
     {{- $properties := $node.properties | default dict -}}
@@ -494,7 +519,7 @@ Implementation notes:
 - Per-target values (token declarations, "@NAME@" markers) are only
   checked by crdkit.schema.validateValues / crdkit.schema.value.
 - A root value that fails its node comes back as an empty value of the
-  node's kind ({} for a map).
+  node's shape ({} for a map).
 */}}
 {{- define "crdkit.schema.validate" -}}
 {{- $values := .values -}}
@@ -506,7 +531,7 @@ Implementation notes:
   {{- include "crdkit.schema.walk.internal" (dict "node" .schema "value" $values "path" (.path | default "") "diag" .diag "mode" "structural" "out" $out) -}}
   {{- $values = $out.value -}}
   {{- if not $out.keep -}}
-    {{- $values = ternary (list) (dict) (eq (toString .schema.kind) "list") -}}
+    {{- $values = ternary (list) (dict) (eq (include "crdkit.schema.shape.internal" (dict "node" .schema)) "list") -}}
   {{- end -}}
 {{- end -}}
 value: {{ $values | toYaml | nindent 2 }}
@@ -573,14 +598,14 @@ Implementation notes:
   (crdkit.schema.tokens.internal), and every string holding "@NAME@"
   markers.
 - Follows only what the structural pass would keep: an unmatched switch,
-  a kind mismatch or an unknown key is skipped silently (already
+  a shape mismatch or an unknown key is skipped silently (already
   reported there).
 */}}
 {{- define "crdkit.schema.valuesWalk.internal" -}}
 {{- $node := .node -}}
 {{- $value := .value -}}
 {{- $path := .path -}}
-{{- $kind := $node.kind | default "" | toString -}}
+{{- $shape := include "crdkit.schema.shape.internal" (dict "node" $node) -}}
 {{- $inTokens := .inTokens -}}
 {{- $tokens := include "crdkit.schema.tokens.internal" (dict "node" $node "inTokens" $inTokens) -}}
 {{- $childInTokens := or $inTokens (ne $tokens "") -}}
@@ -593,14 +618,14 @@ Implementation notes:
       {{- include "crdkit.schema.valuesWalk.internal" (merge (dict "node" (index $node.switch.cases $selected) "value" $value "path" $path "inTokens" $inTokens) $common) -}}
     {{- end -}}
   {{- end -}}
-{{- else if eq $kind "any" -}}
-{{- else if or $tokens (and (eq $kind "scalar") (kindIs "string" $value) (regexMatch "@[A-Za-z0-9_]+@" $value)) -}}
+{{- else if eq $shape "any" -}}
+{{- else if or $tokens (and (eq $shape "scalar") (kindIs "string" $value) (regexMatch "@[A-Za-z0-9_]+@" $value)) -}}
   {{- include "crdkit.schema.resolveAndCheck.internal" (merge (dict "node" $node "def" $value "tokens" (ne $tokens "") "path" $path "out" (dict)) $common) -}}
-{{- else if and (eq $kind "list") (kindIs "slice" $value) -}}
+{{- else if and (eq $shape "list") (kindIs "slice" $value) -}}
   {{- range $i, $element := $value -}}
-    {{- include "crdkit.schema.valuesWalk.internal" (merge (dict "node" ($node.items | default (dict "kind" "any")) "value" $element "path" (include "crdkit.schema.path.internal" (dict "path" $path "index" $i)) "inTokens" $childInTokens) $common) -}}
+    {{- include "crdkit.schema.valuesWalk.internal" (merge (dict "node" ($node.items | default (dict "type" "any")) "value" $element "path" (include "crdkit.schema.path.internal" (dict "path" $path "index" $i)) "inTokens" $childInTokens) $common) -}}
   {{- end -}}
-{{- else if and (eq $kind "map") (kindIs "map" $value) -}}
+{{- else if and (eq $shape "map") (kindIs "map" $value) -}}
   {{- $properties := $node.properties | default dict -}}
   {{- range $key, $child := $value -}}
     {{- $childNode := dict -}}
@@ -696,7 +721,7 @@ Interface:
 - Returns YAML: { "value": <node> } when found, `{}` otherwise.
 
 Implementation notes:
-- A returned scalar/list node carries an explicit `tokens:` — its
+- A returned scalar-type or list node carries an explicit `tokens:` — its
   per-target state depends on its ancestors.
 - A switch is followed by the value of its "by" key at that location; a
   final switch node is returned as its selected case.
@@ -723,8 +748,8 @@ Implementation notes:
   {{- end -}}
   {{- if and $found (ne (toString $key) "") -}}
     {{- $inTokens = or $inTokens (ne (include "crdkit.schema.tokens.internal" (dict "node" $node "inTokens" $inTokens)) "") -}}
-    {{- $kind := $node.kind | default "" | toString -}}
-    {{- if eq $kind "map" -}}
+    {{- $shape := include "crdkit.schema.shape.internal" (dict "node" $node) -}}
+    {{- if eq $shape "map" -}}
       {{- $properties := $node.properties | default dict -}}
       {{- if hasKey $properties (toString $key) -}}
         {{- $node = index $properties (toString $key) -}}
@@ -738,8 +763,8 @@ Implementation notes:
       {{- else -}}
         {{- $value = $none -}}
       {{- end -}}
-    {{- else if and (eq $kind "list") (regexMatch "^[0-9]+$" (toString $key)) -}}
-      {{- $node = $node.items | default (dict "kind" "any") -}}
+    {{- else if and (eq $shape "list") (regexMatch "^[0-9]+$" (toString $key)) -}}
+      {{- $node = $node.items | default (dict "type" "any") -}}
       {{- $index := int (toString $key) -}}
       {{- if and (kindIs "slice" $value) (lt $index (len $value)) -}}
         {{- $value = index $value $index -}}
@@ -752,7 +777,7 @@ Implementation notes:
   {{- end -}}
 {{- end -}}
 {{- if $found -}}
-  {{- if has (toString $node.kind) (list "scalar" "list") -}}
+  {{- if has (include "crdkit.schema.shape.internal" (dict "node" $node)) (list "scalar" "list") -}}
     {{- $node = merge (dict "tokens" (ne (include "crdkit.schema.tokens.internal" (dict "node" $node "inTokens" $inTokens)) "")) (omit $node "tokens") -}}
   {{- end -}}
 value: {{ $node | toYaml | nindent 2 }}
@@ -781,32 +806,30 @@ Implementation notes:
 {{- $node := .node -}}
 {{- $path := .path -}}
 {{- $acc := .acc -}}
-{{- $kind := $node.kind | default "" | toString -}}
+{{- $shape := include "crdkit.schema.shape.internal" (dict "node" $node) -}}
 {{- $inTokens := .inTokens -}}
 {{- $tokens := include "crdkit.schema.tokens.internal" (dict "node" $node "inTokens" $inTokens) -}}
 {{- $childInTokens := or $inTokens (ne $tokens "") -}}
 {{- if .self -}}
-  {{- $kindText := $kind -}}
+  {{- $typeText := $node.type | default "" | toString -}}
   {{- if hasKey $node "switch" -}}
-    {{- $kindText = printf "map, by `%s`: %s" $node.switch.by (keys $node.switch.cases | sortAlpha | join ", ") -}}
-  {{- else if $node.type -}}
-    {{- $kindText = printf "%s (%s)" $kind $node.type -}}
+    {{- $typeText = printf "map, by `%s`: %s" $node.switch.by (keys $node.switch.cases | sortAlpha | join ", ") -}}
   {{- end -}}
   {{- if hasKey $node "enum" -}}
-    {{- $kindText = printf "%s, one of: %s" $kindText (join ", " ($node.enum | toStrings)) -}}
+    {{- $typeText = printf "%s, one of: %s" $typeText (join ", " ($node.enum | toStrings)) -}}
   {{- end -}}
   {{- if hasKey $node "pattern" -}}
-    {{- $kindText = printf "%s, matches `%s`" $kindText $node.pattern -}}
+    {{- $typeText = printf "%s, matches `%s`" $typeText $node.pattern -}}
   {{- end -}}
   {{- if hasKey $node "keys" -}}
-    {{- $kindText = printf "%s, keys match `%s`" $kindText $node.keys.pattern -}}
+    {{- $typeText = printf "%s, keys match `%s`" $typeText $node.keys.pattern -}}
   {{- end -}}
   {{- $perTarget := "" -}}
   {{- if $tokens -}}
     {{- $perTarget = "yes" -}}
   {{- else if eq (toString $node.markers) "false" -}}
     {{- $perTarget = "no" -}}
-  {{- else if eq $kind "scalar" -}}
+  {{- else if eq $shape "scalar" -}}
     {{- $perTarget = "markers" -}}
   {{- end -}}
   {{- $default := "" -}}
@@ -815,21 +838,21 @@ Implementation notes:
   {{- end -}}
   {{- $required := ternary "yes" "" (eq (toString $node.required) "true") -}}
   {{- $doc := $node.doc | default "" | toString | replace "\n" " " | replace "|" "\\|" | trim -}}
-  {{- $row := printf "| `%s` | %s | %s | %s | %s | %s |" $path ($kindText | replace "|" "\\|") $perTarget ($default | replace "|" "\\|") $required $doc -}}
+  {{- $row := printf "| `%s` | %s | %s | %s | %s | %s |" $path ($typeText | replace "|" "\\|") $perTarget ($default | replace "|" "\\|") $required $doc -}}
   {{- $_ := set $acc "rows" (append $acc.rows $row) -}}
 {{- end -}}
 {{- if hasKey $node "switch" -}}
   {{- range $caseValue := keys $node.switch.cases | sortAlpha -}}
     {{- $_ := set $acc "sections" (append $acc.sections (dict "path" $path "by" $node.switch.by "case" $caseValue "node" (index $node.switch.cases $caseValue) "inTokens" $inTokens)) -}}
   {{- end -}}
-{{- else if eq $kind "map" -}}
+{{- else if eq $shape "map" -}}
   {{- range $key, $child := $node.properties | default dict -}}
     {{- include "crdkit.schema.docsNode.internal" (dict "node" $child "path" (include "crdkit.schema.path.internal" (dict "path" $path "key" $key)) "inTokens" $childInTokens "self" true "acc" $acc) -}}
   {{- end -}}
   {{- if hasKey $node "values" -}}
     {{- include "crdkit.schema.docsNode.internal" (dict "node" $node.values "path" (include "crdkit.schema.path.internal" (dict "path" $path "key" "<key>")) "inTokens" $childInTokens "self" true "acc" $acc) -}}
   {{- end -}}
-{{- else if and (eq $kind "list") (hasKey $node "items") -}}
+{{- else if and (eq $shape "list") (hasKey $node "items") -}}
   {{- include "crdkit.schema.docsNode.internal" (dict "node" $node.items "path" (printf "%s[]" $path) "inTokens" $childInTokens "self" true "acc" $acc) -}}
 {{- end -}}
 {{- end -}}
@@ -847,9 +870,8 @@ Interface:
   <case>` table per switch case; ends with a newline.
 
 Implementation notes:
-- Columns: Key (dotted path), Kind (with type / enum / pattern / keys
-  pattern), Per
-  target (`yes` = may be a token declaration, `markers` = may hold
+- Columns: Key (dotted path), Type (with enum / pattern / keys pattern,
+  or the switch key and its cases), Per target (`yes` = may be a token declaration, `markers` = may hold
   "@NAME@" markers, `no` = static), Default, Required, Description
   (the node's `doc`, on one line).
 - Keys are sorted alphabetically; a schema's own key order is not
@@ -858,7 +880,7 @@ Implementation notes:
 */}}
 {{- define "crdkit.schema.docs" -}}
 {{- $acc := dict "rows" (list) "sections" (list) -}}
-{{- $header := list "| Key | Kind | Per target | Default | Required | Description |" "| --- | --- | --- | --- | --- | --- |" -}}
+{{- $header := list "| Key | Type | Per target | Default | Required | Description |" "| --- | --- | --- | --- | --- | --- |" -}}
 {{- $lines := list (printf "# %s" (.title | default "Values")) "" -}}
 {{- include "crdkit.schema.docsNode.internal" (dict "node" .schema "path" "" "self" false "acc" $acc) -}}
 {{- if $acc.rows -}}

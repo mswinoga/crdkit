@@ -10,12 +10,12 @@ tests:
       schemaOps:
         - op: check
           schema:
-            kind: map
+            type: map
             properties:
-              name: {kind: scalar, type: string, required: true, doc: "Name."}
-              tags: {kind: list, items: {kind: scalar}}
-              extra: {kind: map, values: {kind: any}, keys: {pattern: "^[a-z]+$"}}
-              host: {kind: scalar, tokens: true}
+              name: {type: string, required: true, doc: "Name."}
+              tags: {type: list, items: {type: scalar}}
+              extra: {type: map, values: {type: any}, keys: {pattern: "^[a-z]+$"}}
+              host: {type: scalar, tokens: true}
     asserts:
       - equal:
           path: results[0].ok
@@ -29,20 +29,22 @@ tests:
       schemaOps:
         - op: check
           schema:
-            kind: map
+            type: map
             properties:
-              a: {kind: thing}
-              b: {kind: map, type: string}
-              c: {kind: scalar, type: date}
-              d: {kind: map, tokens: true}
-              e: {kind: list, tokens: true, items: {kind: scalar, tokens: true}}
-              f: {kind: scalar, tokens: true, markers: false}
-              g: {kind: scalar, default: x, required: true}
-              h: {kind: scalar, requried: true}
-              i: {kind: scalar, enum: a}
-              j: {kind: map, keys: {}}
+              a: {type: thing}
+              b: {type: map, enum: [a]}
+              c: {type: date}
+              d: {type: map, tokens: true}
+              e: {type: list, tokens: true, items: {type: scalar, tokens: true}}
+              f: {type: scalar, tokens: true, markers: false}
+              g: {type: scalar, default: x, required: true}
+              h: {type: scalar, requried: true}
+              i: {type: scalar, enum: a}
+              j: {type: map, keys: {}}
               k: "not-a-node"
-              l: {kind: scalar, required: "yes"}
+              l: {type: scalar, required: "yes"}
+              m: {kind: scalar}
+              n: {type: int, items: {type: any}}
     asserts:
       - equal:
           path: results[0].ok
@@ -50,10 +52,10 @@ tests:
       - equal:
           path: diag.errors
           value:
-            - "schema invalid: properties.a: unknown kind 'thing'"
-            - "schema invalid: properties.b: 'type' does not apply to kind 'map'"
+            - "schema invalid: properties.a: unknown type 'thing'"
+            - "schema invalid: properties.b: 'enum' does not apply to type 'map'"
             - "schema invalid: properties.c: unknown type 'date'"
-            - "schema invalid: properties.d: 'tokens' does not apply to kind 'map'"
+            - "schema invalid: properties.d: 'tokens' does not apply to type 'map'"
             - "schema invalid: properties.e.items: 'tokens: true' below another 'tokens: true'"
             - "schema invalid: properties.f: 'tokens: true' and 'markers: false' exclude each other"
             - "schema invalid: properties.g: 'default' and 'required: true' exclude each other"
@@ -62,33 +64,36 @@ tests:
             - "schema invalid: properties.j: 'keys' must be {pattern: <regex>}"
             - "schema invalid: properties.k: node must be a map"
             - "schema invalid: properties.l: 'required' must be a bool"
+            - "schema invalid: properties.m: unknown schema key 'kind'"
+            - "schema invalid: properties.m: unknown type ''"
+            - "schema invalid: properties.n: 'items' does not apply to type 'int'"
 
   - it: a switch case must declare the switch key as a static scalar
     set:
       schemaOps:
         - op: check
           schema:
-            kind: map
+            type: map
             values:
               switch:
                 by: type
                 cases:
                   good:
-                    kind: map
+                    type: map
                     properties:
-                      type: {kind: scalar, markers: false}
+                      type: {type: scalar, markers: false}
                   bad:
-                    kind: map
+                    type: map
                     properties:
-                      type: {kind: scalar}
+                      type: {type: scalar}
                   missing:
-                    kind: map
+                    type: map
     asserts:
       - equal:
           path: diag.errors
           value:
-            - "schema invalid: values: case 'bad' must declare 'type' as kind 'scalar' with 'markers: false'"
-            - "schema invalid: values: case 'missing' must declare 'type' as kind 'scalar' with 'markers: false'"
+            - "schema invalid: values: case 'bad' must declare 'type' as a scalar type with 'markers: false'"
+            - "schema invalid: values: case 'missing' must declare 'type' as a scalar type with 'markers: false'"
 
   - it: a schema that failed to parse is reported once, however often it is checked
     set:
@@ -107,7 +112,7 @@ tests:
     set:
       schemaOps:
         - op: validate
-          schema: {kind: map, properties: {a: {kind: bogus}}, values: {kind: scalar}}
+          schema: {type: map, properties: {a: {type: bogus}}, values: {type: scalar}}
           values: {a: 1, b: [x]}
     asserts:
       - equal:
@@ -117,22 +122,22 @@ tests:
           path: diag.warnings
           count: 0
 
-  # --- kinds ---
+  # --- types ---
 
-  - it: values matching every kind pass through unchanged, with no diagnostics
+  - it: values matching every type pass through unchanged, with no diagnostics
     set:
       schemaOps:
         - op: validate
           schema:
-            kind: map
+            type: map
             properties:
-              name: {kind: scalar, type: string}
-              count: {kind: scalar, type: int}
-              ratio: {kind: scalar, type: number}
-              flag: {kind: scalar, type: bool}
-              tags: {kind: list, items: {kind: scalar, type: string}}
-              labels: {kind: map, values: {kind: any}}
-              blob: {kind: any}
+              name: {type: string}
+              count: {type: int}
+              ratio: {type: number}
+              flag: {type: bool}
+              tags: {type: list, items: {type: string}}
+              labels: {type: map, values: {type: any}}
+              blob: {type: any}
           values:
             name: app
             count: 3
@@ -159,17 +164,39 @@ tests:
           path: diag.warnings
           count: 0
 
-  - it: a kind mismatch is a WARNING and the node is dropped
+  - it: type scalar accepts a string, an int and a bool
     set:
       schemaOps:
         - op: validate
           schema:
-            kind: map
+            type: map
             properties:
-              m: {kind: map}
-              l: {kind: list, tokens: false}
-              s: {kind: scalar}
-              keep: {kind: scalar}
+              s: {type: scalar}
+              i: {type: scalar}
+              b: {type: scalar}
+          values: {s: text, i: 3, b: false}
+    asserts:
+      - equal:
+          path: results[0].value
+          value: {s: text, i: 3, b: false}
+      - lengthEqual:
+          path: diag.errors
+          count: 0
+      - lengthEqual:
+          path: diag.warnings
+          count: 0
+
+  - it: a shape mismatch is a WARNING and the node is dropped
+    set:
+      schemaOps:
+        - op: validate
+          schema:
+            type: map
+            properties:
+              m: {type: map}
+              l: {type: list, tokens: false}
+              s: {type: scalar}
+              keep: {type: scalar}
           values: {m: "x", l: {a: 1}, s: [1], keep: ok}
     asserts:
       - equal:
@@ -185,11 +212,11 @@ tests:
           path: diag.errors
           count: 0
 
-  - it: a root value of the wrong kind comes back as an empty map
+  - it: a root value of the wrong shape comes back as an empty map
     set:
       schemaOps:
         - op: validate
-          schema: {kind: map}
+          schema: {type: map}
           values: "not-a-map"
           path: application
     asserts:
@@ -206,18 +233,18 @@ tests:
       schemaOps:
         - op: validate
           schema:
-            kind: map
+            type: map
             properties:
               application:
-                kind: map
+                type: map
                 properties:
                   services:
-                    kind: map
+                    type: map
                     values:
-                      kind: map
+                      type: map
                       properties:
-                        greeting: {kind: scalar}
-            values: {kind: any}
+                        greeting: {type: scalar}
+            values: {type: any}
           values:
             global: {x: 1}
             application:
@@ -246,9 +273,9 @@ tests:
       schemaOps:
         - op: validate
           schema:
-            kind: map
+            type: map
             keys: {pattern: "^[A-Z][A-Z0-9_]*$"}
-            values: {kind: scalar}
+            values: {type: scalar}
           values: {GOOD: 1, bad: 2}
           path: environment
     asserts:
@@ -268,9 +295,9 @@ tests:
       schemaOps:
         - op: validate
           schema:
-            kind: map
+            type: map
             properties:
-              ports: {kind: list, items: {kind: scalar, type: int}}
+              ports: {type: list, items: {type: int}}
           values: {ports: [80, "http", 443]}
     asserts:
       - equal:
@@ -288,15 +315,15 @@ tests:
       schemaOps:
         - op: validate
           schema:
-            kind: map
+            type: map
             properties:
-              enabled: {kind: scalar, type: bool}
-              count: {kind: scalar, type: int}
-              ratio: {kind: scalar, type: number}
-              name: {kind: scalar, type: string}
-              mode: {kind: scalar, enum: [validate, deploy]}
-              id: {kind: scalar, pattern: "^[a-z]+$"}
-              type: {kind: scalar, markers: false}
+              enabled: {type: bool}
+              count: {type: int}
+              ratio: {type: number}
+              name: {type: string}
+              mode: {type: scalar, enum: [validate, deploy]}
+              id: {type: scalar, pattern: "^[a-z]+$"}
+              type: {type: scalar, markers: false}
           values:
             enabled: "false"
             count: 1.5
@@ -325,9 +352,9 @@ tests:
       schemaOps:
         - op: validate
           schema:
-            kind: map
+            type: map
             properties:
-              count: {kind: scalar, type: int, enum: [1, 2]}
+              count: {type: int, enum: [1, 2]}
           values: {count: "@COUNT@"}
     asserts:
       - equal:
@@ -342,11 +369,11 @@ tests:
       schemaOps:
         - op: validate
           schema:
-            kind: map
+            type: map
             properties:
-              greeting: {kind: scalar, type: string, tokens: true}
-              hosts: {kind: list, tokens: true, items: {kind: scalar}}
-              plain: {kind: scalar, type: int, tokens: true}
+              greeting: {type: string, tokens: true}
+              hosts: {type: list, tokens: true, items: {type: scalar}}
+              plain: {type: int, tokens: true}
           values:
             greeting: {default: hi, prod: hello}
             hosts: {default: [a], prod: [a, b]}
@@ -369,10 +396,10 @@ tests:
       schemaOps:
         - op: validate
           schema:
-            kind: map
+            type: map
             properties:
-              target: {kind: scalar, required: true}
-              name: {kind: scalar, type: string, required: true}
+              target: {type: scalar, required: true}
+              name: {type: string, required: true}
           values: {name: 5}
     asserts:
       - equal:
@@ -386,12 +413,12 @@ tests:
       schemaOps:
         - op: validate
           schema:
-            kind: map
+            type: map
             properties:
-              enabled: {kind: scalar, type: bool, default: true}
-              mode: {kind: scalar, default: deploy}
-              level: {kind: scalar, type: int, default: 1}
-              greeting: {kind: scalar, tokens: true, default: {default: hi, prod: hello}}
+              enabled: {type: bool, default: true}
+              mode: {type: scalar, default: deploy}
+              level: {type: int, default: 1}
+              greeting: {type: scalar, tokens: true, default: {default: hi, prod: hello}}
           values: {mode: validate, enabled: "no"}
     asserts:
       - equal:
@@ -411,10 +438,10 @@ tests:
       schemaOps:
         - op: validate
           schema:
-            kind: map
+            type: map
             properties:
-              mode: {kind: scalar, default: deploy}
-              target: {kind: scalar, required: true}
+              mode: {type: scalar, default: deploy}
+              target: {type: scalar, required: true}
           values: {mode: null, target: null}
     asserts:
       - equal:
@@ -433,21 +460,21 @@ tests:
         - op: validate
           path: services
           schema:
-            kind: map
+            type: map
             values:
               switch:
                 by: type
                 cases:
                   greeter:
-                    kind: map
+                    type: map
                     properties:
-                      type: {kind: scalar, markers: false, required: true}
-                      greeting: {kind: scalar}
+                      type: {type: scalar, markers: false, required: true}
+                      greeting: {type: scalar}
                   leader:
-                    kind: map
+                    type: map
                     properties:
-                      type: {kind: scalar, markers: false, required: true}
-                      greeter: {kind: scalar}
+                      type: {type: scalar, markers: false, required: true}
+                      greeter: {type: scalar}
           values:
             A: {type: greeter, greeting: hi, greeter: B}
             B: {type: leader, greeter: A}
@@ -476,10 +503,10 @@ tests:
       schemaOps:
         - op: validateValues
           schema:
-            kind: map
+            type: map
             properties:
-              greeting: {kind: scalar, type: string, tokens: true}
-              count: {kind: scalar, type: int, tokens: true}
+              greeting: {type: string, tokens: true}
+              count: {type: int, tokens: true}
           values:
             greeting: {default: hi, prod: hello}
             count: {default: 1, prod: 2}
@@ -497,11 +524,11 @@ tests:
       schemaOps:
         - op: validateValues
           schema:
-            kind: map
+            type: map
             properties:
-              count: {kind: scalar, type: int, tokens: true}
-              mode: {kind: scalar, enum: [a, b], tokens: true}
-              id: {kind: scalar, pattern: "^[a-z]+$", tokens: true}
+              count: {type: int, tokens: true}
+              mode: {type: scalar, enum: [a, b], tokens: true}
+              id: {type: scalar, pattern: "^[a-z]+$", tokens: true}
           values:
             count: {default: 1, prod: many}
             mode: {default: a, prod: c}
@@ -522,13 +549,13 @@ tests:
       schemaOps:
         - op: validateValues
           schema:
-            kind: map
+            type: map
             properties:
-              a: {kind: scalar, type: int, tokens: true}
-              b: {kind: scalar, type: int, tokens: true}
-              c: {kind: scalar, type: bool, tokens: true}
-              d: {kind: scalar, type: bool, tokens: true}
-              e: {kind: scalar, type: number, tokens: true}
+              a: {type: int, tokens: true}
+              b: {type: int, tokens: true}
+              c: {type: bool, tokens: true}
+              d: {type: bool, tokens: true}
+              e: {type: number, tokens: true}
           values:
             a: {default: "5"}
             b: {default: "@BASE@0"}
@@ -550,11 +577,11 @@ tests:
       schemaOps:
         - op: validateValues
           schema:
-            kind: map
+            type: map
             properties:
-              good: {kind: scalar, type: int}
-              bad: {kind: scalar, type: int}
-              ports: {kind: list, items: {kind: scalar, type: int}}
+              good: {type: int}
+              bad: {type: int}
+              ports: {type: list, items: {type: int}}
           values: {good: "@GOOD@", bad: "@BAD@", ports: [80, "@BAD@"]}
     asserts:
       - equal:
@@ -569,10 +596,10 @@ tests:
       schemaOps:
         - op: validateValues
           schema:
-            kind: map
+            type: map
             properties:
-              hosts: {kind: list, tokens: true, items: {kind: scalar, type: int}}
-              other: {kind: list, tokens: true}
+              hosts: {type: list, tokens: true, items: {type: int}}
+              other: {type: list, tokens: true}
           values:
             hosts: {default: [1], prod: [1, b]}
             other: {prod: "x"}
@@ -589,10 +616,10 @@ tests:
       schemaOps:
         - op: validateValues
           schema:
-            kind: map
+            type: map
             properties:
-              count: {kind: scalar, type: int, tokens: true}
-              typo: {kind: scalar, type: int}
+              count: {type: int, tokens: true}
+              typo: {type: int}
           values:
             count: {qa: 1}
             typo: "@MISSING@"
@@ -609,16 +636,16 @@ tests:
         - op: validateValues
           path: services
           schema:
-            kind: map
+            type: map
             values:
               switch:
                 by: type
                 cases:
                   greeter:
-                    kind: map
+                    type: map
                     properties:
-                      type: {kind: scalar, markers: false}
-                      greeting: {kind: scalar, type: int, tokens: true}
+                      type: {type: scalar, markers: false}
+                      greeting: {type: int, tokens: true}
           values:
             A: {type: greeter, greeting: {prod: hi}}
             B: {type: unknown, greeting: {prod: hi}}
@@ -633,13 +660,13 @@ tests:
       target: prod
       schemaOps:
         - op: validateValues
-          schema: {kind: map, properties: {count: {kind: scalar, type: int, tokens: true}}}
+          schema: {type: map, properties: {count: {type: int, tokens: true}}}
           values: {count: {prod: x}}
         - op: validateValues
-          schema: {kind: map, properties: {count: {kind: scalar, type: int, tokens: true}}}
+          schema: {type: map, properties: {count: {type: int, tokens: true}}}
           values: {count: {prod: x}}
         - op: value
-          node: {kind: scalar, type: int, tokens: true}
+          node: {type: int, tokens: true}
           def: {prod: x}
           path: count
     asserts:
@@ -658,16 +685,16 @@ tests:
         qap1: qa
       schemaOps:
         - op: value
-          node: {kind: scalar, type: int, tokens: true}
+          node: {type: int, tokens: true}
           def: {qa: 1, qap1: x}
           path: application.services.APP.count
           target: qap1
         - op: value
-          node: {kind: scalar, type: int, tokens: true}
+          node: {type: int, tokens: true}
           def: {qa: 1, qap1: x}
           path: application.services.APP.count
         - op: value
-          node: {kind: scalar, type: int}
+          node: {type: int}
           def: 7
           path: application.services.APP.static
     asserts:
@@ -692,20 +719,20 @@ tests:
       schemaOps:
         - op: node
           schema: &services
-            kind: map
+            type: map
             properties:
               services:
-                kind: map
+                type: map
                 values:
                   switch:
                     by: type
                     cases:
                       greeter:
-                        kind: map
+                        type: map
                         properties:
-                          type: {kind: scalar, markers: false}
-                          greeting: {kind: scalar, tokens: true}
-                          ports: {kind: list, items: {kind: scalar, type: int}}
+                          type: {type: scalar, markers: false}
+                          greeting: {type: scalar, tokens: true}
+                          ports: {type: list, items: {type: int}}
           values: &servicesValues
             services:
               A: {type: greeter}
@@ -730,13 +757,13 @@ tests:
     asserts:
       - equal:
           path: results[0]
-          value: {found: true, value: {kind: scalar, tokens: true}}
+          value: {found: true, value: {type: scalar, tokens: true}}
       - equal:
           path: results[1]
-          value: {found: true, value: {kind: scalar, type: int, tokens: false}}
+          value: {found: true, value: {type: int, tokens: false}}
       - equal:
           path: results[2].value.properties.type
-          value: {kind: scalar, markers: false}
+          value: {type: scalar, markers: false}
       - equal:
           path: results[3].found
           value: false
@@ -752,41 +779,41 @@ tests:
         - op: docs
           title: Example values
           schema:
-            kind: map
-            values: {kind: any, doc: "The consumer chart's own keys."}
+            type: map
+            values: {type: any, doc: "The consumer chart's own keys."}
             properties:
-              target: {kind: scalar, type: string, markers: false, required: true, doc: "Render target."}
-              renderMode: {kind: scalar, type: string, markers: false, enum: [validate, deploy], default: deploy, doc: "Mode | see README."}
+              target: {type: string, markers: false, required: true, doc: "Render target."}
+              renderMode: {type: string, markers: false, enum: [validate, deploy], default: deploy, doc: "Mode | see README."}
               services:
-                kind: map
+                type: map
                 doc: "Services by ID."
                 values:
                   switch:
                     by: type
                     cases:
                       greeter:
-                        kind: map
+                        type: map
                         properties:
-                          type: {kind: scalar, type: string, markers: false, required: true}
-                          greeting: {kind: scalar, type: string, tokens: true, doc: "File\ncontent."}
-                          ports: {kind: list, items: {kind: scalar, type: int}}
+                          type: {type: string, markers: false, required: true}
+                          greeting: {type: string, tokens: true, doc: "File\ncontent."}
+                          ports: {type: list, items: {type: int}}
                       environment:
-                        kind: map
+                        type: map
                         properties:
-                          type: {kind: scalar, type: string, markers: false, required: true}
-                          environment: {kind: map, keys: {pattern: "^[A-Z]+$"}, values: {kind: scalar, tokens: true}}
+                          type: {type: string, markers: false, required: true}
+                          environment: {type: map, keys: {pattern: "^[A-Z]+$"}, values: {type: scalar, tokens: true}}
     asserts:
       - matchSnapshot:
           path: results[0].text
       - matchRegex:
           path: results[0].text
-          pattern: "\\| `renderMode` \\| scalar \\(string\\), one of: validate, deploy \\| no \\| `\"deploy\"` \\|  \\| Mode \\\\\\| see README\\. \\|"
+          pattern: "\\| `renderMode` \\| string, one of: validate, deploy \\| no \\| `\"deploy\"` \\|  \\| Mode \\\\\\| see README\\. \\|"
       - matchRegex:
           path: results[0].text
           pattern: "## `services.<key>` with `type: greeter`"
       - matchRegex:
           path: results[0].text
-          pattern: "\\| `services.<key>.greeting` \\| scalar \\(string\\) \\| yes \\|  \\|  \\| File content\\. \\|"
+          pattern: "\\| `services.<key>.greeting` \\| string \\| yes \\|  \\|  \\| File content\\. \\|"
 
   - it: 'a schema with only a switch at the root renders the case tables'
     set:
@@ -797,9 +824,9 @@ tests:
               by: kind
               cases:
                 a:
-                  kind: map
+                  type: map
                   properties:
-                    kind: {kind: scalar, markers: false}
+                    kind: {type: scalar, markers: false}
     asserts:
       - equal:
           path: results[0].text
@@ -808,7 +835,7 @@ tests:
 
             ## (root) with `kind: a`
 
-            | Key | Kind | Per target | Default | Required | Description |
+            | Key | Type | Per target | Default | Required | Description |
             | --- | --- | --- | --- | --- | --- |
             | `kind` | scalar | no |  |  |  |
 
@@ -841,12 +868,12 @@ tests:
       schemaOps:
         - op: validate
           schema: &defaults
-            kind: map
+            type: map
             properties:
-              greeting: {kind: scalar, type: string}
-              hosts: {kind: list, items: {kind: scalar, type: int}}
-              type: {kind: scalar, markers: false}
-              pinned: {kind: scalar, tokens: false}
+              greeting: {type: string}
+              hosts: {type: list, items: {type: int}}
+              type: {type: scalar, markers: false}
+              pinned: {type: scalar, tokens: false}
           values: &defaultsValues
             greeting: {default: hi, prod: hello}
             hosts: {default: [1], prod: [2, x]}
@@ -876,23 +903,23 @@ tests:
       schemaOps:
         - op: check
           schema:
-            kind: map
+            type: map
             properties:
-              hosts: {kind: list, items: {kind: scalar, tokens: true}}
-              static: {kind: list, tokens: false, items: {kind: scalar, tokens: true}}
+              hosts: {type: list, items: {type: scalar, tokens: true}}
+              static: {type: list, tokens: false, items: {type: scalar, tokens: true}}
     asserts:
       - equal:
           path: diag.errors
           value:
             - "schema invalid: properties.hosts.items: 'tokens: true' below another 'tokens: true'"
 
-  - it: 'kind omitted is a self-check ERROR except on a switch node; a closed map warns, an absent type accepts any scalar'
+  - it: 'type omitted is a self-check ERROR except on a switch node; a closed map warns'
     set:
       schemaOps:
         - op: check
-          schema: {kind: map, properties: {a: {doc: "no kind"}}}
+          schema: {type: map, properties: {a: {doc: "no type"}}}
         - op: validate
-          schema: {kind: map, properties: {any: {kind: scalar}}}
+          schema: {type: map, properties: {any: {type: scalar}}}
           values: {any: 5, other: 1}
     asserts:
       - equal:
@@ -901,7 +928,7 @@ tests:
       - equal:
           path: diag.errors
           value:
-            - "schema invalid: properties.a: unknown kind ''"
+            - "schema invalid: properties.a: unknown type ''"
       - equal:
           path: diag.warnings
           value:
@@ -912,19 +939,19 @@ tests:
       schemaOps:
         - op: docs
           schema:
-            kind: map
+            type: map
             properties:
-              greeting: {kind: scalar}
-              hosts: {kind: list, items: {kind: scalar}}
-              type: {kind: scalar, markers: false}
-              pinned: {kind: scalar, tokens: false}
+              greeting: {type: scalar}
+              hosts: {type: list, items: {type: scalar}}
+              type: {type: scalar, markers: false}
+              pinned: {type: scalar, tokens: false}
     asserts:
       - equal:
           path: results[0].text
           value: |
             # Values
 
-            | Key | Kind | Per target | Default | Required | Description |
+            | Key | Type | Per target | Default | Required | Description |
             | --- | --- | --- | --- | --- | --- |
             | `greeting` | scalar | yes |  |  |  |
             | `hosts` | list | yes |  |  |  |
