@@ -740,3 +740,71 @@ tests:
       - equal:
           path: results[4].found
           value: false
+
+  # --- docs ---
+
+  - it: 'crdkit.schema.docs renders one table for the root and one per switch case'
+    set:
+      schemaOps:
+        - op: docs
+          title: Example values
+          schema:
+            kind: map
+            values: {kind: any, doc: "The consumer chart's own keys."}
+            properties:
+              target: {kind: scalar, type: string, markers: false, required: true, doc: "Render target."}
+              renderMode: {kind: scalar, type: string, markers: false, enum: [validate, deploy], default: deploy, doc: "Mode | see README."}
+              services:
+                kind: map
+                doc: "Services by ID."
+                values:
+                  switch:
+                    by: type
+                    cases:
+                      greeter:
+                        kind: map
+                        properties:
+                          type: {kind: scalar, type: string, markers: false, required: true}
+                          greeting: {kind: scalar, type: string, tokens: true, doc: "File\ncontent."}
+                          ports: {kind: list, items: {kind: scalar, type: int}}
+                      environment:
+                        kind: map
+                        properties:
+                          type: {kind: scalar, type: string, markers: false, required: true}
+                          environment: {kind: map, keys: {pattern: "^[A-Z]+$"}, values: {kind: scalar, tokens: true}}
+    asserts:
+      - matchSnapshot:
+          path: results[0].text
+      - matchRegex:
+          path: results[0].text
+          pattern: "\\| `renderMode` \\| scalar \\(string\\), one of: validate, deploy \\| no \\| `\"deploy\"` \\|  \\| Mode \\\\\\| see README\\. \\|"
+      - matchRegex:
+          path: results[0].text
+          pattern: "## `services.<key>` with `type: greeter`"
+      - matchRegex:
+          path: results[0].text
+          pattern: "\\| `services.<key>.greeting` \\| scalar \\(string\\) \\| yes \\|  \\|  \\| File content\\. \\|"
+
+  - it: 'a schema with only a switch at the root renders the case tables'
+    set:
+      schemaOps:
+        - op: docs
+          schema:
+            switch:
+              by: kind
+              cases:
+                a:
+                  kind: map
+                  properties:
+                    kind: {kind: scalar, markers: false}
+    asserts:
+      - equal:
+          path: results[0].text
+          value: |
+            # Values
+
+            ## (root) with `kind: a`
+
+            | Key | Kind | Per target | Default | Required | Description |
+            | --- | --- | --- | --- | --- | --- |
+            | `kind` | scalar | no |  |  |  |
