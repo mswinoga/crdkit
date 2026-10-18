@@ -39,6 +39,9 @@ Everything product-specific, as an explicit dict param — see
 - `parentTargetTemplate`: fully-qualified template name implementing the
   library's own target-escalation taxonomy (optional; defaults to no
   escalation)
+- `state`: optional dict whose keys are copied into `ctx` for the
+  library's own integrations (e.g. normalized input); a key colliding
+  with a crdkit `ctx` key records an `# ERROR:` and is ignored
 
 Not a param at all: `apiVersion`/`kind`/labels/anything about the CR's
 shape. `crdkit.render` never reads `context.Values` — the chain builds
@@ -281,6 +284,47 @@ for the same target overwrites the first.
 ```gotemplate
 {{- include "crdkit.token.underlay" (list .ctx "DB_URL" "jdbc:@DB_HOST@" (dict "owner" "payments")) -}}
 ```
+
+## Values schema
+
+`templates/_schema.tpl` validates a library's consumer values against a
+schema the library supplies (literal YAML from its own defines) and
+renders a Markdown reference from it. Node shape: see the file-level doc
+comment.
+
+```yaml
+kind: map
+values: {kind: any}                     # every key not in properties
+properties:
+  target: {kind: scalar, type: string, markers: false, required: true, doc: "Render target."}
+  services:
+    kind: map
+    values:
+      switch:
+        by: type                        # not "on": YAML 1.1 reads it as true
+        cases:
+          greeter:
+            kind: map
+            properties:
+              type: {kind: scalar, markers: false}
+              greeting: {kind: scalar, type: string, tokens: true, default: hi}
+```
+
+- `crdkit.schema.check` — self-check; `true` or an empty string, each
+  problem an `# ERROR: schema invalid: …`.
+- `crdkit.schema.validate` — structural pass, before the chain:
+  `{value: <normalized values>}` with defaults applied and failing
+  nodes dropped. Kind mismatch, unknown key, unmatched switch →
+  WARNING; required/type/enum/pattern/markers → ERROR.
+- `crdkit.schema.validateValues` — value pass for one target: every
+  `tokens: true` value (resolved like a token) and every string with
+  `@NAME@` markers (substituted), checked "parses as" (`"5"` is an
+  int). Messages name the target.
+- `crdkit.schema.value` — one field for any target, resolved and
+  checked; `crdkit.schema.node` finds a field's node (follows switches).
+  A shared `seen` dict reports each path/target pair once.
+- `crdkit.schema.docs` — Markdown reference: one table for the root,
+  one per switch case.
 
 ## Local testing
 
