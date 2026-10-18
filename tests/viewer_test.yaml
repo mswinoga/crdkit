@@ -1,0 +1,78 @@
+suite: crdkit HTML viewer
+templates:
+  - schema_test.yaml
+tests:
+
+  - it: the page embeds the JSON Schema in a script element and nothing else between its tags
+    set:
+      schemaOps:
+        - op: html
+          title: My Values
+          schemaText: |
+            type: map
+            doc: "Closes with </script> if unescaped."
+            properties:
+              target: {type: string, markers: false, doc: "Render target."}
+    asserts:
+      - matchRegex:
+          path: results[0].text
+          pattern: '<script type="application/json" id="crdkit-schema">\{\n[^<]*"x-crdkit-type": "map"[^<]*\}</script>\n<script>'
+      - matchRegex:
+          path: results[0].text
+          pattern: 'id="crdkit-schema">[^<]*Closes with \\u003c/script\\u003e if unescaped'
+
+  - it: the title is set and HTML-escaped
+    set:
+      schemaOps:
+        - op: html
+          title: "A <b> & C"
+          schemaText: "type: map\n"
+    asserts:
+      - matchRegex:
+          path: results[0].text
+          pattern: '<title>A &lt;b&gt; &amp; C</title>'
+
+  - it: the title defaults to Values
+    set:
+      schemaOps:
+        - op: html
+          schemaText: "type: map\n"
+    asserts:
+      - matchRegex:
+          path: results[0].text
+          pattern: '<title>Values</title>'
+
+  - it: the shell loads nothing external and the script holds no template delimiter
+    set:
+      schemaOps:
+        - op: html
+          schemaText: |
+            type: map
+            properties:
+              target: {type: string, markers: false}
+    asserts:
+      - notMatchRegex:
+          path: results[0].outside
+          pattern: 'https?://'
+      - notMatchRegex:
+          path: results[0].outside
+          pattern: '<link|@import|<img|<iframe| src=|url\('
+      - notMatchRegex:
+          path: results[0].outside
+          pattern: '\{\{'
+      - matchRegex:
+          path: results[0].outside
+          pattern: 'prefers-color-scheme: dark'
+
+  - it: a schema that fails the self-check still renders the page shell, with the ERROR recorded
+    set:
+      schemaOps:
+        - op: html
+          schemaText: "type: nonsense\n"
+    asserts:
+      - matchRegex:
+          path: results[0].text
+          pattern: '<script type="application/json" id="crdkit-schema">\{\}</script>'
+      - matchRegex:
+          path: diag.errors[0]
+          pattern: 'nonsense'
