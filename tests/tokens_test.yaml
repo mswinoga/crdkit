@@ -495,35 +495,120 @@ tests:
           path: stringResolved[0]
           value: "true"
 
-  - it: "crdkit.token.string on a structural value records an ERROR and returns an empty string"
+  - it: "crdkit.token.string on a dict returns its JSON, with no diagnostic"
     set:
       target: prod
       tokens.CONFIG.default:
         host: "x"
+        port: 80
       stringOps:
         - name: CONFIG
           target: "prod"
     asserts:
       - equal:
           path: stringResolved[0]
-          value: ""
-      - equal:
-          path: diag.errors[0]
-          value: "'CONFIG' resolves to a structured value and cannot be used as text"
+          value: '{"host":"x","port":80}'
+      - lengthEqual:
+          path: diag.errors
+          count: 0
 
-  - it: "a @NAME@ marker referencing a token that resolves to a structure is left unexpanded, with an ERROR recorded"
+  - it: "crdkit.token.string on a list joins its elements with ','"
     set:
       target: prod
-      tokens.CONFIG.default:
-        host: "x"
-      structure.x: "prefix-@CONFIG@-suffix"
+      tokens:
+        HOSTS: {default: [a, b, 3]}
+      stringOps:
+        - name: HOSTS
+          target: "prod"
+    asserts:
+      - equal:
+          path: stringResolved[0]
+          value: "a,b,3"
+
+  - it: "a marker to a list token splices its elements joined by ',' (no space)"
+    set:
+      target: prod
+      tokens:
+        L: {default: [a, b, 3]}
+      structure:
+        x: "hosts=@L@"
     asserts:
       - equal:
           path: structure.x
-          value: "prefix-@CONFIG@-suffix"
+          value: "hosts=a,b,3"
+      - lengthEqual:
+          path: diag.errors
+          count: 0
+
+  - it: "a structured list element is spliced as JSON"
+    set:
+      target: prod
+      tokens:
+        L: {default: [a, {k: v}, [1, 2]]}
+      structure:
+        x: "@L@"
+    asserts:
       - equal:
-          path: diag.errors[0]
-          value: "'CONFIG' resolves to a structured value and cannot be used as text"
+          path: structure.x
+          value: 'a,{"k":"v"},[1,2]'
+
+  - it: "a marker to a dict token splices its JSON"
+    set:
+      target: prod
+      tokens:
+        D: {default: {k: v}}
+      structure:
+        x: "cfg=@D@"
+    asserts:
+      - equal:
+          path: structure.x
+          value: 'cfg={"k":"v"}'
+      - lengthEqual:
+          path: diag.errors
+          count: 0
+
+  - it: "an empty list splices as an empty string"
+    set:
+      target: prod
+      tokens:
+        L: {default: []}
+      structure:
+        x: "[@L@]"
+    asserts:
+      - equal:
+          path: structure.x
+          value: "[]"
+
+  - it: "a per-target list token is resolved for the target before it is spliced, markers in its elements included"
+    set:
+      target: prod
+      tokens:
+        HOST: "h1"
+        L:
+          default: [x]
+          prod: ["@HOST@", b]
+        URL: "hosts=@L@"
+      structure:
+        x: "@URL@"
+    asserts:
+      - equal:
+          path: structure.x
+          value: "hosts=h1,b"
+
+  - it: "crdkit.tokenDef.string on a structure returns it as text"
+    set:
+      target: prod
+      tokenDefOps:
+        - fieldId: f
+          def: {default: [a, b]}
+          target: prod
+    asserts:
+      - equal:
+          path: tokenDefResolved[0].string
+          value: "a,b"
+      - lengthEqual:
+          path: diag.errors
+          count: 0
 
   # --- crdkit.tokenDef.value / crdkit.tokenDef.string: resolving an arbitrary structure, not registered in ctx.tokens ---
 
@@ -579,7 +664,7 @@ tests:
             port: 5432
       - equal:
           path: tokenDefResolved[0].string
-          value: ""
+          value: '{"host":"db.internal","port":5432}'
 
   - it: "crdkit.tokenDef.value records a 'no value found' error using the caller-supplied fieldId, same diagnostic shape as a real token"
     set:

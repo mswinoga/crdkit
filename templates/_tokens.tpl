@@ -545,9 +545,8 @@ Implementation notes:
   recursing infinitely), so the rest of the value still resolves.
 - "@AT@" is never treated as a token reference here — handled once,
   separately, by crdkit.tokens.substitute's final pass.
-- A referenced token resolving to a STRUCTURE (not a scalar) can't be
-  spliced into this text — crdkit.stringify.internal records an ERROR
-  and the marker is left unexpanded.
+- A referenced token resolving to a STRUCTURE is spliced as text by
+  crdkit.stringify.internal (list → ","-joined, dict → JSON).
 */}}
 {{- define "crdkit.substituteText.internal" -}}
 {{- $text := .text -}}
@@ -567,10 +566,7 @@ Implementation notes:
       {{- $_ := set $diag "errors" (append $diag.errors (printf "token '%s' references '@%s@', which is already being resolved — cycle (direct or indirect self-reference)" (last $resolving) $refName)) -}}
     {{- else -}}
       {{- $refResolved := include "crdkit.resolveEntry.internal" (dict "fieldId" $refName "def" (index $tokens $refName) "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" $resolving "reservedKeys" $reservedKeys "gen" $gen) | fromYaml -}}
-      {{- $coerced := include "crdkit.stringify.internal" (dict "resolved" $refResolved "fieldId" $refName "diag" $diag) | fromYaml -}}
-      {{- if $coerced.ok -}}
-        {{- $text = $text | replace $marker $coerced.text -}}
-      {{- end -}}
+      {{- $text = $text | replace $marker (include "crdkit.stringify.internal" (dict "resolved" $refResolved) | fromYaml).text -}}
     {{- end -}}
   {{- end -}}
 {{- end -}}
@@ -581,36 +577,41 @@ Implementation notes:
 crdkit.stringify.internal (internal)
 
 Coerces an already-resolved value for embedding into a text blob (a
-"@NAME@" marker's replacement, or a direct *.string entry point): a
-string passes through as-is; a bool/int/float is stringified
-(`toString`); a map/list records an ERROR and comes back as `{text: "",
-ok: false}` — the caller decides what "not ok" means (leave a marker
-unexpanded, or return an empty string).
+"@NAME@" marker's replacement, or a direct *.string entry point).
 
 Interface:
-- Params (dict): { "resolved": <already-decoded {value: <any>} dict>,
-  "fieldId": <string>, "diag": <dict> }
-- Returns YAML: { "text": <string>, "ok": <bool> }
+- Params (dict): { "resolved": <already-decoded {value: <any>} dict> }
+- Returns YAML: { "text": <string> }
 
 Implementation notes:
+- string → as-is; bool/int/float → `toString`; list → every element
+  stringified (a scalar as above, a nil as an empty string, a dict/list
+  element as JSON), joined by "," (no space); dict → JSON (`toJson`).
 - Shared by crdkit.token.string, crdkit.tokenDef.string,
-  crdkit.tokens.substitute, and crdkit.substituteText.internal — one
-  place decides what "give me this as text" means.
+  crdkit.tokens.substituteMarkers.internal and
+  crdkit.substituteText.internal — one place decides what "give me this
+  as text" means.
 */}}
 {{- define "crdkit.stringify.internal" -}}
 {{- $v := .resolved.value -}}
-{{- $fieldId := .fieldId -}}
-{{- $diag := .diag -}}
 {{- if kindIs "string" $v -}}
 text: {{ $v | quote }}
-ok: true
-{{- else if or (kindIs "map" $v) (kindIs "slice" $v) -}}
-{{- $_ := set $diag "errors" (append $diag.errors (printf "'%s' resolves to a structured value and cannot be used as text" $fieldId)) -}}
-text: ""
-ok: false
+{{- else if kindIs "map" $v -}}
+text: {{ $v | toJson | quote }}
+{{- else if kindIs "slice" $v -}}
+  {{- $parts := list -}}
+  {{- range $element := $v -}}
+    {{- if or (kindIs "map" $element) (kindIs "slice" $element) -}}
+      {{- $parts = append $parts (toJson $element) -}}
+    {{- else if kindIs "invalid" $element -}}
+      {{- $parts = append $parts "" -}}
+    {{- else -}}
+      {{- $parts = append $parts (toString $element) -}}
+    {{- end -}}
+  {{- end -}}
+text: {{ join "," $parts | quote }}
 {{- else -}}
 text: {{ $v | toString | quote }}
-ok: true
 {{- end -}}
 {{- end -}}
 
@@ -671,8 +672,8 @@ Interface:
 - Returns: plain string.
 
 Implementation notes:
-- A structured result records an ERROR (via crdkit.stringify.internal)
-  and comes back as an empty string.
+- A structured result comes back as text: list → ","-joined, dict →
+  JSON (crdkit.stringify.internal).
 */}}
 {{- define "crdkit.token.string" -}}
 {{- $ctx := index . 0 -}}
@@ -682,7 +683,7 @@ Implementation notes:
   {{- $target = index . 2 -}}
 {{- end -}}
 {{- $resolved := include "crdkit.token.value" (list $ctx $name $target) | fromYaml -}}
-{{- (include "crdkit.stringify.internal" (dict "resolved" $resolved "fieldId" $name "diag" $ctx.diag) | fromYaml).text -}}
+{{- (include "crdkit.stringify.internal" (dict "resolved" $resolved) | fromYaml).text -}}
 {{- end -}}
 
 {{/*
@@ -732,8 +733,8 @@ Interface:
 - Returns: plain string.
 
 Implementation notes:
-- A structured result records an ERROR (via crdkit.stringify.internal)
-  and comes back as an empty string.
+- A structured result comes back as text: list → ","-joined, dict →
+  JSON (crdkit.stringify.internal).
 */}}
 {{- define "crdkit.tokenDef.string" -}}
 {{- $ctx := index . 0 -}}
@@ -744,7 +745,7 @@ Implementation notes:
   {{- $target = index . 3 -}}
 {{- end -}}
 {{- $resolved := include "crdkit.tokenDef.value" (list $ctx $fieldId $def $target) | fromYaml -}}
-{{- (include "crdkit.stringify.internal" (dict "resolved" $resolved "fieldId" $fieldId "diag" $ctx.diag) | fromYaml).text -}}
+{{- (include "crdkit.stringify.internal" (dict "resolved" $resolved) | fromYaml).text -}}
 {{- end -}}
 
 {{/*
@@ -783,8 +784,8 @@ Interface:
   "@AT@" untouched.
 
 Implementation notes:
-- A marker naming a token that resolves to a STRUCTURE (not a scalar)
-  is left untouched — crdkit.stringify.internal records the ERROR.
+- A marker naming a token that resolves to a STRUCTURE is spliced as
+  text by crdkit.stringify.internal (list → ","-joined, dict → JSON).
 */}}
 {{- define "crdkit.tokens.substituteMarkers.internal" -}}
 {{- $ctx := index . 0 -}}
@@ -794,16 +795,12 @@ Implementation notes:
   {{- $target = index . 2 -}}
 {{- end -}}
 {{- $tokens := $ctx.tokens -}}
-{{- $diag := $ctx.diag -}}
 {{- $markers := regexFindAll (include "crdkit.markerPattern.internal" (dict)) $text -1 -}}
 {{- range $marker := $markers -}}
   {{- $name := trimSuffix "@" (trimPrefix "@" $marker) -}}
   {{- if and (ne $name "AT") (hasKey $tokens $name) -}}
     {{- $resolved := include "crdkit.token.value" (list $ctx $name $target) | fromYaml -}}
-    {{- $coerced := include "crdkit.stringify.internal" (dict "resolved" $resolved "fieldId" $name "diag" $diag) | fromYaml -}}
-    {{- if $coerced.ok -}}
-      {{- $text = $text | replace $marker $coerced.text -}}
-    {{- end -}}
+    {{- $text = $text | replace $marker (include "crdkit.stringify.internal" (dict "resolved" $resolved) | fromYaml).text -}}
   {{- end -}}
 {{- end -}}
 {{- $text -}}

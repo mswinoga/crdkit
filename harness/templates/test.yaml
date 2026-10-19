@@ -43,16 +43,10 @@ a real render goes through:
     as `{value: <resolved thing>}` — exercises resolving a token for a
     target OTHER than the one driving this "render" (the whole point of
     the redesign), and lets a test assert on the resulting "_value"
-    cache shape directly via "tokens". Deliberately does NOT also compute
-    crdkit.token.string here — that has a diagnostic side effect on a
-    structural value (see crdkit.stringify.internal), which would
-    silently pollute diag.errors for every OTHER test that happens to
-    resolve a structural token via crossTargets for unrelated reasons.
-    Use .Values.stringOps (below) to opt into exercising it instead.
+    cache shape directly via "tokens".
   - .Values.stringOps is a data-driven list of {name, target} exercising
     crdkit.token.string specifically, rendered into "stringResolved" (a
-    list of plain strings, same order) — kept separate from
-    crossResolved/crossTargets on purpose (see above).
+    list of plain strings, same order).
   - .Values.tokenDefOps is a data-driven list of {fieldId, def, target}
     exercising crdkit.tokenDef.value AND crdkit.tokenDef.string together
     on an arbitrary structure that is NOT registered in ctx.tokens —
