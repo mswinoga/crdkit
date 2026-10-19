@@ -47,7 +47,7 @@ Implementation notes:
 {{- $result := list "_value" "_gen" "_generated" "match" -}}
 {{- range $annot := $annotations -}}
   {{- if has $annot $collisionCheck -}}
-    {{- $_ := set $diag "errors" (append $diag.errors (printf "annotation name '%s' collides with a crdkit-reserved key and was ignored" $annot)) -}}
+    {{- include "crdkit.diag.error" (list $diag (printf "annotation name '%s' collides with a crdkit-reserved key and was ignored" $annot)) -}}
   {{- else -}}
     {{- $result = append $result $annot -}}
   {{- end -}}
@@ -90,9 +90,9 @@ Implementation notes:
 
 {{- range $name, $_ := $userTokens -}}
   {{- if hasKey $system $name -}}
-    {{- $_ := set $diag "warnings" (append $diag.warnings (printf "token '%s' is reserved by the library and was overridden back to the library value" $name)) -}}
+    {{- include "crdkit.diag.warning" (list $diag (printf "token '%s' is reserved by the library and was overridden back to the library value" $name)) -}}
   {{- else if has $name $builtins -}}
-    {{- $_ := set $diag "warnings" (append $diag.warnings (printf "token '%s' is a reserved built-in and cannot be redefined; the user-supplied value was ignored" $name)) -}}
+    {{- include "crdkit.diag.warning" (list $diag (printf "token '%s' is a reserved built-in and cannot be redefined; the user-supplied value was ignored" $name)) -}}
   {{- end -}}
 {{- end -}}
 {{- range $builtins -}}
@@ -117,7 +117,7 @@ Implementation notes:
   {{- $decl := index $merged $name -}}
   {{- range $key := (list "_value" "_gen" "_generated") -}}
     {{- if hasKey $decl $key -}}
-      {{- $_ := set $diag "warnings" (append $diag.warnings (printf "token '%s' declares crdkit-internal key '%s'; it was removed" $name $key)) -}}
+      {{- include "crdkit.diag.warning" (list $diag (printf "token '%s' declares crdkit-internal key '%s'; it was removed" $name $key)) -}}
       {{- $decl = omit $decl $key -}}
     {{- end -}}
   {{- end -}}
@@ -252,7 +252,7 @@ value: {{ index $cache $target | toYaml | nindent 2 }}
           {{- if not $next -}}
             {{- $stop = true -}}
           {{- else if has $next $visited -}}
-            {{- $_ := set $diag "errors" (append $diag.errors (printf "target escalation chain for '%s' cycles back to '%s' while resolving from '%s'" $fieldId $next $target)) -}}
+            {{- include "crdkit.diag.error" (list $diag (printf "target escalation chain for '%s' cycles back to '%s' while resolving from '%s'" $fieldId $next $target)) -}}
             {{- $stop = true -}}
             {{- $cycleDetected = true -}}
           {{- else -}}
@@ -287,7 +287,7 @@ value: {{ index $cache $target | toYaml | nindent 2 }}
         {{- end -}}
       {{- end -}}
       {{- if and (not $found) (not $cycleDetected) -}}
-        {{- $_ := set $diag "errors" (append $diag.errors (printf "no value found for '%s' — target chain exhausted at '%s' starting from '%s'" $fieldId $current $target)) -}}
+        {{- include "crdkit.diag.error" (list $diag (printf "no value found for '%s' — target chain exhausted at '%s' starting from '%s'" $fieldId $current $target)) -}}
       {{- end -}}
     {{- end -}}
   {{- end -}}
@@ -407,7 +407,7 @@ Implementation notes:
   {{- $refName := trimSuffix "@" (trimPrefix "@" $marker) -}}
   {{- if and (ne $refName "AT") (hasKey $tokens $refName) -}}
     {{- if has $refName $resolving -}}
-      {{- $_ := set $diag "errors" (append $diag.errors (printf "token '%s' references '@%s@', which is already being resolved — cycle (direct or indirect self-reference)" (last $resolving) $refName)) -}}
+      {{- include "crdkit.diag.error" (list $diag (printf "token '%s' references '@%s@', which is already being resolved — cycle (direct or indirect self-reference)" (last $resolving) $refName)) -}}
     {{- else -}}
       {{- $refResolved := include "crdkit.resolveEntry.internal" (dict "fieldId" $refName "def" (index $tokens $refName) "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" $resolving "reservedKeys" $reservedKeys "gen" $gen) | fromYaml -}}
       {{- $text = $text | replace $marker (include "crdkit.stringify.internal" (dict "resolved" $refResolved) | fromYaml).text -}}

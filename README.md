@@ -93,6 +93,10 @@ crdkit's concern.
   string `true` when the path exists (each intermediate node a map), an
   empty string otherwise: `{{ if include "crdkit.model.hasPath" (list
   .ctx.model "spec" "services") }}`.
+- `crdkit.diag.error` / `crdkit.diag.warning` — `(list diag message)`
+  append `message` to `diag.errors` / `diag.warnings` in place and return
+  `""`; an integration passes `.ctx.diag`:
+  `{{- include "crdkit.diag.error" (list .ctx.diag "service 'X' is misconfigured") -}}`.
 - Order is the precedence policy: consumer labels first,
   `crdkit.standardLabels` second (wins on collision), then the rest of
   the chain (which can still override anything).

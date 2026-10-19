@@ -77,7 +77,7 @@ Implementation notes:
 {{- $ctx := dict "root" $root "diag" $diag "model" $model "tokens" $tokens "target" $target "parentTargetTemplate" $parentTargetTemplate "reservedKeys" $reservedKeys "gen" 0 -}}
 {{- range $key, $value := .state | default dict -}}
   {{- if hasKey $ctx $key -}}
-    {{- $_ := set $diag "errors" (append $diag.errors (printf "state key '%s' collides with a crdkit ctx key and was ignored" $key)) -}}
+    {{- include "crdkit.diag.error" (list $diag (printf "state key '%s' collides with a crdkit ctx key and was ignored" $key)) -}}
   {{- else -}}
     {{- $_ := set $ctx $key $value -}}
   {{- end -}}
@@ -93,7 +93,7 @@ Implementation notes:
 {{- range $marker := $unresolvedMarkers -}}
   {{- $name := trimSuffix "@" (trimPrefix "@" $marker) -}}
   {{- if and (ne $name "AT") (not (hasKey $tokens $name)) -}}
-    {{- $_ := set $diag "warnings" (append $diag.warnings (printf "'%s' in the rendered model does not match any known token after resolution — possible typo" $marker)) -}}
+    {{- include "crdkit.diag.warning" (list $diag (printf "'%s' in the rendered model does not match any known token after resolution — possible typo" $marker)) -}}
   {{- end -}}
 {{- end -}}
 

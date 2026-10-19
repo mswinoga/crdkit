@@ -130,7 +130,7 @@ Implementation notes:
 {{- end -}}
 {{- range $problem := $problems.list -}}
   {{- if not (has $problem $diag.errors) -}}
-    {{- $_ := set $diag "errors" (append $diag.errors $problem) -}}
+    {{- include "crdkit.diag.error" (list $diag $problem) -}}
   {{- end -}}
 {{- end -}}
 {{- if not $problems.list -}}
@@ -444,7 +444,7 @@ Implementation notes:
   {{- end -}}
   {{- range $problem := $problems -}}
     {{- if not (has $problem $diag.errors) -}}
-      {{- $_ := set $diag "errors" (append $diag.errors $problem) -}}
+      {{- include "crdkit.diag.error" (list $diag $problem) -}}
     {{- end -}}
   {{- end -}}
   {{- $_ := set $root "$schema" "http://json-schema.org/draft-07/schema#" -}}
@@ -453,7 +453,7 @@ Implementation notes:
       {{- $_ := set $root "$id" .id -}}
     {{- end -}}
   {{- else if not (kindIs "invalid" .id) -}}
-    {{- $_ := set $diag "errors" (append $diag.errors "crdkit.schema.jsonSchema: 'id' must be a string — ignored") -}}
+    {{- include "crdkit.diag.error" (list $diag "crdkit.schema.jsonSchema: 'id' must be a string — ignored") -}}
   {{- end -}}
   {{- $_ := set $root "title" (.title | default "Values") -}}
   {{- range $key, $value := $out.result -}}
@@ -490,7 +490,7 @@ Implementation notes:
 {{- define "crdkit.schema.document" -}}
 {{- $format := .format | default "" -}}
 {{- if not (has $format (list "json" "html" "md")) -}}
-  {{- $_ := set .diag "errors" (append .diag.errors (printf "crdkit.schema.document: unknown format '%s' (json, html or md) — nothing rendered" $format)) -}}
+  {{- include "crdkit.diag.error" (list .diag (printf "crdkit.schema.document: unknown format '%s' (json, html or md) — nothing rendered" $format)) -}}
 {{- else -}}
   {{- $json := include "crdkit.schema.jsonSchema" (dict "schemaText" .schemaText "example" .example "sections" .sections "title" (.title | default "") "id" .id "diag" .diag) -}}
   {{- if eq $format "json" -}}

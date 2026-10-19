@@ -1,0 +1,18 @@
+suite: crdkit diagnostic helpers
+templates:
+  - test.yaml
+tests:
+  - it: diag.error and diag.warning append in call order to their own lists
+    set:
+      diagOps:
+        - {level: error, message: "first error"}
+        - {level: warning, message: "first warning"}
+        - {level: error, message: "second error"}
+        - {level: warning, message: "second warning"}
+    asserts:
+      - equal:
+          path: diag.errors
+          value: ["first error", "second error"]
+      - equal:
+          path: diag.warnings
+          value: ["first warning", "second warning"]

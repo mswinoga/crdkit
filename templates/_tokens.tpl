@@ -197,7 +197,7 @@ Implementation notes:
   {{- $target = index . 2 -}}
 {{- end -}}
 {{- if not (hasKey $ctx.tokens $name) -}}
-{{- $_ := set $ctx.diag "errors" (append $ctx.diag.errors (printf "unknown token '%s' referenced" $name)) -}}
+{{- include "crdkit.diag.error" (list $ctx.diag (printf "unknown token '%s' referenced" $name)) -}}
 value: ""
 {{- else -}}
 {{- include "crdkit.resolveEntry.internal" (dict "fieldId" $name "def" (index $ctx.tokens $name) "tokens" $ctx.tokens "target" $target "diag" $ctx.diag "parentTargetTemplate" $ctx.parentTargetTemplate "root" $ctx.root "reservedKeys" $ctx.reservedKeys "gen" $ctx.gen) -}}
@@ -370,7 +370,7 @@ Implementation notes:
 {{- $diag := $ctx.diag -}}
 
 {{- if and $rawAnnotations (not (kindIs "map" $rawAnnotations)) -}}
-  {{- $_ := set $diag "errors" (append $diag.errors (printf "crdkit.token.add for '%s': annotations must be a dict — ignored" $name)) -}}
+  {{- include "crdkit.diag.error" (list $diag (printf "crdkit.token.add for '%s': annotations must be a dict — ignored" $name)) -}}
 {{- end -}}
 
 {{- $decl := dict -}}
@@ -439,7 +439,7 @@ Implementation notes:
 {{- $diag := $ctx.diag -}}
 
 {{- if and $rawAnnotations (not (kindIs "map" $rawAnnotations)) -}}
-  {{- $_ := set $diag "errors" (append $diag.errors (printf "crdkit.token.underlay for '%s': annotations must be a dict — ignored" $name)) -}}
+  {{- include "crdkit.diag.error" (list $diag (printf "crdkit.token.underlay for '%s': annotations must be a dict — ignored" $name)) -}}
 {{- end -}}
 
 {{- $decl := dict -}}

@@ -275,7 +275,7 @@ Implementation notes:
 {{- $mode := .mode -}}
 {{- $suffix := .suffix | default "" -}}
 {{- $resolved := eq $mode "resolved" -}}
-{{- $shapeLevel := ternary "errors" "warnings" $resolved -}}
+{{- $shapeDiag := ternary "crdkit.diag.error" "crdkit.diag.warning" $resolved -}}
 {{- $tail := ternary "" " — ignored" $resolved -}}
 {{- $_ := set $out "keep" true -}}
 {{- $_ := set $out "value" $value -}}
@@ -288,13 +288,13 @@ Implementation notes:
   {{- $switch := $node.switch -}}
   {{- $onPath := include "crdkit.schema.path.internal" (dict "path" $path "key" $switch.by) -}}
   {{- if not (kindIs "map" $value) -}}
-    {{- $_ := set $diag $shapeLevel (append (index $diag $shapeLevel) (printf "'%s'%s must be a map%s" $path $suffix $tail)) -}}
+    {{- include $shapeDiag (list $diag (printf "'%s'%s must be a map%s" $path $suffix $tail)) -}}
     {{- $_ := set $out "keep" false -}}
   {{- else if kindIs "invalid" (index $value $switch.by) -}}
-    {{- $_ := set $diag $shapeLevel (append (index $diag $shapeLevel) (printf "'%s'%s has no '%s'%s" $path $suffix $switch.by $tail)) -}}
+    {{- include $shapeDiag (list $diag (printf "'%s'%s has no '%s'%s" $path $suffix $switch.by $tail)) -}}
     {{- $_ := set $out "keep" false -}}
   {{- else if not (hasKey $switch.cases (toString (index $value $switch.by))) -}}
-    {{- $_ := set $diag $shapeLevel (append (index $diag $shapeLevel) (printf "'%s'%s has unknown value '%v'%s" $onPath $suffix (index $value $switch.by) $tail)) -}}
+    {{- include $shapeDiag (list $diag (printf "'%s'%s has unknown value '%v'%s" $onPath $suffix (index $value $switch.by) $tail)) -}}
     {{- $_ := set $out "keep" false -}}
   {{- else -}}
     {{- include "crdkit.schema.walk.internal" (dict "node" (index $switch.cases (toString (index $value $switch.by))) "value" $value "path" $path "diag" $diag "mode" $mode "suffix" $suffix "inTokens" $inTokens "out" $out) -}}
@@ -303,20 +303,20 @@ Implementation notes:
   {{/* kept as written */}}
 {{- else if eq $shape "scalar" -}}
   {{- if or (kindIs "map" $value) (kindIs "slice" $value) -}}
-    {{- $_ := set $diag $shapeLevel (append (index $diag $shapeLevel) (printf "'%s'%s must be a scalar%s" $path $suffix $tail)) -}}
+    {{- include $shapeDiag (list $diag (printf "'%s'%s must be a scalar%s" $path $suffix $tail)) -}}
     {{- $_ := set $out "keep" false -}}
   {{- else -}}
     {{- $hasMarkers := and (not $resolved) (kindIs "string" $value) (regexMatch (include "crdkit.markerPattern.internal" (dict)) $value) -}}
     {{- if and $hasMarkers (eq (toString $node.markers) "false") -}}
-      {{- $_ := set $diag "errors" (append $diag.errors (printf "'%s' must not contain '@NAME@' markers — ignored" $path)) -}}
+      {{- include "crdkit.diag.error" (list $diag (printf "'%s' must not contain '@NAME@' markers — ignored" $path)) -}}
       {{- $_ := set $out "keep" false -}}
     {{- else if not $hasMarkers -}}
       {{- $reason := include "crdkit.schema.scalarReason.internal" (dict "node" $node "value" $value "strict" (not $resolved)) -}}
       {{- if $reason -}}
         {{- if $resolved -}}
-          {{- $_ := set $diag "errors" (append $diag.errors (printf "'%s'%s %s — got '%v'" $path $suffix $reason $value)) -}}
+          {{- include "crdkit.diag.error" (list $diag (printf "'%s'%s %s — got '%v'" $path $suffix $reason $value)) -}}
         {{- else -}}
-          {{- $_ := set $diag "errors" (append $diag.errors (printf "'%s' %s — ignored" $path $reason)) -}}
+          {{- include "crdkit.diag.error" (list $diag (printf "'%s' %s — ignored" $path $reason)) -}}
         {{- end -}}
         {{- $_ := set $out "keep" false -}}
       {{- end -}}
@@ -324,7 +324,7 @@ Implementation notes:
   {{- end -}}
 {{- else if eq $shape "list" -}}
   {{- if not (kindIs "slice" $value) -}}
-    {{- $_ := set $diag $shapeLevel (append (index $diag $shapeLevel) (printf "'%s'%s must be a list%s" $path $suffix $tail)) -}}
+    {{- include $shapeDiag (list $diag (printf "'%s'%s must be a list%s" $path $suffix $tail)) -}}
     {{- $_ := set $out "keep" false -}}
   {{- else -}}
     {{- $items := $node.items | default (dict "type" "any") -}}
@@ -345,7 +345,7 @@ Implementation notes:
   {{- end -}}
 {{- else if eq $shape "map" -}}
   {{- if not (kindIs "map" $value) -}}
-    {{- $_ := set $diag $shapeLevel (append (index $diag $shapeLevel) (printf "'%s'%s must be a map%s" $path $suffix $tail)) -}}
+    {{- include $shapeDiag (list $diag (printf "'%s'%s must be a map%s" $path $suffix $tail)) -}}
     {{- $_ := set $out "keep" false -}}
   {{- else -}}
     {{- $properties := $node.properties | default dict -}}
@@ -362,9 +362,9 @@ Implementation notes:
           {{- $badKey = and (hasKey $node "keys") (not (mustRegexMatch $node.keys.pattern $key)) -}}
         {{- end -}}
         {{- if $badKey -}}
-          {{- $_ := set $diag "errors" (append $diag.errors (printf "key '%s'%s must match '%s'%s" $childPath $suffix $node.keys.pattern $tail)) -}}
+          {{- include "crdkit.diag.error" (list $diag (printf "key '%s'%s must match '%s'%s" $childPath $suffix $node.keys.pattern $tail)) -}}
         {{- else if not $childNode -}}
-          {{- $_ := set $diag "warnings" (append $diag.warnings (printf "'%s'%s is not a known key%s" $childPath $suffix $tail)) -}}
+          {{- include "crdkit.diag.warning" (list $diag (printf "'%s'%s is not a known key%s" $childPath $suffix $tail)) -}}
         {{- else -}}
           {{- $childOut := dict -}}
           {{- include "crdkit.schema.walk.internal" (dict "node" $childNode "value" $child "path" $childPath "diag" $diag "mode" $mode "suffix" $suffix "inTokens" $childInTokens "out" $childOut) -}}
@@ -381,7 +381,7 @@ Implementation notes:
           {{- $_ := set $result $key (index $childNode "default" | deepCopy) -}}
         {{- else if and (eq (toString $childNode.required) "true") (not $given) -}}
           {{- $childPath := include "crdkit.schema.path.internal" (dict "path" $path "key" $key) -}}
-          {{- $_ := set $diag "errors" (append $diag.errors (printf "'%s'%s is required" $childPath $suffix)) -}}
+          {{- include "crdkit.diag.error" (list $diag (printf "'%s'%s is required" $childPath $suffix)) -}}
         {{- end -}}
       {{- end -}}
     {{- end -}}
