@@ -324,8 +324,7 @@ A schema is a tree of **nodes**; each node is a dict.
 | `required` | all | the key must be present | `false` |
 | `enum` | scalar types | list of allowed values (compared as strings) | any |
 | `pattern` | scalar types | regex on the value's string form, unanchored | any |
-| `markers` | scalar types | `false` → a `@NAME@` marker is an ERROR | `true` |
-| `tokens` | scalar types, `list` | `true` → the value may be a token declaration | `true` (see below) |
+| `static` | scalar types | `true` → the value is used as written: a `@NAME@` marker is an ERROR, never per-target | `false` |
 | `properties` | `map` | `{<key>: <node>}` for named keys | none |
 | `values` | `map` | node for every key not in `properties` | closed: other keys → WARNING |
 | `keys` | `map` | `{pattern: <regex>, label?: <string>}` for keys matched by `values`; `label` is a documentation-only placeholder for a matched key (e.g. `<ID>`) | any key |
@@ -350,19 +349,19 @@ Types:
 Switch:
 - A node with `switch` validates a map against the case named by the
   value of its `by` key; each case is a complete node.
-- Every case must declare the `by` key as a scalar type with `markers:
-  false` — the case is chosen before anything is resolved.
+- Every case must declare the `by` key as a scalar type with `static:
+  true` — the case is chosen before anything is resolved.
 - No case for the value, or no `by` key → WARNING, node dropped.
 - The key is `by`, never `on`: Helm's `fromYaml` speaks YAML 1.1 and
   reads an `on:`/`yes:`/`no:` KEY as a boolean.
 
-Per-target values (`tokens`):
+Per-target values:
 - A per-target node's value may be a plain value or a token declaration
   (`default`, target keys, `match`), resolved for a target exactly like
   a token (see "Target escalation").
-- Per-target by default on scalar types and `list` — except a
-  `markers: false` scalar (static) and any node below a per-target
-  node. An explicit `tokens: false` opts out.
+- Per-target on every scalar type and `list` node — except a `static:
+  true` scalar and any node below a per-target node (there, markers
+  only).
 - Only scalar types/`list`: a declaration is always a dict, so a dict
   in a scalar/list field is unambiguously a declaration
   (`{default: [a], prod: [a, b]}`); in a map field it would not be.
@@ -381,8 +380,8 @@ Example:
 type: map
 values: {type: any}                       # the consumer chart's own keys
 properties:
-  target:     {type: string, markers: false, required: true, doc: "Render target."}
-  renderMode: {type: scalar, markers: false, enum: [validate, deploy], default: deploy}
+  target:     {type: string, static: true, required: true, doc: "Render target."}
+  renderMode: {type: scalar, static: true, enum: [validate, deploy], default: deploy}
   services:
     type: map
     keys: {pattern: "^[A-Z0-9_]+$"}
@@ -393,8 +392,8 @@ properties:
           greeter:
             type: map
             properties:
-              type:     {type: scalar, markers: false, required: true}
-              enabled:  {type: bool, markers: false, default: true}
+              type:     {type: scalar, static: true, required: true}
+              enabled:  {type: bool, static: true, default: true}
               greeting: {type: string, doc: "File content."}   # per-target
               ports:    {type: list, items: {type: int}}      # per-target list
 ```
@@ -409,8 +408,8 @@ however often the schema is checked:
 - unknown node key, an unknown or omitted `type`, a key on a type it
   doesn't apply to, a non-bool flag, a non-list `enum`, malformed
   `keys`/`switch`;
-- `tokens: true` on `map`/`any`, below a per-target node, or with
-  `markers: false`; `default` with `required: true`;
+- `static` on a type other than a scalar type; `default` with
+  `required: true`;
 - a switch case not declaring its `by` key as a static scalar.
 
 An invalid regex in `pattern`/`keys.pattern` aborts the render
@@ -482,7 +481,7 @@ list elements are indexed: `services["a.b"].ports[0]`.
 | switch, no case | WARNING | `'<path>.<by>' has unknown value '<v>' — ignored` |
 | required | ERROR | `'<path>' is required` |
 | type / enum / pattern | ERROR | `'<path>' must be of type 'int' — ignored` |
-| markers | ERROR | `'<path>' must not contain '@NAME@' markers — ignored` |
+| markers in a static value | ERROR | `'<path>' must not contain '@NAME@' markers — ignored` |
 | value pass | ERROR | `'<path>' for target '<t>' must be of type 'int' — got '<v>'` |
 
 In the value pass every violation except an unknown key is an ERROR.
@@ -572,8 +571,8 @@ Schema for editors and the viewer; the DSL maps keyword by keyword
   alphabetically after the positioned ones.
 - Per-target nodes are `anyOf` [type, `tokenDeclaration`, `markers`];
   a marker-accepting `int`/`number`/`bool`, or `string`/`scalar` with
-  `enum` or `pattern`, is `anyOf` [type, `markers`]; `markers: false` on a `string`/`scalar` adds a `not`
-  pattern.
+  `enum` or `pattern`, is `anyOf` [type, `markers`]; `static: true` on a
+  `string`/`scalar` adds a `not` pattern.
 - A switch case is a complete, closed schema under
   `definitions["<node path>[<by>=<case>]"]`, selected by `allOf`
   `if/then`; properties identical in every case (two or more) carry

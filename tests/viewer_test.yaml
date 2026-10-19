@@ -12,7 +12,7 @@ tests:
             type: map
             doc: "Closes with </script> if unescaped."
             properties:
-              target: {type: string, markers: false, doc: "Render target."}
+              target: {type: string, static: true, doc: "Render target."}
     asserts:
       - matchRegex:
           path: results[0].text
@@ -49,7 +49,7 @@ tests:
           schemaText: |
             type: map
             properties:
-              target: {type: string, markers: false}
+              target: {type: string, static: true}
     asserts:
       - notMatchRegex:
           path: results[0].outside

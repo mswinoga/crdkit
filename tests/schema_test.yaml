@@ -15,7 +15,7 @@ tests:
               name: {type: string, required: true, doc: "Name."}
               tags: {type: list, items: {type: scalar}}
               extra: {type: map, values: {type: any}, keys: {pattern: "^[a-z]+$"}}
-              host: {type: scalar, tokens: true}
+              host: {type: scalar}
     asserts:
       - equal:
           path: results[0].ok
@@ -34,9 +34,10 @@ tests:
               a: {type: thing}
               b: {type: map, enum: [a]}
               c: {type: date}
-              d: {type: map, tokens: true}
-              e: {type: list, tokens: true, items: {type: scalar, tokens: true}}
-              f: {type: scalar, tokens: true, markers: false}
+              d: {type: map, static: true}
+              e: {type: list, static: true, items: {type: scalar}}
+              f: {type: scalar, markers: false}
+              q: {type: scalar, tokens: true}
               g: {type: scalar, default: x, required: true}
               h: {type: scalar, requried: true}
               i: {type: scalar, enum: a}
@@ -57,9 +58,9 @@ tests:
             - "schema invalid: properties.a: unknown type 'thing'"
             - "schema invalid: properties.b: 'enum' does not apply to type 'map'"
             - "schema invalid: properties.c: unknown type 'date'"
-            - "schema invalid: properties.d: 'tokens' does not apply to type 'map'"
-            - "schema invalid: properties.e.items: 'tokens: true' below another 'tokens: true'"
-            - "schema invalid: properties.f: 'tokens: true' and 'markers: false' exclude each other"
+            - "schema invalid: properties.d: 'static' does not apply to type 'map'"
+            - "schema invalid: properties.e: 'static' does not apply to type 'list'"
+            - "schema invalid: properties.f: unknown schema key 'markers'"
             - "schema invalid: properties.g: 'default' and 'required: true' exclude each other"
             - "schema invalid: properties.h: unknown schema key 'requried'"
             - "schema invalid: properties.i: 'enum' must be a list"
@@ -70,6 +71,7 @@ tests:
             - "schema invalid: properties.m: unknown type ''"
             - "schema invalid: properties.n: 'items' does not apply to type 'int'"
             - "schema invalid: properties.o: 'keys.label' must be a string"
+            - "schema invalid: properties.q: unknown schema key 'tokens'"
 
   - it: a switch case must declare the switch key as a static scalar
     set:
@@ -84,7 +86,7 @@ tests:
                   good:
                     type: map
                     properties:
-                      type: {type: scalar, markers: false}
+                      type: {type: scalar, static: true}
                   bad:
                     type: map
                     properties:
@@ -95,8 +97,8 @@ tests:
       - equal:
           path: diag.errors
           value:
-            - "schema invalid: values: case 'bad' must declare 'type' as a scalar type with 'markers: false'"
-            - "schema invalid: values: case 'missing' must declare 'type' as a scalar type with 'markers: false'"
+            - "schema invalid: values: case 'bad' must declare 'type' as a scalar type with 'static: true'"
+            - "schema invalid: values: case 'missing' must declare 'type' as a scalar type with 'static: true'"
 
   - it: a schema that failed to parse is reported once, however often it is checked
     set:
@@ -197,10 +199,10 @@ tests:
             type: map
             properties:
               m: {type: map}
-              l: {type: list, tokens: false}
+              l: {type: list}
               s: {type: scalar}
               keep: {type: scalar}
-          values: {m: "x", l: {a: 1}, s: [1], keep: ok}
+          values: {m: "x", l: "x", s: [1], keep: ok}
     asserts:
       - equal:
           path: results[0].value
@@ -326,7 +328,7 @@ tests:
               name: {type: string}
               mode: {type: scalar, enum: [validate, deploy]}
               id: {type: scalar, pattern: "^[a-z]+$"}
-              type: {type: scalar, markers: false}
+              type: {type: scalar, static: true}
           values:
             enabled: "false"
             count: 1.5
@@ -367,16 +369,16 @@ tests:
           path: diag.errors
           count: 0
 
-  - it: "dotted and relative markers count as markers: rejected in a markers: false field, type check skipped elsewhere"
+  - it: "dotted and relative markers count as markers: rejected in a static field, type check skipped elsewhere"
     set:
       schemaOps:
         - op: validate
           schema:
             type: map
             properties:
-              type: {type: scalar, markers: false}
+              type: {type: scalar, static: true}
               port: {type: int}
-              host: {type: string, markers: false}
+              host: {type: string, static: true}
           values: {type: "@.kind@", port: "@SVC.port@", host: "me@example.com"}
     asserts:
       - equal:
@@ -387,16 +389,16 @@ tests:
           value:
             - "'type' must not contain '@NAME@' markers — ignored"
 
-  - it: 'a token declaration in a "tokens: true" field is kept as written; a plain value is checked as usual'
+  - it: 'a token declaration in a per-target field is kept as written; a plain value is checked as usual'
     set:
       schemaOps:
         - op: validate
           schema:
             type: map
             properties:
-              greeting: {type: string, tokens: true}
-              hosts: {type: list, tokens: true, items: {type: scalar}}
-              plain: {type: int, tokens: true}
+              greeting: {type: string}
+              hosts: {type: list, items: {type: scalar}}
+              plain: {type: int}
           values:
             greeting: {default: hi, prod: hello}
             hosts: {default: [a], prod: [a, b]}
@@ -441,7 +443,7 @@ tests:
               enabled: {type: bool, default: true}
               mode: {type: scalar, default: deploy}
               level: {type: int, default: 1}
-              greeting: {type: scalar, tokens: true, default: {default: hi, prod: hello}}
+              greeting: {type: scalar, default: {default: hi, prod: hello}}
           values: {mode: validate, enabled: "no"}
     asserts:
       - equal:
@@ -491,12 +493,12 @@ tests:
                   greeter:
                     type: map
                     properties:
-                      type: {type: scalar, markers: false, required: true}
+                      type: {type: scalar, static: true, required: true}
                       greeting: {type: scalar}
                   leader:
                     type: map
                     properties:
-                      type: {type: scalar, markers: false, required: true}
+                      type: {type: scalar, static: true, required: true}
                       greeter: {type: scalar}
           values:
             A: {type: greeter, greeting: hi, greeter: B}
@@ -528,8 +530,8 @@ tests:
           schema:
             type: map
             properties:
-              greeting: {type: string, tokens: true}
-              count: {type: int, tokens: true}
+              greeting: {type: string}
+              count: {type: int}
           values:
             greeting: {default: hi, prod: hello}
             count: {default: 1, prod: 2}
@@ -549,9 +551,9 @@ tests:
           schema:
             type: map
             properties:
-              count: {type: int, tokens: true}
-              mode: {type: scalar, enum: [a, b], tokens: true}
-              id: {type: scalar, pattern: "^[a-z]+$", tokens: true}
+              count: {type: int}
+              mode: {type: scalar, enum: [a, b]}
+              id: {type: scalar, pattern: "^[a-z]+$"}
           values:
             count: {default: 1, prod: many}
             mode: {default: a, prod: c}
@@ -574,11 +576,11 @@ tests:
           schema:
             type: map
             properties:
-              a: {type: int, tokens: true}
-              b: {type: int, tokens: true}
-              c: {type: bool, tokens: true}
-              d: {type: bool, tokens: true}
-              e: {type: number, tokens: true}
+              a: {type: int}
+              b: {type: int}
+              c: {type: bool}
+              d: {type: bool}
+              e: {type: number}
           values:
             a: {default: "5"}
             b: {default: "@BASE@0"}
@@ -621,8 +623,8 @@ tests:
           schema:
             type: map
             properties:
-              hosts: {type: list, tokens: true, items: {type: int}}
-              other: {type: list, tokens: true}
+              hosts: {type: list, items: {type: int}}
+              other: {type: list}
           values:
             hosts: {default: [1], prod: [1, b]}
             other: {prod: "x"}
@@ -641,7 +643,7 @@ tests:
           schema:
             type: map
             properties:
-              count: {type: int, tokens: true}
+              count: {type: int}
               typo: {type: int}
           values:
             count: {qa: 1}
@@ -667,8 +669,8 @@ tests:
                   greeter:
                     type: map
                     properties:
-                      type: {type: scalar, markers: false}
-                      greeting: {type: int, tokens: true}
+                      type: {type: scalar, static: true}
+                      greeting: {type: int}
           values:
             A: {type: greeter, greeting: {prod: hi}}
             B: {type: unknown, greeting: {prod: hi}}
@@ -683,13 +685,13 @@ tests:
       target: prod
       schemaOps:
         - op: validateValues
-          schema: {type: map, properties: {count: {type: int, tokens: true}}}
+          schema: {type: map, properties: {count: {type: int}}}
           values: {count: {prod: x}}
         - op: validateValues
-          schema: {type: map, properties: {count: {type: int, tokens: true}}}
+          schema: {type: map, properties: {count: {type: int}}}
           values: {count: {prod: x}}
         - op: value
-          node: {type: int, tokens: true}
+          node: {type: int}
           def: {prod: x}
           path: count
     asserts:
@@ -707,23 +709,23 @@ tests:
       tokens: {P: "123", R: "1.5", B: "true"}
       schemaOps:
         - op: value
-          node: {type: int, tokens: false}
+          node: {type: int, perTarget: false}
           def: "@P@"
           path: port
         - op: value
-          node: {type: number, tokens: false}
+          node: {type: number, perTarget: false}
           def: "@R@"
           path: ratio
         - op: value
-          node: {type: bool, tokens: false}
+          node: {type: bool, perTarget: false}
           def: "@B@"
           path: enabled
         - op: value
-          node: {type: string, tokens: false}
+          node: {type: string, perTarget: false}
           def: "@P@"
           path: name
         - op: value
-          node: {type: scalar, tokens: false}
+          node: {type: scalar, perTarget: false}
           def: "@P@"
           path: any
     asserts:
@@ -746,11 +748,11 @@ tests:
         prod-01: prod
       schemaOps:
         - op: value
-          node: {type: int, tokens: true}
+          node: {type: int}
           def: {default: "80", prod: "8080"}
           path: port
         - op: value
-          node: {type: int, tokens: true}
+          node: {type: int}
           def: {default: "80", prod: "8080"}
           path: port
           target: qa
@@ -767,15 +769,15 @@ tests:
       tokens: {P: "12x", E: "3"}
       schemaOps:
         - op: value
-          node: {type: int, tokens: false}
+          node: {type: int, perTarget: false}
           def: "@P@"
           path: port
         - op: value
-          node: {type: int, tokens: false}
+          node: {type: int, perTarget: false}
           def: "@LATER@"
           path: later
         - op: value
-          node: {type: int, enum: [1, 2], tokens: false}
+          node: {type: int, enum: [1, 2], perTarget: false}
           def: "@E@"
           path: level
     asserts:
@@ -797,11 +799,11 @@ tests:
       tokens: {P: "123"}
       schemaOps:
         - op: value
-          node: {type: int, tokens: false}
+          node: {type: int, perTarget: false}
           def: "@P@"
           path: port
         - op: value
-          node: {type: int, tokens: false}
+          node: {type: int, perTarget: false}
           def: "@P@"
           path: port
     asserts:
@@ -822,12 +824,12 @@ tests:
         qap1: qa
       schemaOps:
         - op: value
-          node: {type: int, tokens: true}
+          node: {type: int}
           def: {qa: 1, qap1: x}
           path: application.services.APP.count
           target: qap1
         - op: value
-          node: {type: int, tokens: true}
+          node: {type: int}
           def: {qa: 1, qap1: x}
           path: application.services.APP.count
         - op: value
@@ -867,8 +869,8 @@ tests:
                       greeter:
                         type: map
                         properties:
-                          type: {type: scalar, markers: false}
-                          greeting: {type: scalar, tokens: true}
+                          type: {type: scalar, static: true}
+                          greeting: {type: scalar}
                           ports: {type: list, items: {type: int}}
           values: &servicesValues
             services:
@@ -894,13 +896,13 @@ tests:
     asserts:
       - equal:
           path: results[0]
-          value: {found: true, value: {type: scalar, tokens: true}}
+          value: {found: true, value: {type: scalar, perTarget: true}}
       - equal:
           path: results[1]
-          value: {found: true, value: {type: int, tokens: false}}
+          value: {found: true, value: {type: int, perTarget: false}}
       - equal:
           path: results[2].value.properties.type
-          value: {type: scalar, markers: false}
+          value: {type: scalar, static: true}
       - equal:
           path: results[3].found
           value: false
@@ -920,8 +922,8 @@ tests:
             type: map
             values: {type: any, doc: "The consumer chart's own keys."}
             properties:
-              target: {type: string, markers: false, required: true, doc: "Render target."}
-              renderMode: {type: string, markers: false, enum: [validate, deploy], default: deploy, doc: "Mode | see README."}
+              target: {type: string, static: true, required: true, doc: "Render target."}
+              renderMode: {type: string, static: true, enum: [validate, deploy], default: deploy, doc: "Mode | see README."}
               services:
                 type: map
                 doc: "Services by ID."
@@ -934,14 +936,14 @@ tests:
                         type: map
                         doc: "Writes a greeting."
                         properties:
-                          type: {type: string, markers: false, required: true}
-                          greeting: {type: string, tokens: true, doc: "File\ncontent."}
+                          type: {type: string, static: true, required: true}
+                          greeting: {type: string, doc: "File\ncontent."}
                           ports: {type: list, items: {type: int}}
                       environment:
                         type: map
                         properties:
-                          type: {type: string, markers: false, required: true}
-                          environment: {type: map, keys: {pattern: "^[A-Z]+$"}, values: {type: scalar, tokens: true}}
+                          type: {type: string, static: true, required: true}
+                          environment: {type: map, keys: {pattern: "^[A-Z]+$"}, values: {type: scalar}}
     asserts:
       - matchSnapshot:
           path: results[0].text
@@ -965,8 +967,8 @@ tests:
           schema:
             type: map
             properties:
-              a: {type: string, markers: false}
-              b: {type: int, markers: false, default: 3}
+              a: {type: string, static: true}
+              b: {type: int, static: true, default: 3}
     asserts:
       - matchRegex:
           path: results[0].text
@@ -1005,12 +1007,12 @@ tests:
                         type: map
                         doc: "Writes a greeting."
                         properties:
-                          type: {type: string, markers: false, required: true}
+                          type: {type: string, static: true, required: true}
                           greeting: {type: string}
                       environment:
                         type: map
                         properties:
-                          type: {type: string, markers: false, required: true}
+                          type: {type: string, static: true, required: true}
     asserts:
       - equal:
           path: diag.errors
@@ -1042,17 +1044,17 @@ tests:
                       greeter:
                         type: map
                         properties:
-                          type: {type: string, markers: false, required: true}
+                          type: {type: string, static: true, required: true}
                           greeting: {type: string}
-                          mode: {type: string, markers: false, enum: [fast, slow]}
+                          mode: {type: string, static: true, enum: [fast, slow]}
                           port: {type: int, default: 80}
-                          name: {type: string, markers: false, pattern: "^[a-z]+$"}
-                          hosts: {type: list, tokens: false, items: {type: scalar, markers: false}}
-                          flag: {type: bool, markers: false}
+                          name: {type: string, static: true, pattern: "^[a-z]+$"}
+                          hosts: {type: list, items: {type: scalar, static: true}}
+                          flag: {type: bool, static: true}
     asserts:
       - matchRegex:
           path: results[0].text
-          pattern: "\\*\\*Example\\*\\* \\(generated\\)\\n\\n```yaml\\nservices:\\n  <ID>:\\n    flag: true\\n    greeting:\\n      default: text\\n      prod: text\\n    hosts:\\n    - text\\n    mode: fast\\n    port:\\n      default: 80\\n      prod: 80\\n    type: greeter\\n```"
+          pattern: "\\*\\*Example\\*\\* \\(generated\\)\\n\\n```yaml\\nservices:\\n  <ID>:\\n    flag: true\\n    greeting:\\n      default: text\\n      prod: text\\n    hosts:\\n      default:\\n      - text\\n      prod:\\n      - text\\n    mode: fast\\n    port:\\n      default: 80\\n      prod: 80\\n    type: greeter\\n```"
 
   - it: 'docs: a schema with only a switch at the root renders the case sections'
     set:
@@ -1065,7 +1067,7 @@ tests:
                 a:
                   type: map
                   properties:
-                    flavor: {type: scalar, markers: false}
+                    flavor: {type: scalar, static: true}
     asserts:
       - equal:
           path: results[0].text
@@ -1129,7 +1131,7 @@ tests:
             - {text: 'services.APP.hosts[0].1'}
             - {text: ""}
 
-  - it: 'tokens omitted = per-target on scalars and lists, static on markers:false scalars, never below a per-target node'
+  - it: 'omitted static = per-target on scalars and lists; static scalars are not'
     set:
       target: prod
       schemaOps:
@@ -1139,8 +1141,8 @@ tests:
             properties:
               greeting: {type: string}
               hosts: {type: list, items: {type: int}}
-              type: {type: scalar, markers: false}
-              pinned: {type: scalar, tokens: false}
+              type: {type: scalar, static: true}
+              pinned: {type: scalar, static: true}
           values: &defaultsValues
             greeting: {default: hi, prod: hello}
             hosts: {default: [1], prod: [2, x]}
@@ -1165,20 +1167,21 @@ tests:
           value:
             - "'hosts[1]' for target 'prod' must be of type 'int' — got 'x'"
 
-  - it: 'an explicit tokens:true below an implicitly per-target list is a nested-tokens ERROR'
+  - it: 'a static scalar below a per-target list is a valid schema'
     set:
       schemaOps:
         - op: check
           schema:
             type: map
             properties:
-              hosts: {type: list, items: {type: scalar, tokens: true}}
-              static: {type: list, tokens: false, items: {type: scalar, tokens: true}}
+              hosts: {type: list, items: {type: scalar, static: true}}
     asserts:
       - equal:
+          path: results[0].ok
+          value: "true"
+      - lengthEqual:
           path: diag.errors
-          value:
-            - "schema invalid: properties.hosts.items: 'tokens: true' below another 'tokens: true'"
+          count: 0
 
   - it: 'type omitted is a self-check ERROR except on a switch node; a closed map warns'
     set:
@@ -1368,18 +1371,18 @@ tests:
           path: results[0].text
           pattern: '^\{\n  "\$schema": '
 
-  - it: 'jsonSchema maps each scalar type, enum, pattern and default (markers: false)'
+  - it: 'jsonSchema maps each scalar type, enum, pattern and default (static: true)'
     set:
       schemaOps:
         - op: jsonSchema
           schemaText: |
             type: map
             properties:
-              s: {type: string, markers: false, pattern: "^a", enum: [ab, ac], default: ab}
-              i: {type: int, markers: false}
-              num: {type: number, markers: false}
-              flag: {type: bool, markers: false}
-              c: {type: scalar, markers: false}
+              s: {type: string, static: true, pattern: "^a", enum: [ab, ac], default: ab}
+              i: {type: int, static: true}
+              num: {type: number, static: true}
+              flag: {type: bool, static: true}
+              c: {type: scalar, static: true}
     asserts:
       - equal:
           path: results[0].json.properties.s
@@ -1408,20 +1411,25 @@ tests:
             x-crdkit-type: scalar
             x-crdkit-perTarget: "no"
 
-  - it: 'jsonSchema: markers allowed on an int/number/bool wrap it in anyOf with the markers definition'
+  - it: 'jsonSchema: markers allowed below a per-target node on an int/number/bool wrap it in anyOf with the markers definition'
     set:
       schemaOps:
         - op: jsonSchema
           schemaText: |
             type: map
             properties:
-              i: {type: int, tokens: false}
-              num: {type: number, tokens: false}
-              flag: {type: bool, tokens: false}
-              s: {type: string, tokens: false}
+              l:
+                type: list
+                items:
+                  type: map
+                  properties:
+                    i: {type: int}
+                    num: {type: number}
+                    flag: {type: bool}
+                    s: {type: string}
     asserts:
       - equal:
-          path: results[0].json.properties.i
+          path: results[0].json.properties.l.anyOf[0].items.properties.i
           value:
             anyOf:
               - {type: integer}
@@ -1429,13 +1437,13 @@ tests:
             x-crdkit-type: int
             x-crdkit-perTarget: markers
       - equal:
-          path: results[0].json.properties.num.anyOf[0]
+          path: results[0].json.properties.l.anyOf[0].items.properties.num.anyOf[0]
           value: {type: number}
       - equal:
-          path: results[0].json.properties.flag.anyOf[0]
+          path: results[0].json.properties.l.anyOf[0].items.properties.flag.anyOf[0]
           value: {type: boolean}
       - equal:
-          path: results[0].json.properties.s
+          path: results[0].json.properties.l.anyOf[0].items.properties.s
           value: {type: string, x-crdkit-type: string, x-crdkit-perTarget: markers}
 
   - it: 'jsonSchema: a marker-accepting string or scalar with enum or pattern is wrapped in anyOf, a plain one is not'
@@ -1445,14 +1453,19 @@ tests:
           schemaText: |
             type: map
             properties:
-              se: {type: string, tokens: false, enum: [a, b]}
-              sp: {type: string, tokens: false, pattern: "^a"}
-              ce: {type: scalar, tokens: false, enum: [a, 1]}
-              plain: {type: string, tokens: false}
-              locked: {type: string, markers: false, pattern: "^a"}
+              l:
+                type: list
+                items:
+                  type: map
+                  properties:
+                    se: {type: string, enum: [a, b]}
+                    sp: {type: string, pattern: "^a"}
+                    ce: {type: scalar, enum: [a, 1]}
+                    plain: {type: string}
+              locked: {type: string, static: true, pattern: "^a"}
     asserts:
       - equal:
-          path: results[0].json.properties.se
+          path: results[0].json.properties.l.anyOf[0].items.properties.se
           value:
             anyOf:
               - {type: string, enum: [a, b]}
@@ -1460,17 +1473,17 @@ tests:
             x-crdkit-type: string
             x-crdkit-perTarget: markers
       - equal:
-          path: results[0].json.properties.sp.anyOf
+          path: results[0].json.properties.l.anyOf[0].items.properties.sp.anyOf
           value:
             - {type: string, pattern: "^a"}
             - {"$ref": "#/definitions/markers"}
       - equal:
-          path: results[0].json.properties.ce.anyOf
+          path: results[0].json.properties.l.anyOf[0].items.properties.ce.anyOf
           value:
             - {type: [string, number, boolean], enum: [a, 1]}
             - {"$ref": "#/definitions/markers"}
       - equal:
-          path: results[0].json.properties.plain
+          path: results[0].json.properties.l.anyOf[0].items.properties.plain
           value: {type: string, x-crdkit-type: string, x-crdkit-perTarget: markers}
       - equal:
           path: results[0].json.properties.locked
@@ -1488,7 +1501,7 @@ tests:
           schemaText: |
             type: map
             properties:
-              host: {type: string, tokens: true}
+              host: {type: string}
               ports: {type: list, items: {type: int}}
     asserts:
       - equal:
@@ -1517,18 +1530,18 @@ tests:
           path: results[0].json.properties.ports["x-crdkit-perTarget"]
           value: "yes"
 
-  - it: 'jsonSchema: a list without tokens is a plain array, items default to any'
+  - it: 'jsonSchema: a list below a per-target list is a plain array, items default to any'
     set:
       schemaOps:
         - op: jsonSchema
           schemaText: |
             type: map
             properties:
-              plain: {type: list, tokens: false}
+              plain: {type: list, items: {type: list}}
               free: {type: any}
     asserts:
       - equal:
-          path: results[0].json.properties.plain
+          path: results[0].json.properties.plain.anyOf[0].items
           value:
             type: array
             items: {x-crdkit-type: any}
@@ -1548,8 +1561,8 @@ tests:
               closed:
                 type: map
                 properties:
-                  zeta: {type: string, markers: false, required: true}
-                  alpha: {type: string, markers: false}
+                  zeta: {type: string, static: true, required: true}
+                  alpha: {type: string, static: true}
               open:
                 type: map
                 keys: {pattern: "^[A-Z]+$", label: "<ID>"}
@@ -1607,8 +1620,8 @@ tests:
           schemaText: |
             type: map
             properties:
-              a: {type: string, markers: false, doc: "Use `x`, see [the docs](http://e.x/d)."}
-              b: {type: string, markers: false}
+              a: {type: string, static: true, doc: "Use `x`, see [the docs](http://e.x/d)."}
+              b: {type: string, static: true}
     asserts:
       - equal:
           path: results[0].json.properties.a.description
@@ -1634,13 +1647,13 @@ tests:
                   zeta:
                     type: map
                     properties:
-                      type: {type: string, markers: false, required: true}
-                      z: {type: string, markers: false}
+                      type: {type: string, static: true, required: true}
+                      z: {type: string, static: true}
                   alpha:
                     type: map
                     properties:
-                      type: {type: string, markers: false, required: true}
-                      a: {type: int, markers: false}
+                      type: {type: string, static: true, required: true}
+                      a: {type: int, static: true}
     asserts:
       - equal:
           path: results[0].json.additionalProperties.type
@@ -1694,16 +1707,16 @@ tests:
                 one:
                   type: map
                   properties:
-                    kind: {type: string, markers: false, required: true}
-                    same: {type: int, markers: false}
-                    differs: {type: int, markers: false}
-                    only: {type: int, markers: false}
+                    kind: {type: string, static: true, required: true}
+                    same: {type: int, static: true}
+                    differs: {type: int, static: true}
+                    only: {type: int, static: true}
                 two:
                   type: map
                   properties:
-                    kind: {type: string, markers: false, required: true}
-                    same: {type: int, markers: false}
-                    differs: {type: string, markers: false}
+                    kind: {type: string, static: true, required: true}
+                    same: {type: int, static: true}
+                    differs: {type: string, static: true}
     asserts:
       - equal:
           path: results[0].json.definitions["[kind=one]"].properties.same["x-crdkit-shared"]
@@ -1729,7 +1742,7 @@ tests:
                 only:
                   type: map
                   properties:
-                    kind: {type: string, markers: false, required: true}
+                    kind: {type: string, static: true, required: true}
     asserts:
       - notExists:
           path: results[0].json.definitions["[kind=only]"].properties.kind["x-crdkit-shared"]
@@ -1741,7 +1754,7 @@ tests:
           schemaText: |
             type: map
             properties:
-              target: {type: string, markers: false}
+              target: {type: string, static: true}
               services:
                 type: map
                 values:
@@ -1751,14 +1764,14 @@ tests:
                       a:
                         type: map
                         properties:
-                          type: {type: string, markers: false, required: true}
-                          size: {type: int, markers: false}
+                          type: {type: string, static: true, required: true}
+                          size: {type: int, static: true}
                       b:
                         type: map
                         properties:
-                          type: {type: string, markers: false, required: true}
-                          size: {type: int, markers: false}
-              untouched: {type: string, markers: false}
+                          type: {type: string, static: true, required: true}
+                          size: {type: int, static: true}
+              untouched: {type: string, static: true}
           example:
             target: prod
             services:
@@ -1802,8 +1815,8 @@ tests:
           schemaText: |
             type: map
             properties:
-              named: {type: string, markers: false}
-            values: {type: string, markers: false}
+              named: {type: string, static: true}
+            values: {type: string, static: true}
           example:
             named: n
             other: o
@@ -1842,7 +1855,7 @@ tests:
           schemaText: |
             type: map
             properties:
-              target: {type: string, markers: false, doc: "Render target."}
+              target: {type: string, static: true, doc: "Render target."}
               services:
                 type: map
                 values:
@@ -1852,7 +1865,7 @@ tests:
                       a:
                         type: map
                         properties:
-                          type: {type: string, markers: false, required: true}
+                          type: {type: string, static: true, required: true}
           sections:
             "services.*[type=a]":
               - title: Variables
@@ -1893,7 +1906,7 @@ tests:
           schemaText: |
             type: map
             properties:
-              a: {type: string, markers: false}
+              a: {type: string, static: true}
           sections:
             a:
               - {title: ""}
@@ -1944,8 +1957,8 @@ tests:
             type: map
             values: {type: any}                       # the consumer chart's own keys
             properties:
-              target:     {type: string, markers: false, required: true, doc: "Render target."}
-              renderMode: {type: scalar, markers: false, enum: [validate, deploy], default: deploy}
+              target:     {type: string, static: true, required: true, doc: "Render target."}
+              renderMode: {type: scalar, static: true, enum: [validate, deploy], default: deploy}
               services:
                 type: map
                 keys: {pattern: "^[A-Z0-9_]+$", label: "<ID>"}
@@ -1956,15 +1969,15 @@ tests:
                       greeter:
                         type: map
                         properties:
-                          type:     {type: scalar, markers: false, required: true}
-                          enabled:  {type: bool, markers: false, default: true}
+                          type:     {type: scalar, static: true, required: true}
+                          enabled:  {type: bool, static: true, default: true}
                           greeting: {type: string, doc: "File content."}
                           ports:    {type: list, items: {type: int}}
                       environment:
                         type: map
                         properties:
-                          type:     {type: scalar, markers: false, required: true}
-                          enabled:  {type: bool, markers: false, default: true}
+                          type:     {type: scalar, static: true, required: true}
+                          enabled:  {type: bool, static: true, default: true}
                           environment: {type: map, keys: {pattern: "^[A-Z]+$"}, values: {type: scalar}}
           example:
             target: prod

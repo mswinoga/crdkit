@@ -49,7 +49,7 @@ scalar
 {{- end -}}
 
 {{/*
-crdkit.schema.tokens.internal (internal)
+crdkit.schema.perTarget.internal (internal)
 
 Whether a node is per-target (its value may be a token declaration).
 
@@ -59,20 +59,19 @@ Interface:
 - Returns: the plain string `true`, or an EMPTY string.
 
 Implementation notes:
-- Only scalar-type and list nodes, never below a per-target ancestor.
-- An explicit `tokens:` wins; omitted = true, except on a
-  `markers: false` scalar (static by declaration).
+- Only scalar-type and list nodes, never below a per-target ancestor,
+  never `static`.
+- A node carrying `perTarget:` (set by crdkit.schema.node, which knows
+  the ancestors) is decided by it alone.
 */}}
-{{- define "crdkit.schema.tokens.internal" -}}
+{{- define "crdkit.schema.perTarget.internal" -}}
 {{- $node := .node -}}
-{{- if and (has (include "crdkit.schema.shape.internal" (dict "node" $node)) (list "scalar" "list")) (not .inTokens) -}}
-  {{- if hasKey $node "tokens" -}}
-    {{- if eq (toString $node.tokens) "true" -}}
-true
-    {{- end -}}
-  {{- else if ne (toString $node.markers) "false" -}}
+{{- if hasKey $node "perTarget" -}}
+  {{- if eq (toString $node.perTarget) "true" -}}
 true
   {{- end -}}
+{{- else if and (has (include "crdkit.schema.shape.internal" (dict "node" $node)) (list "scalar" "list")) (not .inTokens) (ne (toString $node.static) "true") -}}
+true
 {{- end -}}
 {{- end -}}
 
@@ -83,7 +82,7 @@ Recursive self-check of one schema node; collects every problem.
 
 Interface:
 - Params (dict): { "node": <any>, "path": <schema path string>,
-  "inTokens": <bool, an ancestor has tokens: true>, "problems": <dict
+  "inTokens": <bool, an ancestor is per-target>, "problems": <dict
   with a "list" key, appended to in place> }
 - Returns: nothing.
 */}}
@@ -97,7 +96,7 @@ Interface:
 {{- if not (kindIs "map" $node) -}}
   {{- $found = append $found "node must be a map" -}}
 {{- else -}}
-  {{- $allowed := list "doc" "default" "required" "type" "enum" "pattern" "markers" "tokens" "properties" "values" "keys" "items" "switch" -}}
+  {{- $allowed := list "doc" "default" "required" "type" "enum" "pattern" "static" "properties" "values" "keys" "items" "switch" -}}
   {{- range $key, $_ := $node -}}
     {{- if not (has $key $allowed) -}}
       {{- $found = append $found (printf "unknown schema key '%s'" $key) -}}
@@ -120,15 +119,15 @@ Interface:
         {{- if and (kindIs "map" $caseNode) (kindIs "map" $caseNode.properties) -}}
           {{- $onNode = index $caseNode.properties $switch.by -}}
         {{- end -}}
-        {{- if not (and (eq (include "crdkit.schema.shape.internal" (dict "node" $onNode)) "scalar") (eq (toString $onNode.markers) "false") (ne (toString $onNode.tokens) "true")) -}}
-          {{- $found = append $found (printf "case '%s' must declare '%s' as a scalar type with 'markers: false'" $caseValue $switch.by) -}}
+        {{- if not (and (eq (include "crdkit.schema.shape.internal" (dict "node" $onNode)) "scalar") (eq (toString $onNode.static) "true")) -}}
+          {{- $found = append $found (printf "case '%s' must declare '%s' as a scalar type with 'static: true'" $caseValue $switch.by) -}}
         {{- end -}}
       {{- end -}}
     {{- end -}}
   {{- else if not $shape -}}
     {{- $found = append $found (printf "unknown type '%s'" $type) -}}
   {{- end -}}
-  {{- $appliesTo := dict "enum" (list "scalar") "pattern" (list "scalar") "markers" (list "scalar") "tokens" (list "scalar" "list") "properties" (list "map") "values" (list "map") "keys" (list "map") "items" (list "list") -}}
+  {{- $appliesTo := dict "enum" (list "scalar") "pattern" (list "scalar") "static" (list "scalar") "properties" (list "map") "values" (list "map") "keys" (list "map") "items" (list "list") -}}
   {{- if $shape -}}
     {{- range $key, $shapes := $appliesTo -}}
       {{- if and (hasKey $node $key) (not (has $shape $shapes)) -}}
@@ -142,17 +141,9 @@ Interface:
   {{- if and (hasKey $node "pattern") (not (kindIs "string" $node.pattern)) -}}
     {{- $found = append $found "'pattern' must be a string" -}}
   {{- end -}}
-  {{- range $flag := list "required" "markers" "tokens" -}}
+  {{- range $flag := list "required" "static" -}}
     {{- if and (hasKey $node $flag) (not (kindIs "bool" (index $node $flag))) -}}
       {{- $found = append $found (printf "'%s' must be a bool" $flag) -}}
-    {{- end -}}
-  {{- end -}}
-  {{- if eq (toString $node.tokens) "true" -}}
-    {{- if $inTokens -}}
-      {{- $found = append $found "'tokens: true' below another 'tokens: true'" -}}
-    {{- end -}}
-    {{- if eq (toString $node.markers) "false" -}}
-      {{- $found = append $found "'tokens: true' and 'markers: false' exclude each other" -}}
     {{- end -}}
   {{- end -}}
   {{- if and (hasKey $node "default") (eq (toString $node.required) "true") -}}
@@ -163,7 +154,7 @@ Interface:
   {{- else if and (hasKey $node "keys") (hasKey $node.keys "label") (not (kindIs "string" $node.keys.label)) -}}
     {{- $found = append $found "'keys.label' must be a string" -}}
   {{- end -}}
-  {{- $childInTokens := or $inTokens (ne (include "crdkit.schema.tokens.internal" (dict "node" $node "inTokens" $inTokens)) "") -}}
+  {{- $childInTokens := or $inTokens (ne (include "crdkit.schema.perTarget.internal" (dict "node" $node "inTokens" $inTokens)) "") -}}
   {{- if hasKey $node "properties" -}}
     {{- if not (kindIs "map" $node.properties) -}}
       {{- $found = append $found "'properties' must be a map" -}}
@@ -281,7 +272,7 @@ Implementation notes:
 {{- $_ := set $out "value" $value -}}
 {{- $shape := include "crdkit.schema.shape.internal" (dict "node" $node) -}}
 {{- $inTokens := .inTokens -}}
-{{- $tokens := include "crdkit.schema.tokens.internal" (dict "node" $node "inTokens" $inTokens) -}}
+{{- $tokens := include "crdkit.schema.perTarget.internal" (dict "node" $node "inTokens" $inTokens) -}}
 {{- $childInTokens := or $inTokens (ne $tokens "") -}}
 {{- $isDeclaration := and (not $resolved) $tokens (kindIs "map" $value) -}}
 {{- if hasKey $node "switch" -}}
@@ -307,7 +298,7 @@ Implementation notes:
     {{- $_ := set $out "keep" false -}}
   {{- else -}}
     {{- $hasMarkers := and (not $resolved) (kindIs "string" $value) (regexMatch (include "crdkit.markerPattern.internal" (dict)) $value) -}}
-    {{- if and $hasMarkers (eq (toString $node.markers) "false") -}}
+    {{- if and $hasMarkers (eq (toString $node.static) "true") -}}
       {{- include "crdkit.diag.error" (list $diag (printf "'%s' must not contain '@NAME@' markers — ignored" $path)) -}}
       {{- $_ := set $out "keep" false -}}
     {{- else if not $hasMarkers -}}
@@ -467,7 +458,7 @@ Interface:
 
 Implementation notes:
 - Per-target values: the value of every per-target node
-  (crdkit.schema.tokens.internal), and every string holding "@NAME@"
+  (crdkit.schema.perTarget.internal), and every string holding "@NAME@"
   markers.
 - Follows only what the structural pass would keep: an unmatched switch,
   a shape mismatch or an unknown key is skipped silently (already
@@ -479,7 +470,7 @@ Implementation notes:
 {{- $path := .path -}}
 {{- $shape := include "crdkit.schema.shape.internal" (dict "node" $node) -}}
 {{- $inTokens := .inTokens -}}
-{{- $tokens := include "crdkit.schema.tokens.internal" (dict "node" $node "inTokens" $inTokens) -}}
+{{- $tokens := include "crdkit.schema.perTarget.internal" (dict "node" $node "inTokens" $inTokens) -}}
 {{- $childInTokens := or $inTokens (ne $tokens "") -}}
 {{- $common := dict "ctx" .ctx "target" .target "seen" .seen -}}
 {{- if kindIs "invalid" $value -}}
@@ -1259,7 +1250,7 @@ Implementation notes:
 {{- $shape := include "crdkit.schema.shape.internal" (dict "node" $node) -}}
 {{- $isSwitch := hasKey $node "switch" -}}
 {{- $type := $node.type | default "map" | toString -}}
-{{- $tokens := include "crdkit.schema.tokens.internal" (dict "node" $node "inTokens" $inTokens) -}}
+{{- $tokens := include "crdkit.schema.perTarget.internal" (dict "node" $node "inTokens" $inTokens) -}}
 {{- $childInTokens := or $inTokens (ne $tokens "") -}}
 {{- $meta := dict "x-crdkit-type" $type -}}
 {{- $core := dict -}}
@@ -1392,16 +1383,16 @@ Implementation notes:
       {{- $_ := set $core $key (index $node $key) -}}
     {{- end -}}
   {{- end -}}
-  {{- if and (eq (toString $node.markers) "false") (has $type (list "string" "scalar")) -}}
+  {{- if and (eq (toString $node.static) "true") (has $type (list "string" "scalar")) -}}
     {{- $_ := set $core "not" (dict "pattern" (include "crdkit.markerPattern.internal" (dict))) -}}
   {{- end -}}
-  {{- $_ := set $meta "x-crdkit-perTarget" (ternary "yes" (ternary "no" "markers" (eq (toString $node.markers) "false")) (ne $tokens "")) -}}
+  {{- $_ := set $meta "x-crdkit-perTarget" (ternary "yes" (ternary "no" "markers" (eq (toString $node.static) "true")) (ne $tokens "")) -}}
 {{- end -}}
 {{- $result := $meta -}}
 {{- $wrapped := list -}}
 {{- if and $tokens (has $shape (list "scalar" "list")) -}}
   {{- $wrapped = list $core (dict "$ref" "#/definitions/tokenDeclaration") (dict "$ref" "#/definitions/markers") -}}
-{{- else if and (eq $shape "scalar") (ne (toString $node.markers) "false") (or (has $type (list "int" "number" "bool")) (hasKey $node "enum") (hasKey $node "pattern")) -}}
+{{- else if and (eq $shape "scalar") (ne (toString $node.static) "true") (or (has $type (list "int" "number" "bool")) (hasKey $node "enum") (hasKey $node "pattern")) -}}
   {{- $wrapped = list $core (dict "$ref" "#/definitions/markers") -}}
 {{- end -}}
 {{- if $wrapped -}}

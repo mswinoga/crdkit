@@ -15,12 +15,13 @@ Schema node (a dict):
 - default: inserted when the key is absent (map properties only)
 - required: bool — the key must be present
 - required omitted = false; doc and default are optional
-- scalar types: enum (list), pattern (regex, unanchored), markers
-  (false → "@NAME@" markers rejected; omitted = true)
-- scalar types and list: tokens (true → the value may be a token
-  declaration, resolved per target). Omitted = true, except on a
-  "markers: false" scalar and below a node that is per-target (see
-  crdkit.schema.tokens.internal)
+- scalar types: enum (list), pattern (regex, unanchored), static
+  (true → the value is used as written: "@NAME@" markers rejected, never
+  per-target; omitted = false)
+- scalar types and list: every non-static node may hold markers and be
+  per-target (a token declaration, resolved per target), except below a
+  per-target node, where only markers are allowed (see
+  crdkit.schema.perTarget.internal)
 - map: properties ({key: node}), values (node for every other key;
   omitted = every other key is unknown), keys ({pattern, label?} for keys
   matched by "values"; label = documentation-only placeholder for a
@@ -115,10 +116,9 @@ Implementation notes:
 - A schema that failed to parse (Helm's `fromYaml` error dict, a single
   `Error` key) is reported as such.
 - Rules: known node keys only; a known type (or a switch); each key on a
-  type it applies to; `tokens: true` only on a scalar type or `list`,
-  never below another one, never with `markers: false`; never `default`
+  type it applies to; `static` only on a scalar type; never `default`
   together with `required: true`; every switch case declares the switch
-  key as a scalar type with `markers: false`.
+  key as a scalar type with `static: true`.
 */}}
 {{- define "crdkit.schema.check" -}}
 {{- $diag := .diag -}}
@@ -238,7 +238,7 @@ Implementation notes:
 {{- $ctx := .ctx -}}
 {{- $node := .node | default dict -}}
 {{- $out := dict "value" .def -}}
-{{- $tokens := include "crdkit.schema.tokens.internal" (dict "node" $node "inTokens" false) -}}
+{{- $tokens := include "crdkit.schema.perTarget.internal" (dict "node" $node "inTokens" false) -}}
 {{- if or $tokens (and (kindIs "string" .def) (regexMatch (include "crdkit.markerPattern.internal" (dict)) .def)) -}}
   {{- include "crdkit.schema.resolveAndCheck.internal" (dict "ctx" $ctx "node" $node "def" .def "tokens" (ne $tokens "") "path" .path "target" (.target | default $ctx.target) "seen" (ternary .seen (dict) (kindIs "map" .seen)) "out" $out) -}}
 {{- end -}}
@@ -257,8 +257,8 @@ Interface:
 - Returns YAML: { "value": <node> } when found, `{}` otherwise.
 
 Implementation notes:
-- A returned scalar-type or list node carries an explicit `tokens:` — its
-  per-target state depends on its ancestors.
+- A returned scalar-type or list node carries an explicit `perTarget:`
+  bool — its per-target state depends on its ancestors.
 - A switch is followed by the value of its "by" key at that location; a
   final switch node is returned as its selected case.
 */}}
@@ -283,7 +283,7 @@ Implementation notes:
     {{- end -}}
   {{- end -}}
   {{- if and $found (ne (toString $key) "") -}}
-    {{- $inTokens = or $inTokens (ne (include "crdkit.schema.tokens.internal" (dict "node" $node "inTokens" $inTokens)) "") -}}
+    {{- $inTokens = or $inTokens (ne (include "crdkit.schema.perTarget.internal" (dict "node" $node "inTokens" $inTokens)) "") -}}
     {{- $shape := include "crdkit.schema.shape.internal" (dict "node" $node) -}}
     {{- if eq $shape "map" -}}
       {{- $properties := $node.properties | default dict -}}
@@ -314,7 +314,7 @@ Implementation notes:
 {{- end -}}
 {{- if $found -}}
   {{- if has (include "crdkit.schema.shape.internal" (dict "node" $node)) (list "scalar" "list") -}}
-    {{- $node = merge (dict "tokens" (ne (include "crdkit.schema.tokens.internal" (dict "node" $node "inTokens" $inTokens)) "")) (omit $node "tokens") -}}
+    {{- $node = merge (dict "perTarget" (ne (include "crdkit.schema.perTarget.internal" (dict "node" $node "inTokens" $inTokens)) "")) (omit $node "perTarget") -}}
   {{- end -}}
 value: {{ $node | toYaml | nindent 2 }}
 {{- end -}}
