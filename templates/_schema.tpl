@@ -1583,8 +1583,12 @@ Implementation notes:
 - Structural keywords (`type`, `enum`, `pattern`, `not`, `items`,
   `properties` …) and annotation keywords (`description`, `default`,
   `examples`, `x-crdkit-*`) are collected apart. A per-target scalar or
-  list, and a marker-accepting int/number/bool, wrap the structural part
-  in `anyOf`; the annotations stay on the outer node.
+  list, and a marker-accepting scalar that a marker could violate (an
+  int/number/bool, or a string/scalar with `enum` or `pattern`), wrap
+  the structural part in `anyOf` with the markers definition; the
+  render substitutes before it checks, the editor cannot. A marker-
+  accepting string/scalar without `enum`/`pattern` stays unwrapped (a
+  marker is a valid string). The annotations stay on the outer node.
 - Each switch case is stored in acc.definitions under its node path.
 */}}
 {{- define "crdkit.schema.jsonNode.internal" -}}
@@ -1743,7 +1747,7 @@ Implementation notes:
 {{- $wrapped := list -}}
 {{- if and $tokens (has $shape (list "scalar" "list")) -}}
   {{- $wrapped = list $core (dict "$ref" "#/definitions/tokenDeclaration") (dict "$ref" "#/definitions/markers") -}}
-{{- else if and (eq $shape "scalar") (ne (toString $node.markers) "false") (has $type (list "int" "number" "bool")) -}}
+{{- else if and (eq $shape "scalar") (ne (toString $node.markers) "false") (or (has $type (list "int" "number" "bool")) (hasKey $node "enum") (hasKey $node "pattern")) -}}
   {{- $wrapped = list $core (dict "$ref" "#/definitions/markers") -}}
 {{- end -}}
 {{- if $wrapped -}}

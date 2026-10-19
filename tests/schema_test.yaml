@@ -1304,6 +1304,49 @@ tests:
           path: results[0].json.properties.s
           value: {type: string, x-crdkit-type: string, x-crdkit-perTarget: markers}
 
+  - it: 'jsonSchema: a marker-accepting string or scalar with enum or pattern is wrapped in anyOf, a plain one is not'
+    set:
+      schemaOps:
+        - op: jsonSchema
+          schemaText: |
+            type: map
+            properties:
+              se: {type: string, tokens: false, enum: [a, b]}
+              sp: {type: string, tokens: false, pattern: "^a"}
+              ce: {type: scalar, tokens: false, enum: [a, 1]}
+              plain: {type: string, tokens: false}
+              locked: {type: string, markers: false, pattern: "^a"}
+    asserts:
+      - equal:
+          path: results[0].json.properties.se
+          value:
+            anyOf:
+              - {type: string, enum: [a, b]}
+              - {"$ref": "#/definitions/markers"}
+            x-crdkit-type: string
+            x-crdkit-perTarget: markers
+      - equal:
+          path: results[0].json.properties.sp.anyOf
+          value:
+            - {type: string, pattern: "^a"}
+            - {"$ref": "#/definitions/markers"}
+      - equal:
+          path: results[0].json.properties.ce.anyOf
+          value:
+            - {type: [string, number, boolean], enum: [a, 1]}
+            - {"$ref": "#/definitions/markers"}
+      - equal:
+          path: results[0].json.properties.plain
+          value: {type: string, x-crdkit-type: string, x-crdkit-perTarget: markers}
+      - equal:
+          path: results[0].json.properties.locked
+          value:
+            type: string
+            pattern: "^a"
+            not: {pattern: "@[A-Za-z0-9_]+@"}
+            x-crdkit-type: string
+            x-crdkit-perTarget: "no"
+
   - it: 'jsonSchema: a per-target scalar or list is anyOf [type, declaration, markers]'
     set:
       schemaOps:
