@@ -1245,6 +1245,8 @@ Interface:
   <URL of the HTML reference, optional> }
 - Returns: Markdown text, ending with a newline:
   - `# <title>` and a link to the HTML reference when given;
+  - when the schema has `$id`, an "Editor support" line with the
+    modeline `# yaml-language-server: $schema=<$id>` as a YAML block;
   - a commented YAML skeleton of the tree (keys in schema order, type,
     `required` and `per target` as trailing comments; switch cases as
     `# <by>: <value>` blocks);
@@ -1268,6 +1270,9 @@ Implementation notes:
 {{- $parts := list (printf "# %s" (.title | default $js.title | default "Values")) -}}
 {{- if .htmlLink -}}
   {{- $parts = append $parts (printf "[HTML reference](%s)" .htmlLink) -}}
+{{- end -}}
+{{- if index $js "$id" -}}
+  {{- $parts = append $parts (printf "**Editor support** — first line of a values file:\n\n```yaml\n# yaml-language-server: $schema=%s\n```" (index $js "$id")) -}}
 {{- end -}}
 {{- $skeleton := dict "lines" (list) -}}
 {{- include "crdkit.schema.mdSkeleton.internal" (dict "name" "" "node" $js "path" "" "defs" $defs "required" false "lead" "" "pad" "" "acc" $skeleton) -}}
@@ -1785,6 +1790,9 @@ Implementation notes:
   `*` for a `values` key, `[]` for list items, `[<by>=<value>]` for a
   case). A malformed section or a path naming no node records an ERROR
   and is dropped. crdkit never interprets a section's content.
+- A non-empty `id` becomes the root `$id` (the viewer and the Markdown
+  show it as the editor modeline); empty or absent → no `$id`; a
+  non-string records an ERROR and is ignored.
 - Output is encoded by toPrettyJson: `<`, `>` and `&` appear as
   `<`, `>` and `&` (valid JSON).
 */}}
@@ -1829,6 +1837,13 @@ Implementation notes:
     {{- end -}}
   {{- end -}}
   {{- $_ := set $root "$schema" "http://json-schema.org/draft-07/schema#" -}}
+  {{- if kindIs "string" .id -}}
+    {{- if .id -}}
+      {{- $_ := set $root "$id" .id -}}
+    {{- end -}}
+  {{- else if not (kindIs "invalid" .id) -}}
+    {{- $_ := set $diag "errors" (append $diag.errors "crdkit.schema.jsonSchema: 'id' must be a string — ignored") -}}
+  {{- end -}}
   {{- $_ := set $root "title" (.title | default "Values") -}}
   {{- range $key, $value := $out.result -}}
     {{- $_ := set $root $key $value -}}
@@ -1850,7 +1865,8 @@ Interface:
   <schema as YAML text>, "example": <example values, optional>,
   "sections": <{<node path>: [<section>]}, optional>, "title": <title,
   optional>, "htmlLink": <URL of the HTML reference, "md" only,
-  optional>, "diag": <dict> }
+  optional>, "id": <root `$id`, see crdkit.schema.jsonSchema, optional>,
+  "diag": <dict> }
 - Returns: that format's text (see crdkit.schema.jsonSchema,
   crdkit.schema.html, crdkit.schema.docs); an empty string for an
   unknown format (an ERROR is recorded).
@@ -1865,7 +1881,7 @@ Implementation notes:
 {{- if not (has $format (list "json" "html" "md")) -}}
   {{- $_ := set .diag "errors" (append .diag.errors (printf "crdkit.schema.document: unknown format '%s' (json, html or md) — nothing rendered" $format)) -}}
 {{- else -}}
-  {{- $json := include "crdkit.schema.jsonSchema" (dict "schemaText" .schemaText "example" .example "sections" .sections "title" (.title | default "") "diag" .diag) -}}
+  {{- $json := include "crdkit.schema.jsonSchema" (dict "schemaText" .schemaText "example" .example "sections" .sections "title" (.title | default "") "id" .id "diag" .diag) -}}
   {{- if eq $format "json" -}}
     {{- $json -}}
   {{- else if eq $format "html" -}}

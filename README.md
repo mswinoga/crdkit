@@ -476,8 +476,8 @@ All take a dict.
 | `crdkit.schema.node` | `{schema, values, keys}` | YAML `{value: <node>}` or `{}` |
 | `crdkit.schema.value` | `{ctx, node, def, path, target?, seen?}` | YAML `{value: <resolved>}` |
 | `crdkit.schema.path` | `{keys, path?}` | the dotted path as text |
-| `crdkit.schema.document` | `{format, schemaText, example?, sections?, title?, htmlLink?, diag}` | the text of one format (`json`, `html`, `md`) |
-| `crdkit.schema.jsonSchema` | `{schemaText, example?, sections?, title?, diag}` | JSON Schema text (draft-07) |
+| `crdkit.schema.document` | `{format, schemaText, example?, sections?, title?, htmlLink?, id?, diag}` | the text of one format (`json`, `html`, `md`) |
+| `crdkit.schema.jsonSchema` | `{schemaText, example?, sections?, title?, id?, diag}` | JSON Schema text (draft-07) |
 | `crdkit.schema.html` | `{schema, title?}` — `schema` is the JSON Schema text | HTML page |
 | `crdkit.schema.docs` | `{schema, title?, htmlLink?}` — `schema` is the JSON Schema text | Markdown text |
 
@@ -556,11 +556,16 @@ Schema for editors and the viewer; the DSL maps keyword by keyword
   `if/then`; properties identical in every case (two or more) carry
   `x-crdkit-shared`.
 - `examples` and `x-crdkit-sections` come from `example` and `sections`.
+- `id` (string, optional) becomes the root `$id`: the URL the committed
+  file is served from, ideally pinned to a release tag (convention
+  `v<chart version>`). Empty or absent → no `$id`; a non-string records an ERROR and is ignored.
 - An invalid schema records the self-check ERRORs and returns `{}`.
 
 Editor use:
 - Commit the JSON as `input.schema.json` and point consumers at it with
-  `# yaml-language-server: $schema=<URL>` in their values file.
+  `# yaml-language-server: $schema=<URL>` in their values file. With
+  `id` set to that URL, the viewer's root page and the Markdown show the
+  ready-to-copy modeline.
 - Never name it `values.schema.json`: Helm validates a chart's own
   values against that file on every install and template, so a library
   chart's copy would be applied to the subchart scope instead of the
@@ -592,6 +597,7 @@ page: no external request, system fonts, light and dark through
   first line of `doc`), switch cases as rows with their own pages,
   search, and a URL fragment per node path.
 - Generated examples follow the same rules as the Markdown.
+- With a `$id`, the root page shows the editor modeline.
 
 ### Markdown reference
 
@@ -599,6 +605,8 @@ page: no external request, system fonts, light and dark through
 
 - `# <title>` (default: the schema's title) and, with `htmlLink`, a link
   to the HTML reference;
+- with a `$id` in the schema, an "Editor support" block holding the
+  modeline `# yaml-language-server: $schema=<$id>`;
 - a commented YAML skeleton: keys in schema order, type, `required` and
   `per target` as trailing comments, switch cases as `# <by>: <value>`
   blocks;

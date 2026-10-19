@@ -12,15 +12,15 @@ entry to "results":
   - {op: value, node, def, path, target?}       → {value: <resolved>}
   - {op: node, schema, values, keys}            → {found, value}
   - {op: path, keys, path?}                     → {text: <path>}
-  - {op: docs, schemaText | schema, example?, sections?, title?, htmlLink?}
+  - {op: docs, schemaText | schema, example?, sections?, title?, htmlLink?, id?}
                                                 → {text: <Markdown>} (jsonSchema, then docs)
-  - {op: html, schemaText, example?, sections?, title?}
+  - {op: html, schemaText, example?, sections?, title?, id?}
                                                 → {text: <HTML>, outside: <HTML without the
                                                    embedded JSON>} (jsonSchema, then html)
-  - {op: document, format, schemaText, example?, sections?, title?, htmlLink?}
+  - {op: document, format, schemaText, example?, sections?, title?, htmlLink?, id?}
                                                 → {text: <that format's output>}
   - {op: order, text}                           → {order: {<schema path>: <index>}}
-  - {op: jsonSchema, schemaText, example?, sections?, title?}
+  - {op: jsonSchema, schemaText, example?, sections?, title?, id?}
                                                 → {text: <JSON text>, json: <decoded>}
 "values"/"def" are passed through `toYaml | fromYaml`, like a library
 reading .Values. Renders `results`, `seen`, `diag`. With no schemaOps
@@ -59,19 +59,19 @@ it renders empty lists — never interferes with a bare `helm template`.
     {{- $results = append $results (dict "text" (include "crdkit.schema.path" (dict "keys" $op.keys "path" ($op.path | default "")))) -}}
   {{- else if eq $op.op "docs" -}}
     {{- $schemaText := $op.schemaText | default ($op.schema | toYaml) -}}
-    {{- $json := include "crdkit.schema.jsonSchema" (dict "schemaText" $schemaText "example" $op.example "sections" $op.sections "title" ($op.title | default "") "diag" $diag) -}}
+    {{- $json := include "crdkit.schema.jsonSchema" (dict "schemaText" $schemaText "example" $op.example "sections" $op.sections "title" ($op.title | default "") "id" $op.id "diag" $diag) -}}
     {{- $results = append $results (dict "text" (include "crdkit.schema.docs" (dict "schema" $json "title" ($op.title | default "") "htmlLink" ($op.htmlLink | default "")))) -}}
   {{- else if eq $op.op "html" -}}
-    {{- $json := include "crdkit.schema.jsonSchema" (dict "schemaText" $op.schemaText "example" $op.example "sections" $op.sections "title" ($op.title | default "") "diag" $diag) -}}
+    {{- $json := include "crdkit.schema.jsonSchema" (dict "schemaText" $op.schemaText "example" $op.example "sections" $op.sections "title" ($op.title | default "") "id" $op.id "diag" $diag) -}}
     {{- $page := include "crdkit.schema.html" (dict "schema" $json "title" ($op.title | default "")) -}}
     {{- $results = append $results (dict "text" $page "outside" (regexReplaceAll "(?s)<script type=\"application/json\".*?</script>" $page "")) -}}
   {{- else if eq $op.op "document" -}}
-    {{- $results = append $results (dict "text" (include "crdkit.schema.document" (dict "format" $op.format "schemaText" $op.schemaText "example" $op.example "sections" $op.sections "title" ($op.title | default "") "htmlLink" ($op.htmlLink | default "") "diag" $diag))) -}}
+    {{- $results = append $results (dict "text" (include "crdkit.schema.document" (dict "format" $op.format "schemaText" $op.schemaText "example" $op.example "sections" $op.sections "title" ($op.title | default "") "htmlLink" ($op.htmlLink | default "") "id" $op.id "diag" $diag))) -}}
   {{- else if eq $op.op "order" -}}
     {{- $r := include "crdkit.schema.order.internal" (dict "text" $op.text) | fromYaml -}}
     {{- $results = append $results (dict "order" $r.value) -}}
   {{- else if eq $op.op "jsonSchema" -}}
-    {{- $text := include "crdkit.schema.jsonSchema" (dict "schemaText" $op.schemaText "example" $op.example "sections" $op.sections "title" ($op.title | default "") "diag" $diag) -}}
+    {{- $text := include "crdkit.schema.jsonSchema" (dict "schemaText" $op.schemaText "example" $op.example "sections" $op.sections "title" ($op.title | default "") "id" $op.id "diag" $diag) -}}
     {{- $results = append $results (dict "text" $text "json" ($text | fromJson)) -}}
   {{- end -}}
 {{- end -}}

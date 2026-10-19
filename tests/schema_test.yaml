@@ -1931,3 +1931,89 @@ tests:
       - matchRegex:
           path: diag.errors[0]
           pattern: '^schema invalid'
+
+  - it: 'jsonSchema: id becomes the root $id'
+    set:
+      schemaOps:
+        - op: jsonSchema
+          id: "https://example.com/lib/v1.2.3/input.schema.json"
+          schemaText: "type: map\nproperties:\n  target: {type: string}\n"
+    asserts:
+      - equal:
+          path: results[0].json["$id"]
+          value: "https://example.com/lib/v1.2.3/input.schema.json"
+      - equal:
+          path: diag.errors
+          value: []
+
+  - it: 'jsonSchema: no id and an empty id emit no $id'
+    set:
+      schemaOps:
+        - op: jsonSchema
+          schemaText: "type: map\n"
+        - op: jsonSchema
+          id: ""
+          schemaText: "type: map\n"
+    asserts:
+      - notMatchRegex:
+          path: results[0].text
+          pattern: '\$id'
+      - notMatchRegex:
+          path: results[1].text
+          pattern: '\$id'
+      - equal:
+          path: diag.errors
+          value: []
+
+  - it: 'jsonSchema: a non-string id records an ERROR and is ignored'
+    set:
+      schemaOps:
+        - op: jsonSchema
+          id: 5
+          schemaText: "type: map\n"
+    asserts:
+      - notMatchRegex:
+          path: results[0].text
+          pattern: '\$id'
+      - equal:
+          path: diag.errors
+          value:
+            - "crdkit.schema.jsonSchema: 'id' must be a string — ignored"
+
+  - it: 'document: id reaches the JSON, the page and the Markdown'
+    set:
+      schemaOps:
+        - op: document
+          format: json
+          id: "https://example.com/v1/input.schema.json"
+          schemaText: "type: map\n"
+        - op: document
+          format: html
+          id: "https://example.com/v1/input.schema.json"
+          schemaText: "type: map\n"
+        - op: document
+          format: md
+          title: Doc
+          id: "https://example.com/v1/input.schema.json"
+          schemaText: "type: map\nproperties:\n  target: {type: string}\n"
+    asserts:
+      - matchRegex:
+          path: results[0].text
+          pattern: '"\$id": "https://example.com/v1/input.schema.json"'
+      - matchRegex:
+          path: results[1].text
+          pattern: 'id="crdkit-schema">\{\n  "\$id": "https://example.com/v1/input.schema.json"'
+      - matchRegex:
+          path: results[2].text
+          pattern: '# Doc\n\n\*\*Editor support\*\*[^\n]*\n\n```yaml\n# yaml-language-server: \$schema=https://example.com/v1/input.schema.json\n```\n\n```yaml\ntarget:'
+
+  - it: 'docs: without an $id there is no Editor support block'
+    set:
+      schemaOps:
+        - op: docs
+          title: Doc
+          schemaText: "type: map\nproperties:\n  target: {type: string}\n"
+    asserts:
+      - notMatchRegex:
+          path: results[0].text
+          pattern: 'Editor support|yaml-language-server'

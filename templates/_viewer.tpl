@@ -679,6 +679,7 @@ function renderDetail() {
       "<h3>" + esc(it.label) + "</h3>" +
       (docOf(n) ? '<div class="prose">' + md(docOf(n)) + "</div>" : "") +
       '<dl class="facts">' + facts.map(function (f) { return "<dt>" + f[0] + "</dt><dd>" + f[1] + "</dd>"; }).join("") + "</dl>" +
+      (it.isRoot && typeof SCHEMA.$id === "string" && SCHEMA.$id ? block("Editor support", "<pre>" + esc("# yaml-language-server: $schema=" + SCHEMA.$id) + "</pre>") : "") +
       keyExamples(it) + sectionsHtml(n["x-crdkit-sections"]);
   }
   detail.innerHTML = html;

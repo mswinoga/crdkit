@@ -76,3 +76,30 @@ tests:
       - matchRegex:
           path: diag.errors[0]
           pattern: 'nonsense'
+
+  - it: with an $id the root page shows the editor modeline
+    set:
+      schemaOps:
+        - op: html
+          id: "https://example.com/v1/input.schema.json"
+          schemaText: "type: map\n"
+    asserts:
+      - matchRegex:
+          path: results[0].text
+          pattern: 'SCHEMA\.\$id'
+      - matchRegex:
+          path: results[0].text
+          pattern: '"\$id": "https://example.com/v1/input.schema.json"'
+      - matchRegex:
+          path: results[0].outside
+          pattern: 'Editor support'
+
+  - it: without an id the schema has no $id (the root page shows no modeline)
+    set:
+      schemaOps:
+        - op: html
+          schemaText: "type: map\n"
+    asserts:
+      - notMatchRegex:
+          path: results[0].text
+          pattern: '"\$id"'
