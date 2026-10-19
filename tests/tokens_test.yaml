@@ -101,6 +101,57 @@ tests:
           path: structure.email
           value: "user@example.com"
 
+  - it: "@AT@ escapes text the marker pattern would otherwise read as a marker"
+    set:
+      target: prod-01
+      structure.email: "@AT@example.com@AT@"
+    asserts:
+      - equal:
+          path: structure.email
+          value: "@example.com@"
+      - lengthEqual:
+          path: diag.warnings
+          count: 0
+
+  - it: "a dotted token name resolves through its '@A.b@' marker"
+    set:
+      target: prod-01
+      tokens:
+        A.b: "hello"
+      structure:
+        message: "@A.b@ world"
+    asserts:
+      - equal:
+          path: structure.message
+          value: "hello world"
+      - lengthEqual:
+          path: diag.errors
+          count: 0
+
+  - it: "dotted token names chain like any other name, per target"
+    set:
+      target: prod-01
+      tokens:
+        SVC.host: "h1"
+        SVC.port: {default: "80", prod-01: "8080"}
+        SVC.url: "http://@SVC.host@:@SVC.port@"
+      structure:
+        url: "@SVC.url@"
+    asserts:
+      - equal:
+          path: structure.url
+          value: "http://h1:8080"
+
+  - it: "a dotted marker naming no token is left untouched"
+    set:
+      target: prod-01
+      structure:
+        email: "@example.com@"
+    asserts:
+      - equal:
+          path: structure.email
+          value: "@example.com@"
+
   - it: a declared-but-never-used token produces no diagnostic at all, even if it would error if resolved
     set:
       target: prod-01

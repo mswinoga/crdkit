@@ -367,6 +367,26 @@ tests:
           path: diag.errors
           count: 0
 
+  - it: "dotted and relative markers count as markers: rejected in a markers: false field, type check skipped elsewhere"
+    set:
+      schemaOps:
+        - op: validate
+          schema:
+            type: map
+            properties:
+              type: {type: scalar, markers: false}
+              port: {type: int}
+              host: {type: string, markers: false}
+          values: {type: "@.kind@", port: "@SVC.port@", host: "me@example.com"}
+    asserts:
+      - equal:
+          path: results[0].value
+          value: {port: "@SVC.port@", host: "me@example.com"}
+      - equal:
+          path: diag.errors
+          value:
+            - "'type' must not contain '@NAME@' markers — ignored"
+
   - it: 'a token declaration in a "tokens: true" field is kept as written; a plain value is checked as usual'
     set:
       schemaOps:
@@ -1212,7 +1232,7 @@ tests:
           path: results[0].json.definitions
           value:
             tokenDeclaration: {type: object, minProperties: 1}
-            markers: {type: string, pattern: "@[A-Za-z0-9_]+@"}
+            markers: {type: string, pattern: "@[A-Za-z0-9_.]+@"}
       - equal:
           path: results[0].json["x-crdkit-type"]
           value: map
@@ -1254,7 +1274,7 @@ tests:
             pattern: "^a"
             enum: [ab, ac]
             default: ab
-            not: {pattern: "@[A-Za-z0-9_]+@"}
+            not: {pattern: "@[A-Za-z0-9_.]+@"}
             x-crdkit-type: string
             x-crdkit-perTarget: "no"
       - equal:
@@ -1270,7 +1290,7 @@ tests:
           path: results[0].json.properties.c
           value:
             type: [string, number, boolean]
-            not: {pattern: "@[A-Za-z0-9_]+@"}
+            not: {pattern: "@[A-Za-z0-9_.]+@"}
             x-crdkit-type: scalar
             x-crdkit-perTarget: "no"
 
@@ -1343,7 +1363,7 @@ tests:
           value:
             type: string
             pattern: "^a"
-            not: {pattern: "@[A-Za-z0-9_]+@"}
+            not: {pattern: "@[A-Za-z0-9_.]+@"}
             x-crdkit-type: string
             x-crdkit-perTarget: "no"
 

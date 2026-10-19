@@ -96,7 +96,7 @@
         },
         "definitions": {
           "markers": {
-            "pattern": "@[A-Za-z0-9_]+@",
+            "pattern": "@[A-Za-z0-9_.]+@",
             "type": "string"
           },
           "services.*[type=environment]": {
@@ -157,7 +157,7 @@
                   "environment"
                 ],
                 "not": {
-                  "pattern": "@[A-Za-z0-9_]+@"
+                  "pattern": "@[A-Za-z0-9_.]+@"
                 },
                 "type": [
                   "string",
@@ -261,7 +261,7 @@
                   "greeter"
                 ],
                 "not": {
-                  "pattern": "@[A-Za-z0-9_]+@"
+                  "pattern": "@[A-Za-z0-9_.]+@"
                 },
                 "type": [
                   "string",
@@ -334,7 +334,7 @@
               "deploy"
             ],
             "not": {
-              "pattern": "@[A-Za-z0-9_]+@"
+              "pattern": "@[A-Za-z0-9_.]+@"
             },
             "type": [
               "string",
@@ -449,7 +449,7 @@
             ],
             "markdownDescription": "Render target.",
             "not": {
-              "pattern": "@[A-Za-z0-9_]+@"
+              "pattern": "@[A-Za-z0-9_.]+@"
             },
             "type": "string",
             "x-crdkit-perTarget": "no",

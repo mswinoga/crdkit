@@ -98,3 +98,17 @@ tests:
       - equal:
           path: apiVersion
           value: "harness.example.com/v2"
+
+  - it: "a marker escaped with @AT@ is rendered literally"
+    set:
+      target: prod
+      chainPopulatesModel: true
+      tokens:
+        GROUP_SUFFIX: "@AT@example.com@AT@"
+    asserts:
+      - equal:
+          path: kind
+          value: "HarnessCR"
+      - equal:
+          path: apiVersion
+          value: "harness.example.com/@example.com@"

@@ -39,7 +39,7 @@ Implementation notes:
 - Pipeline: merge tokens -> build empty ctx.model -> run the chain (the
   ONLY step that populates ctx.model) -> one substitution pass over the
   whole model -> scan for unresolved "@word@" markers (possible typos)
-  -> emit `{{ model | toYaml }}`, then the diagnostics.
+  -> replace "@AT@" with "@" -> emit `{{ model | toYaml }}`, then the diagnostics.
 - ctx carries: root, diag, model, tokens, target, parentTargetTemplate,
   reservedKeys (list) and gen (int, starts at 0; bumped by
   crdkit.token.add / crdkit.token.underlay to invalidate resolution
@@ -85,14 +85,14 @@ Implementation notes:
 
 {{- include "crdkit.integrations.chain" (dict "chain" .chain "ctx" $ctx) -}}
 
-{{- $substitutedText := include "crdkit.tokens.substitute" (list $ctx ($model | toYaml) $target) -}}
-{{- $substitutedModel := $substitutedText | fromYaml -}}
+{{- $substitutedText := include "crdkit.tokens.substituteMarkers.internal" (list $ctx ($model | toYaml) $target) -}}
 
-{{/* leftover "@word@" after substitution = possible typo; a genuine cycle is already reported elsewhere with a more specific message. */}}
-{{- $unresolvedMarkers := regexFindAll "@[A-Za-z0-9_]+@" $substitutedText -1 -}}
+{{/* leftover "@word@" after substitution = possible typo; a genuine cycle is already reported elsewhere with a more specific message. Scanned before "@AT@" becomes "@", so an escaped marker is never reported. */}}
+{{- $unresolvedMarkers := regexFindAll (include "crdkit.markerPattern.internal" (dict)) $substitutedText -1 -}}
+{{- $substitutedModel := $substitutedText | replace "@AT@" "@" | fromYaml -}}
 {{- range $marker := $unresolvedMarkers -}}
   {{- $name := trimSuffix "@" (trimPrefix "@" $marker) -}}
-  {{- if not (hasKey $tokens $name) -}}
+  {{- if and (ne $name "AT") (not (hasKey $tokens $name)) -}}
     {{- $_ := set $diag "warnings" (append $diag.warnings (printf "'%s' in the rendered model does not match any known token after resolution — possible typo" $marker)) -}}
   {{- end -}}
 {{- end -}}

@@ -441,7 +441,7 @@ Implementation notes:
     {{- $_ := set $diag $shapeLevel (append (index $diag $shapeLevel) (printf "'%s'%s must be a scalar%s" $path $suffix $tail)) -}}
     {{- $_ := set $out "keep" false -}}
   {{- else -}}
-    {{- $hasMarkers := and (not $resolved) (kindIs "string" $value) (regexMatch "@[A-Za-z0-9_]+@" $value) -}}
+    {{- $hasMarkers := and (not $resolved) (kindIs "string" $value) (regexMatch (include "crdkit.markerPattern.internal" (dict)) $value) -}}
     {{- if and $hasMarkers (eq (toString $node.markers) "false") -}}
       {{- $_ := set $diag "errors" (append $diag.errors (printf "'%s' must not contain '@NAME@' markers — ignored" $path)) -}}
       {{- $_ := set $out "keep" false -}}
@@ -598,7 +598,7 @@ Implementation notes:
 {{- $seenKey := printf "%s|%s" .path $target -}}
 {{- if not (hasKey .seen $seenKey) -}}
   {{- $_ := set .seen $seenKey true -}}
-  {{- $unresolved := and (kindIs "string" $value) (regexMatch "@[A-Za-z0-9_]+@" $value) -}}
+  {{- $unresolved := and (kindIs "string" $value) (regexMatch (include "crdkit.markerPattern.internal" (dict)) $value) -}}
   {{- if and (eq (len $ctx.diag.errors) $errorsBefore) (not $unresolved) (not (kindIs "invalid" $value)) -}}
     {{- include "crdkit.schema.walk.internal" (dict "node" $node "value" $value "path" .path "diag" $ctx.diag "mode" "resolved" "suffix" (printf " for target '%s'" $target) "out" (dict)) -}}
   {{- end -}}
@@ -643,7 +643,7 @@ Implementation notes:
     {{- end -}}
   {{- end -}}
 {{- else if eq $shape "any" -}}
-{{- else if or $tokens (and (eq $shape "scalar") (kindIs "string" $value) (regexMatch "@[A-Za-z0-9_]+@" $value)) -}}
+{{- else if or $tokens (and (eq $shape "scalar") (kindIs "string" $value) (regexMatch (include "crdkit.markerPattern.internal" (dict)) $value)) -}}
   {{- include "crdkit.schema.resolveAndCheck.internal" (merge (dict "node" $node "def" $value "tokens" (ne $tokens "") "path" $path "out" (dict)) $common) -}}
 {{- else if and (eq $shape "list") (kindIs "slice" $value) -}}
   {{- range $i, $element := $value -}}
@@ -727,7 +727,7 @@ Implementation notes:
 {{- $node := .node | default dict -}}
 {{- $out := dict "value" .def -}}
 {{- $tokens := include "crdkit.schema.tokens.internal" (dict "node" $node "inTokens" false) -}}
-{{- if or $tokens (and (kindIs "string" .def) (regexMatch "@[A-Za-z0-9_]+@" .def)) -}}
+{{- if or $tokens (and (kindIs "string" .def) (regexMatch (include "crdkit.markerPattern.internal" (dict)) .def)) -}}
   {{- include "crdkit.schema.resolveAndCheck.internal" (dict "ctx" $ctx "node" $node "def" .def "tokens" (ne $tokens "") "path" .path "target" (.target | default $ctx.target) "seen" (ternary .seen (dict) (kindIs "map" .seen)) "out" $out) -}}
 {{- end -}}
 value: {{ $out.value | toYaml | nindent 2 }}
@@ -1744,7 +1744,7 @@ Implementation notes:
     {{- end -}}
   {{- end -}}
   {{- if and (eq (toString $node.markers) "false") (has $type (list "string" "scalar")) -}}
-    {{- $_ := set $core "not" (dict "pattern" "@[A-Za-z0-9_]+@") -}}
+    {{- $_ := set $core "not" (dict "pattern" (include "crdkit.markerPattern.internal" (dict))) -}}
   {{- end -}}
   {{- $_ := set $meta "x-crdkit-perTarget" (ternary "yes" (ternary "no" "markers" (eq (toString $node.markers) "false")) (ne $tokens "")) -}}
 {{- end -}}
@@ -1823,7 +1823,7 @@ Implementation notes:
       {{- $_ := set $sections $sectionPath $valid -}}
     {{- end -}}
   {{- end -}}
-  {{- $acc := dict "definitions" (dict "tokenDeclaration" (dict "type" "object" "minProperties" 1) "markers" (dict "type" "string" "pattern" "@[A-Za-z0-9_]+@")) "paths" (dict) -}}
+  {{- $acc := dict "definitions" (dict "tokenDeclaration" (dict "type" "object" "minProperties" 1) "markers" (dict "type" "string" "pattern" (include "crdkit.markerPattern.internal" (dict)))) "paths" (dict) -}}
   {{- $out := dict -}}
   {{- include "crdkit.schema.jsonNode.internal" (dict "node" $schema "schemaPath" "" "nodePath" "" "inTokens" false "instances" (ternary (list $example) (list) (kindIs "map" $example)) "order" $order "sections" $sections "acc" $acc "out" $out) -}}
   {{- range $sectionPath := keys $sections | sortAlpha -}}

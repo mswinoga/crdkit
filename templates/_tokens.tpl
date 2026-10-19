@@ -74,16 +74,19 @@ Dependency graph (who calls whom):
                          -> crdkit.tokens.merge.internal -> ctx.tokens
 
   crdkit.tokens.substitute (public)
-    -> crdkit.token.value (public)
-         -> crdkit.resolveEntry.internal
-              -> crdkit.matchRules
-              -> <parentTargetTemplate>            (caller-supplied hook)
-              -> crdkit.substituteStructure.internal
-                   -> crdkit.substituteText.internal
-                        -> crdkit.resolveEntry.internal   (cycle, per "@ref@" —
-                                                            bounded by "resolving")
-                   -> (self, recursing into nested map/list values)
-    -> crdkit.stringify.internal                     (coerce for splicing into text)
+    -> crdkit.tokens.substituteMarkers.internal      (also called by crdkit.render)
+         -> crdkit.token.value (public)
+              -> crdkit.resolveEntry.internal
+                   -> crdkit.matchRules
+                   -> <parentTargetTemplate>       (caller-supplied hook)
+                   -> crdkit.substituteStructure.internal
+                        -> crdkit.substituteText.internal
+                             -> crdkit.resolveEntry.internal   (cycle, per "@ref@" —
+                                                                 bounded by "resolving")
+                        -> (self, recursing into nested map/list values)
+         -> crdkit.stringify.internal                (coerce for splicing into text)
+
+  Every marker match uses crdkit.markerPattern.internal.
 
   crdkit.token.string / crdkit.tokenDef.string (public)
     -> crdkit.token.value / crdkit.tokenDef.value (public)
@@ -101,6 +104,26 @@ or substituting across an entire text blob). crdkit.resolveEntry.internal
 is shared engine code used directly by BOTH crdkit.token.value and
 crdkit.tokenDef.value — it deliberately isn't namespaced under either.
 */}}
+
+{{/*
+crdkit.markerPattern.internal (internal)
+
+The one definition of a "@NAME@" marker; every marker match in crdkit
+(substitution, unresolved-marker scan, schema checks, JSON Schema
+`markers` pattern) uses it.
+
+Interface:
+- Params: none (pass an empty dict).
+- Returns: the regex as plain text — `@[A-Za-z0-9_.]+@`.
+
+Implementation notes:
+- "." is part of a name, so a dotted name (`@A.b@`) and a library's
+  relative form (`@.x@`) are markers too. Side effect: text like
+  `@example.com@` is a marker — escape it with "@AT@".
+*/}}
+{{- define "crdkit.markerPattern.internal" -}}
+@[A-Za-z0-9_.]+@
+{{- end -}}
 
 {{/*
 crdkit.matchRules (public)
@@ -536,7 +559,7 @@ Implementation notes:
 {{- $resolving := .resolving -}}
 {{- $reservedKeys := .reservedKeys -}}
 {{- $gen := .gen -}}
-{{- $markers := regexFindAll "@[A-Za-z0-9_]+@" $text -1 -}}
+{{- $markers := regexFindAll (include "crdkit.markerPattern.internal" (dict)) $text -1 -}}
 {{- range $marker := $markers -}}
   {{- $refName := trimSuffix "@" (trimPrefix "@" $marker) -}}
   {{- if and (ne $refName "AT") (hasKey $tokens $refName) -}}
@@ -740,12 +763,30 @@ Implementation notes:
 - A marker naming something that isn't a known token is left
   untouched — the caller is responsible for a "possible typo"
   diagnostic against whatever's left over.
-- A marker naming a token that resolves to a STRUCTURE (not a scalar)
-  is also left untouched — crdkit.stringify.internal records the ERROR.
 - "@AT@" is replaced last, after every other substitution, so it can't
   be misread as part of another marker mid-resolution.
 */}}
 {{- define "crdkit.tokens.substitute" -}}
+{{- include "crdkit.tokens.substituteMarkers.internal" . | replace "@AT@" "@" -}}
+{{- end -}}
+
+{{/*
+crdkit.tokens.substituteMarkers.internal (internal)
+
+crdkit.tokens.substitute without the final "@AT@" pass — for
+crdkit.render, which scans the result for unresolved markers before
+"@AT@" becomes "@" (an escaped `@AT@example.com@` is never reported).
+
+Interface:
+- Params (list): [ctx, text, target?] — same as crdkit.tokens.substitute
+- Returns: text with every "@NAME@" marker of a known token resolved;
+  "@AT@" untouched.
+
+Implementation notes:
+- A marker naming a token that resolves to a STRUCTURE (not a scalar)
+  is left untouched — crdkit.stringify.internal records the ERROR.
+*/}}
+{{- define "crdkit.tokens.substituteMarkers.internal" -}}
 {{- $ctx := index . 0 -}}
 {{- $text := index . 1 -}}
 {{- $target := $ctx.target -}}
@@ -754,7 +795,7 @@ Implementation notes:
 {{- end -}}
 {{- $tokens := $ctx.tokens -}}
 {{- $diag := $ctx.diag -}}
-{{- $markers := regexFindAll "@[A-Za-z0-9_]+@" $text -1 -}}
+{{- $markers := regexFindAll (include "crdkit.markerPattern.internal" (dict)) $text -1 -}}
 {{- range $marker := $markers -}}
   {{- $name := trimSuffix "@" (trimPrefix "@" $marker) -}}
   {{- if and (ne $name "AT") (hasKey $tokens $name) -}}
@@ -765,7 +806,6 @@ Implementation notes:
     {{- end -}}
   {{- end -}}
 {{- end -}}
-{{- $text = $text | replace "@AT@" "@" -}}
 {{- $text -}}
 {{- end -}}
 
