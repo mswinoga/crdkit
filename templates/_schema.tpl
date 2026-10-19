@@ -46,6 +46,10 @@ Dependency graph (who calls whom):
          -> crdkit.schema.resolveAndCheck.internal
               -> crdkit.tokenDef.value / crdkit.tokens.substitute
               -> crdkit.schema.walk.internal (mode "resolved")
+  crdkit.schema.resolve (public)
+    -> crdkit.schema.check (public)
+    -> crdkit.schema.path (public)
+    -> crdkit.schema.valuesWalk.internal
   crdkit.schema.value (public) -> crdkit.schema.resolveAndCheck.internal
   crdkit.schema.node (public)
   crdkit.schema.path (public) -> crdkit.schema.path.internal
@@ -198,6 +202,8 @@ Implementation notes:
 - Resolution substitutes markers now: tokens added to ctx after this
   call are not seen.
 - Skipped when the schema is invalid (crdkit.schema.check).
+- Shares its walker with crdkit.schema.resolve, which also returns the
+  values with every per-target value resolved.
 */}}
 {{- define "crdkit.schema.validateValues" -}}
 {{- $ctx := .ctx -}}
@@ -205,6 +211,95 @@ Implementation notes:
 {{- $seen := ternary .seen (dict) (kindIs "map" .seen) -}}
 {{- if include "crdkit.schema.check" (dict "schema" .schema "diag" $ctx.diag) -}}
   {{- include "crdkit.schema.valuesWalk.internal" (dict "ctx" $ctx "node" .schema "value" .values "path" (.path | default "") "target" (.target | default $ctx.target) "seen" $seen) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+crdkit.schema.resolve (public)
+
+Returns a subtree of the values with every per-target value resolved
+for one target — for library code that maps whole subtrees into the
+model.
+
+Interface:
+- Params (dict): { "ctx": <ctx>, "schema": <root node>, "values":
+  <normalized values, whole — from crdkit.schema.validate>, "keys":
+  <list of map keys / list indices from the root to the subtree,
+  optional — [] = root>, "target": <optional — defaults to ctx.target>,
+  "seen": <dict shared with crdkit.schema.validateValues /
+  crdkit.schema.value, optional> }
+- Returns YAML: { "value": <the subtree, every per-target value
+  resolved for the target> }; `{}` when "keys" address nothing.
+
+Implementation notes:
+- "keys" are followed like crdkit.schema.node does, from the root, so
+  ancestors (switch cases, per-target state) are known; diagnostic paths
+  are spelled as the value pass spells them and "seen" de-duplicates
+  across both.
+- Same walker as crdkit.schema.validateValues
+  (crdkit.schema.valuesWalk.internal): a per-target node or a string
+  with markers is resolved and checked (an `int` / `number` / `bool`
+  result converted); an `any` node is copied as written; what the
+  structural pass would drop is dropped.
+- No value found for the target (resolution ERROR) → the key or list
+  element is omitted. A value failing its check stays as resolved,
+  unconverted.
+- A marker to a token that does not exist yet stays as text, for the
+  final substitution pass.
+- Skipped when the schema is invalid (crdkit.schema.check): returns `{}`.
+*/}}
+{{- define "crdkit.schema.resolve" -}}
+{{- $ctx := .ctx -}}
+{{- $seen := ternary .seen (dict) (kindIs "map" .seen) -}}
+{{- if include "crdkit.schema.check" (dict "schema" .schema "diag" $ctx.diag) -}}
+  {{- $node := .schema -}}
+  {{- $value := .values -}}
+  {{- $none := index (dict) "none" -}}
+  {{- $found := true -}}
+  {{- $inTokens := false -}}
+  {{- $path := "" -}}
+  {{- range $key := .keys | default (list) -}}
+    {{- if and $found (hasKey $node "switch") -}}
+      {{- $by := "" -}}
+      {{- if kindIs "map" $value -}}
+        {{- $by = index $value $node.switch.by -}}
+      {{- end -}}
+      {{- if and (not (kindIs "invalid" $by)) (ne (toString $by) "") (hasKey $node.switch.cases (toString $by)) -}}
+        {{- $node = index $node.switch.cases (toString $by) -}}
+      {{- else -}}
+        {{- $found = false -}}
+      {{- end -}}
+    {{- end -}}
+    {{- if $found -}}
+      {{- $inTokens = or $inTokens (ne (include "crdkit.schema.perTarget.internal" (dict "node" $node "inTokens" $inTokens)) "") -}}
+      {{- $shape := include "crdkit.schema.shape.internal" (dict "node" $node) -}}
+      {{- if and (eq $shape "map") (kindIs "map" $value) -}}
+        {{- $properties := $node.properties | default dict -}}
+        {{- if hasKey $properties (toString $key) -}}
+          {{- $node = index $properties (toString $key) -}}
+        {{- else if hasKey $node "values" -}}
+          {{- $node = $node.values -}}
+        {{- else -}}
+          {{- $found = false -}}
+        {{- end -}}
+        {{- $value = index $value (toString $key) -}}
+        {{- $path = include "crdkit.schema.path" (dict "keys" (list (toString $key)) "path" $path) -}}
+      {{- else if and (eq $shape "list") (kindIs "slice" $value) (regexMatch "^[0-9]+$" (toString $key)) (lt (int (toString $key)) (len $value)) -}}
+        {{- $node = $node.items | default (dict "type" "any") -}}
+        {{- $value = index $value (int (toString $key)) -}}
+        {{- $path = include "crdkit.schema.path" (dict "keys" (list (int (toString $key))) "path" $path) -}}
+      {{- else -}}
+        {{- $found = false -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if and $found (not (kindIs "invalid" $value)) -}}
+    {{- $out := dict -}}
+    {{- include "crdkit.schema.valuesWalk.internal" (dict "ctx" $ctx "node" $node "value" $value "path" $path "target" (.target | default $ctx.target) "seen" $seen "inTokens" $inTokens "out" $out) -}}
+    {{- if hasKey $out "value" -}}
+value: {{ $out.value | toYaml | nindent 2 }}
+    {{- end -}}
+  {{- end -}}
 {{- end -}}
 {{- end -}}
 
@@ -230,6 +325,7 @@ Implementation notes:
 - A resolved string of an `int` / `number` / `bool` node is returned
   converted to that type when it passes the check (see
   crdkit.schema.resolveAndCheck.internal), on every call.
+- For a whole subtree use crdkit.schema.resolve.
 - The node must come from a schema that passed crdkit.schema.check,
   through crdkit.schema.node (which makes its per-target state
   explicit — "node" alone cannot know its ancestors).

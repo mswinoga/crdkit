@@ -9,6 +9,7 @@ entry to "results":
   - {op: check, schema}                         → {ok: "true" | ""}
   - {op: validate, schema, values, path?}       → {value: <normalized>}
   - {op: validateValues, schema, values, target?, path?} → {}
+  - {op: resolve, schema, values, keys?, target?} → {found, value}
   - {op: value, node, def, path, target?}       → {value: <resolved>}
   - {op: node, schema, values, keys}            → {found, value}
   - {op: path, keys, path?}                     → {text: <path>}
@@ -48,6 +49,9 @@ it renders empty lists — never interferes with a bare `helm template`.
   {{- else if eq $op.op "validateValues" -}}
     {{- include "crdkit.schema.validateValues" (dict "ctx" $ctx "schema" $op.schema "values" $values "path" ($op.path | default "") "target" ($op.target | default "") "seen" $seen) -}}
     {{- $results = append $results (dict) -}}
+  {{- else if eq $op.op "resolve" -}}
+    {{- $r := include "crdkit.schema.resolve" (dict "ctx" $ctx "schema" $op.schema "values" $values "keys" $op.keys "target" ($op.target | default "") "seen" $seen) | fromYaml -}}
+    {{- $results = append $results (dict "found" (hasKey $r "value") "value" $r.value) -}}
   {{- else if eq $op.op "value" -}}
     {{- $def := (dict "v" $op.def | toYaml | fromYaml).v -}}
     {{- $r := include "crdkit.schema.value" (dict "ctx" $ctx "node" $op.node "def" $def "path" $op.path "target" ($op.target | default "") "seen" $seen) | fromYaml -}}

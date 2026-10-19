@@ -2164,3 +2164,210 @@ tests:
       - notMatchRegex:
           path: results[0].text
           pattern: 'Editor support|yaml-language-server'
+
+  # --- resolve (subtree with per-target values resolved) ---
+
+  - it: 'resolve: the root and a nested subtree; taxonomy, default and markers'
+    set:
+      target: prod-01
+      parentTargetMap: {prod-01: prod}
+      tokens:
+        START: "600"
+        FLAG: "true"
+      schemaOps:
+        - op: resolve
+          schema: &resolveSchema
+            type: map
+            properties:
+              name: {type: string}
+              infra:
+                type: map
+                properties:
+                  maxInstances: {type: int}
+                  startTimeout: {type: int}
+                  retries: {type: int}
+                  enabled: {type: bool}
+                  tags: {type: list, items: {type: string}}
+                  hosts: {type: list, items: {type: string}}
+                  rules:
+                    type: list
+                    items:
+                      type: map
+                      properties:
+                        limit: {type: int}
+                  raw: {type: any}
+          values: &resolveValues
+            name: plain
+            infra:
+              maxInstances: {default: 2, prod: 6}
+              startTimeout: "@START@"
+              retries: {default: 3}
+              enabled: "@FLAG@"
+              tags: ["a", "@START@"]
+              hosts: {default: [x], prod: [p, q]}
+              rules: [{limit: "@START@"}, {limit: 4}]
+              raw: {maxInstances: {prod: 6}}
+        - op: resolve
+          schema: *resolveSchema
+          values: *resolveValues
+          keys: [infra]
+        - op: resolve
+          schema: *resolveSchema
+          values: *resolveValues
+          keys: [infra, rules, 0]
+    asserts:
+      - equal:
+          path: results[0].value
+          value:
+            name: plain
+            infra:
+              maxInstances: 6
+              startTimeout: 600
+              retries: 3
+              enabled: true
+              tags: ["a", "600"]
+              hosts: [p, q]
+              rules: [{limit: "600"}, {limit: 4}]
+              raw: {maxInstances: {prod: 6}}
+      - equal:
+          path: results[1].value.maxInstances
+          value: 6
+      - equal:
+          path: results[2].value
+          value: {limit: 600}
+      - lengthEqual:
+          path: diag.errors
+          count: 0
+
+  - it: 'resolve: a switch subtree walks the selected case'
+    set:
+      target: prod
+      schemaOps:
+        - op: resolve
+          schema:
+            type: map
+            properties:
+              services:
+                type: map
+                values:
+                  switch:
+                    by: type
+                    cases:
+                      greeter:
+                        type: map
+                        properties:
+                          type: {type: scalar, static: true}
+                          count: {type: int}
+          values:
+            services:
+              A: {type: greeter, count: {default: 1, prod: 5}}
+              B: {type: unknown, count: 1}
+          keys: [services]
+    asserts:
+      - equal:
+          path: results[0].value
+          value:
+            A: {type: greeter, count: 5}
+
+  - it: 'resolve: no value for the target omits the key and records an ERROR'
+    set:
+      target: prod
+      schemaOps:
+        - op: resolve
+          schema:
+            type: map
+            properties:
+              count: {type: int}
+              keep: {type: string}
+          values:
+            count: {qa: 1}
+            keep: x
+    asserts:
+      - equal:
+          path: results[0].value
+          value: {keep: x}
+      - equal:
+          path: diag.errors
+          value:
+            - "no value found for 'count' — target chain exhausted at 'prod' starting from 'prod'"
+
+  - it: 'resolve: a value failing its check is kept as resolved, unconverted'
+    set:
+      target: prod
+      schemaOps:
+        - op: resolve
+          schema: {type: map, properties: {count: {type: int}}}
+          values: {count: {prod: many}}
+    asserts:
+      - equal:
+          path: results[0].value
+          value: {count: many}
+      - equal:
+          path: diag.errors
+          value:
+            - "'count' for target 'prod' must be of type 'int' — got 'many'"
+
+  - it: 'resolve: the same path and target is reported once across resolve and validateValues'
+    set:
+      target: prod
+      schemaOps:
+        - op: resolve
+          schema: &onceSchema {type: map, properties: {count: {type: int}}}
+          values: &onceValues {count: {prod: x}}
+        - op: validateValues
+          schema: *onceSchema
+          values: *onceValues
+    asserts:
+      - lengthEqual:
+          path: diag.errors
+          count: 1
+
+  - it: 'resolve: a marker to an undeclared token stays as text without an ERROR'
+    set:
+      target: prod
+      schemaOps:
+        - op: resolve
+          schema: {type: map, properties: {a: {type: string}}}
+          values: {a: "x-@LATER@"}
+    asserts:
+      - equal:
+          path: results[0].value
+          value: {a: "x-@LATER@"}
+      - lengthEqual:
+          path: diag.errors
+          count: 0
+
+  - it: 'resolve: keys addressing nothing give an empty result'
+    set:
+      target: prod
+      schemaOps:
+        - op: resolve
+          schema: {type: map, properties: {a: {type: string}}}
+          values: {a: x}
+          keys: [missing]
+        - op: resolve
+          schema: {type: map, properties: {a: {type: string}}}
+          values: {a: x}
+          keys: [a, deeper]
+    asserts:
+      - equal:
+          path: results[0].found
+          value: false
+      - equal:
+          path: results[1].found
+          value: false
+
+  - it: 'resolve: an invalid schema gives an empty result and the self-check ERROR'
+    set:
+      target: prod
+      schemaOps:
+        - op: resolve
+          schema: {type: map, properties: {a: {type: bogus}}}
+          values: {a: x}
+    asserts:
+      - equal:
+          path: results[0].found
+          value: false
+      - matchRegex:
+          path: diag.errors[0]
+          pattern: '^schema invalid'
