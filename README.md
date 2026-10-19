@@ -111,14 +111,27 @@ One `toYaml`/`tokens.substitute`/`fromYaml` round-trip, over `ctx.model`
 as a whole, after the chain finishes:
 
 ```gotemplate
-{{- $substitutedText := include "crdkit.tokens.substitute" (list $ctx ($model | toYaml) $target) -}}
-{{- $substitutedModel := $substitutedText | fromYaml -}}
+{{- $substitutedText := include "crdkit.tokens.substituteMarkers.internal" (list $ctx ($model | toYaml) $target) -}}
+{{- $substitutedModel := $substitutedText | replace "@AT@" "@" | fromYaml -}}
 ```
 
 crdkit never reads `context.Values`, so there's nothing else to
 substitute — whatever a library wanted from consumer `Values` is
 already in `ctx.model` by the time this runs. The "possible typo"
-unresolved-marker check runs over the same text.
+unresolved-marker check runs over the same text, before `@AT@` becomes
+`@`.
+
+- A marker is `@<name>@`, the name made of `A-Z a-z 0-9 _ .`
+  (`@[A-Za-z0-9_.]+@`, crdkit.markerPattern.internal — the one
+  definition every marker match uses). A dotted name (`@SVC1.host@`)
+  is a marker like any other.
+- `@AT@` renders as a literal `@`, after every other marker: write
+  `@AT@example.com@` for text that would otherwise read as a marker
+  (`@example.com@` alone is one, reported as a possible typo when no
+  token has that name).
+- A token resolving to a structure is spliced as text: a list as its
+  elements joined by `,` (no space; a dict/list element as JSON), a
+  dict as JSON. `L: {default: [a, b]}` → `"hosts=@L@"` → `hosts=a,b`.
 
 ## Resolution model
 
@@ -145,11 +158,12 @@ registry:
 
 ```
 crdkit.tokens.substitute
-  └─ crdkit.token.value
-       └─ crdkit.resolveEntry.internal        (shared by token.* and tokenDef.*)
-            └─ crdkit.substituteStructure.internal
-                 └─ crdkit.substituteText.internal → crdkit.resolveEntry.internal (per "@ref@")
-  └─ crdkit.stringify.internal                 (coerce for splicing into text)
+  └─ crdkit.tokens.substituteMarkers.internal  (crdkit.render calls it directly)
+       └─ crdkit.token.value
+            └─ crdkit.resolveEntry.internal   (shared by token.* and tokenDef.*)
+                 └─ crdkit.substituteStructure.internal
+                      └─ crdkit.substituteText.internal → crdkit.resolveEntry.internal (per "@ref@")
+       └─ crdkit.stringify.internal            (coerce for splicing into text)
 ```
 
 ## Resolving/substituting tokens directly
@@ -160,7 +174,7 @@ crdkit.tokens.substitute
 {{/* $resolved is {value: "..."} — a string, or a dict/list if the
      token's entry for this target is itself structural */}}
 
-{{/* same thing, but always as a string (errors + "" if structural) */}}
+{{/* same thing, but always as a string (a list joined by ",", a dict as JSON) */}}
 {{- $asString := include "crdkit.token.string" (list $ctx "DB_HOST" $target) -}}
 
 {{/* resolve an arbitrary structure sourced from consumer Values —
@@ -440,6 +454,11 @@ Single field (`crdkit.schema.value`):
 - Takes the field's node from `crdkit.schema.node`, which follows
   `properties`/`values`/list indices/switches through the values and
   makes the node's per-target state explicit.
+- Returns a resolved string of an `int` / `number` / `bool` node
+  converted to that type when it passes the check (`"@PORT@"` →
+  `8080`, not `"8080"`), on every call; a value failing the check, or
+  still holding a marker, comes back unconverted; `string` / `scalar`
+  nodes come back as resolved.
 - Pass the same `seen` dict to `crdkit.schema.validateValues` and every
   `crdkit.schema.value` call: each `<path>|<target>` pair is checked and
   reported once. Build `path` with `crdkit.schema.path` (same `keys` as
