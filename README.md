@@ -421,6 +421,7 @@ An invalid regex in `pattern`/`keys.pattern` aborts the render
 crdkit.schema.validate        values as written → normalized values      (before the chain)
 crdkit.schema.validateValues  per-target values, for one target          (after the chain)
 crdkit.schema.value           one field, any target, resolved + checked  (from an integration)
+crdkit.schema.resolve         a values subtree, per-target values resolved (from an integration)
 ```
 
 Structural pass (`crdkit.schema.validate`):
@@ -467,6 +468,28 @@ Single field (`crdkit.schema.value`):
   reported once. Build `path` with `crdkit.schema.path` (same `keys` as
   `crdkit.schema.node`), so it is spelled as the value pass spells it.
 
+Subtree (`crdkit.schema.resolve`):
+- For library code that copies whole subtrees of the normalized values
+  into the model: returns the subtree at `keys` (`[]` = root; same
+  addressing as `crdkit.schema.node`) with every per-target value
+  resolved for the target. Params: `{ctx, schema, values, keys?,
+  target?, seen?}`; returns YAML `{value: <subtree>}`, `{}` when `keys`
+  address nothing or the schema is invalid.
+- Per-target nodes and strings with markers are resolved and checked
+  like `crdkit.schema.validateValues` does (same walker, same `seen`),
+  an `int` / `number` / `bool` result converted; `any` nodes and plain
+  values are copied as written.
+- No value for the target: the key is omitted (ERROR recorded). A value
+  failing its check stays as resolved, unconverted. A marker to a token
+  that does not exist yet stays as text for the final substitution pass.
+
+```yaml
+# values                              # resolve, keys [infra], target prod
+infra:                                value:
+  maxInstances: {ALL: 2, prod: 6}       maxInstances: 6
+  startTimeout: "@START@"               startTimeout: 600   # START: "600", int node
+```
+
 ### Diagnostics
 
 Paths are dotted values paths; a key containing `.` goes in brackets,
@@ -496,6 +519,7 @@ All take a dict.
 | `crdkit.schema.validate` | `{schema, values, diag, path?}` | YAML `{value: <normalized>}` |
 | `crdkit.schema.validateValues` | `{ctx, schema, values, path?, target?, seen?}` | nothing |
 | `crdkit.schema.node` | `{schema, values, keys}` | YAML `{value: <node>}` or `{}` |
+| `crdkit.schema.resolve` | `{ctx, schema, values, keys?, target?, seen?}` | YAML `{value: <subtree>}` or `{}` |
 | `crdkit.schema.value` | `{ctx, node, def, path, target?, seen?}` | YAML `{value: <resolved>}` |
 | `crdkit.schema.path` | `{keys, path?}` | the dotted path as text |
 | `crdkit.schema.document` | `{format, schemaText, example?, sections?, title?, htmlLink?, id?, diag}` | the text of one format (`json`, `html`, `md`) |
