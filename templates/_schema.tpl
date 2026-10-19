@@ -572,9 +572,15 @@ Interface:
   markers>, "tokens": <bool, the node is per-target>, "path": <values
   path>, "target": <string>, "seen": <dict>, "out": <dict, written in
   place> }
-- Returns: nothing; sets out.value to the resolved value.
+- Returns: nothing; sets out.value to the resolved value — for an
+  `int` / `number` / `bool` node, a resolved string that passes the node's
+  "parses as" check (crdkit.schema.scalarReason.internal) converted to
+  that type (int, float64, bool).
 
 Implementation notes:
+- A value that fails the check, or still holds an unresolved marker
+  (e.g. one left for a later substitution pass), is returned
+  unconverted. `string` / `scalar` nodes are returned as resolved.
 - A per-target node resolves through crdkit.tokenDef.value (field
   id = the values path); any other value through
   crdkit.tokens.substitute.
@@ -595,10 +601,23 @@ Implementation notes:
   {{- $value = include "crdkit.tokens.substitute" (list $ctx .def $target) -}}
 {{- end -}}
 {{- $_ := set .out "value" $value -}}
+{{- $unresolved := and (kindIs "string" $value) (regexMatch (include "crdkit.markerPattern.internal" (dict)) $value) -}}
+{{- $type := $node.type | default "" | toString -}}
+{{/* converted on every call, not only the checked one: a repeated call (check skipped via "seen") must return the same value. */}}
+{{- if and (kindIs "string" $value) (not $unresolved) (has $type (list "int" "number" "bool")) -}}
+  {{- if not (include "crdkit.schema.scalarReason.internal" (dict "node" $node "value" $value "strict" false)) -}}
+    {{- if eq $type "int" -}}
+      {{- $_ := set .out "value" (atoi $value) -}}
+    {{- else if eq $type "number" -}}
+      {{- $_ := set .out "value" (float64 $value) -}}
+    {{- else -}}
+      {{- $_ := set .out "value" (eq $value "true") -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
 {{- $seenKey := printf "%s|%s" .path $target -}}
 {{- if not (hasKey .seen $seenKey) -}}
   {{- $_ := set .seen $seenKey true -}}
-  {{- $unresolved := and (kindIs "string" $value) (regexMatch (include "crdkit.markerPattern.internal" (dict)) $value) -}}
   {{- if and (eq (len $ctx.diag.errors) $errorsBefore) (not $unresolved) (not (kindIs "invalid" $value)) -}}
     {{- include "crdkit.schema.walk.internal" (dict "node" $node "value" $value "path" .path "diag" $ctx.diag "mode" "resolved" "suffix" (printf " for target '%s'" $target) "out" (dict)) -}}
   {{- end -}}
@@ -718,6 +737,9 @@ Implementation notes:
 - A per-target node or a string with markers is resolved and
   checked (once per path and target, see "seen"); any other value is
   returned as written — the structural pass already checked it.
+- A resolved string of an `int` / `number` / `bool` node is returned
+  converted to that type when it passes the check (see
+  crdkit.schema.resolveAndCheck.internal), on every call.
 - The node must come from a schema that passed crdkit.schema.check,
   through crdkit.schema.node (which makes its per-target state
   explicit — "node" alone cannot know its ancestors).

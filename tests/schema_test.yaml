@@ -701,6 +701,120 @@ tests:
           path: results[2].value
           value: x
 
+  - it: 'a resolved string of an int / number / bool node is returned converted; a string node keeps the string'
+    set:
+      target: prod
+      tokens: {P: "123", R: "1.5", B: "true"}
+      schemaOps:
+        - op: value
+          node: {type: int, tokens: false}
+          def: "@P@"
+          path: port
+        - op: value
+          node: {type: number, tokens: false}
+          def: "@R@"
+          path: ratio
+        - op: value
+          node: {type: bool, tokens: false}
+          def: "@B@"
+          path: enabled
+        - op: value
+          node: {type: string, tokens: false}
+          def: "@P@"
+          path: name
+        - op: value
+          node: {type: scalar, tokens: false}
+          def: "@P@"
+          path: any
+    asserts:
+      - equal:
+          path: results
+          value:
+            - value: 123
+            - value: 1.5
+            - value: true
+            - value: "123"
+            - value: "123"
+      - lengthEqual:
+          path: diag.errors
+          count: 0
+
+  - it: 'a per-target declaration with string values is converted for each target'
+    set:
+      target: prod
+      parentTargetMap:
+        prod-01: prod
+      schemaOps:
+        - op: value
+          node: {type: int, tokens: true}
+          def: {default: "80", prod: "8080"}
+          path: port
+        - op: value
+          node: {type: int, tokens: true}
+          def: {default: "80", prod: "8080"}
+          path: port
+          target: qa
+    asserts:
+      - equal:
+          path: results
+          value:
+            - value: 8080
+            - value: 80
+
+  - it: 'a value failing the check is returned unconverted, with its ERROR; an unresolved marker stays a string'
+    set:
+      target: prod
+      tokens: {P: "12x", E: "3"}
+      schemaOps:
+        - op: value
+          node: {type: int, tokens: false}
+          def: "@P@"
+          path: port
+        - op: value
+          node: {type: int, tokens: false}
+          def: "@LATER@"
+          path: later
+        - op: value
+          node: {type: int, enum: [1, 2], tokens: false}
+          def: "@E@"
+          path: level
+    asserts:
+      - equal:
+          path: results
+          value:
+            - value: "12x"
+            - value: "@LATER@"
+            - value: "3"
+      - equal:
+          path: diag.errors
+          value:
+            - "'port' for target 'prod' must be of type 'int' — got '12x'"
+            - "'level' for target 'prod' must be one of '1', '2' — got '3'"
+
+  - it: 'a repeated call for the same path and target (check skipped) still converts'
+    set:
+      target: prod
+      tokens: {P: "123"}
+      schemaOps:
+        - op: value
+          node: {type: int, tokens: false}
+          def: "@P@"
+          path: port
+        - op: value
+          node: {type: int, tokens: false}
+          def: "@P@"
+          path: port
+    asserts:
+      - equal:
+          path: results
+          value:
+            - value: 123
+            - value: 123
+      - equal:
+          path: seen
+          value:
+            port|prod: true
+
   - it: 'a single field resolves and is checked for an explicit target other than the render target'
     set:
       target: qa
