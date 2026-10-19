@@ -448,26 +448,38 @@ Implementation notes:
 crdkit.schema.valuesWalk.internal (internal)
 
 Value pass over (normalized) values: finds every per-target value and
-checks it for one target.
+checks it for one target; with "out", also builds the copy of the values
+with every per-target value resolved.
 
 Interface:
 - Params (dict): { "ctx": <ctx>, "node": <checked node>, "value":
   <any>, "path": <values path>, "target": <string>, "seen": <dict>,
-  "inTokens": <bool, an ancestor is per-target> }
-- Returns: nothing.
+  "inTokens": <bool, an ancestor is per-target>, "out": <dict, optional> }
+- Returns: nothing; with "out", sets out.value to the resolved copy of
+  "value" (and leaves it unset for a value that has no result).
 
 Implementation notes:
+- Without "out" the walk only checks.
 - Per-target values: the value of every per-target node
   (crdkit.schema.perTarget.internal), and every string holding "@NAME@"
   markers.
 - Follows only what the structural pass would keep: an unmatched switch,
   a shape mismatch or an unknown key is skipped silently (already
-  reported there).
+  reported there) and has no result.
+- Result per level: map → dict of the children's results (a child
+  without a result is omitted), list → list likewise, switch → the
+  selected case's result, "any" and a plain scalar → as written,
+  per-target value → resolved (crdkit.schema.resolveAndCheck.internal).
+- A per-target value whose resolution recorded an ERROR and returned
+  nothing ("no value found") has no result; one that resolved but failed
+  its check keeps the resolved value, unconverted.
 */}}
 {{- define "crdkit.schema.valuesWalk.internal" -}}
 {{- $node := .node -}}
 {{- $value := .value -}}
 {{- $path := .path -}}
+{{- $out := .out -}}
+{{- $collect := kindIs "map" $out -}}
 {{- $shape := include "crdkit.schema.shape.internal" (dict "node" $node) -}}
 {{- $inTokens := .inTokens -}}
 {{- $tokens := include "crdkit.schema.perTarget.internal" (dict "node" $node "inTokens" $inTokens) -}}
@@ -478,18 +490,33 @@ Implementation notes:
   {{- if kindIs "map" $value -}}
     {{- $selected := toString (index $value $node.switch.by) -}}
     {{- if and (not (kindIs "invalid" (index $value $node.switch.by))) (hasKey $node.switch.cases $selected) -}}
-      {{- include "crdkit.schema.valuesWalk.internal" (merge (dict "node" (index $node.switch.cases $selected) "value" $value "path" $path "inTokens" $inTokens) $common) -}}
+      {{- include "crdkit.schema.valuesWalk.internal" (merge (dict "node" (index $node.switch.cases $selected) "value" $value "path" $path "inTokens" $inTokens "out" $out) $common) -}}
     {{- end -}}
   {{- end -}}
 {{- else if eq $shape "any" -}}
+  {{- if $collect -}}{{- $_ := set $out "value" $value -}}{{- end -}}
 {{- else if or $tokens (and (eq $shape "scalar") (kindIs "string" $value) (regexMatch (include "crdkit.markerPattern.internal" (dict)) $value)) -}}
-  {{- include "crdkit.schema.resolveAndCheck.internal" (merge (dict "node" $node "def" $value "tokens" (ne $tokens "") "path" $path "out" (dict)) $common) -}}
-{{- else if and (eq $shape "list") (kindIs "slice" $value) -}}
-  {{- range $i, $element := $value -}}
-    {{- include "crdkit.schema.valuesWalk.internal" (merge (dict "node" ($node.items | default (dict "type" "any")) "value" $element "path" (include "crdkit.schema.path.internal" (dict "path" $path "index" $i)) "inTokens" $childInTokens) $common) -}}
+  {{- $leaf := dict -}}
+  {{- $errorsBefore := len .ctx.diag.errors -}}
+  {{- include "crdkit.schema.resolveAndCheck.internal" (merge (dict "node" $node "def" $value "tokens" (ne $tokens "") "path" $path "out" $leaf) $common) -}}
+  {{- if $collect -}}
+    {{/* an ERROR with an empty result = nothing found for the target. */}}
+    {{- $missing := and (gt (len .ctx.diag.errors) $errorsBefore) (or (kindIs "invalid" $leaf.value) (eq (toString $leaf.value) "")) -}}
+    {{- if not $missing -}}{{- $_ := set $out "value" $leaf.value -}}{{- end -}}
   {{- end -}}
+{{- else if and (eq $shape "scalar") (not (kindIs "map" $value)) (not (kindIs "slice" $value)) -}}
+  {{- if $collect -}}{{- $_ := set $out "value" $value -}}{{- end -}}
+{{- else if and (eq $shape "list") (kindIs "slice" $value) -}}
+  {{- $items := list -}}
+  {{- range $i, $element := $value -}}
+    {{- $childOut := ternary (dict) (index (dict) "none") $collect -}}
+    {{- include "crdkit.schema.valuesWalk.internal" (merge (dict "node" ($node.items | default (dict "type" "any")) "value" $element "path" (include "crdkit.schema.path.internal" (dict "path" $path "index" $i)) "inTokens" $childInTokens "out" $childOut) $common) -}}
+    {{- if and $collect (hasKey $childOut "value") -}}{{- $items = append $items $childOut.value -}}{{- end -}}
+  {{- end -}}
+  {{- if $collect -}}{{- $_ := set $out "value" $items -}}{{- end -}}
 {{- else if and (eq $shape "map") (kindIs "map" $value) -}}
   {{- $properties := $node.properties | default dict -}}
+  {{- $children := dict -}}
   {{- range $key, $child := $value -}}
     {{- $childNode := dict -}}
     {{- if hasKey $properties $key -}}
@@ -498,9 +525,12 @@ Implementation notes:
       {{- $childNode = $node.values -}}
     {{- end -}}
     {{- if $childNode -}}
-      {{- include "crdkit.schema.valuesWalk.internal" (merge (dict "node" $childNode "value" $child "path" (include "crdkit.schema.path.internal" (dict "path" $path "key" $key)) "inTokens" $childInTokens) $common) -}}
+      {{- $childOut := ternary (dict) (index (dict) "none") $collect -}}
+      {{- include "crdkit.schema.valuesWalk.internal" (merge (dict "node" $childNode "value" $child "path" (include "crdkit.schema.path.internal" (dict "path" $path "key" $key)) "inTokens" $childInTokens "out" $childOut) $common) -}}
+      {{- if and $collect (hasKey $childOut "value") -}}{{- $_ := set $children $key $childOut.value -}}{{- end -}}
     {{- end -}}
   {{- end -}}
+  {{- if $collect -}}{{- $_ := set $out "value" $children -}}{{- end -}}
 {{- end -}}
 {{- end -}}
 
