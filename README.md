@@ -614,10 +614,10 @@ Schema for editors and the viewer; the DSL maps keyword by keyword
   `targetDeclaration2`, …, `.<annotation>` appended): key names closed
   (`propertyNames` enum: target keys, `default`, `match`, annotations),
   `match` a list of single-key objects, values untyped (the value pass
-  checks them per target), and the node carries
-  `x-crdkit-targetKeys` / `x-crdkit-annotations`; the Markdown links
-  its Per target cell to a final "Token declarations" section, the
-  viewer lists the keys;
+  checks them per target); the Markdown and the viewer read the keys
+  from that definition (enum order: target keys, `default`, `match`,
+  annotations), the Markdown links the Per target cell to a final
+  "Token declarations" section, the viewer lists the keys;
   a marker-accepting `int`/`number`/`bool`, or `string`/`scalar` with
   `enum` or `pattern`, is `anyOf` [type, `markers`]; `static: true` on a
   `string`/`scalar` adds a `not` pattern.

@@ -121,5 +121,8 @@ tests:
           path: results[0].outside
           pattern: 'closed.indexOf\("prod"\) < 0 \? closed\[0\] : "prod"'
       - matchRegex:
+          path: results[0].outside
+          pattern: 'function declOf\(n\)'
+      - matchRegex:
           path: results[0].text
-          pattern: '"x-crdkit-targetKeys": \[\s*"ALL"\s*\]'
+          pattern: '"enum": \[\s*"ALL",\s*"default",\s*"match",\s*"owner"\s*\]'

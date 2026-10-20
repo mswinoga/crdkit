@@ -693,14 +693,15 @@ Required, Description) to acc.rows.
 
 Interface:
 - Params (dict): { "key": <text shown as the key>, "node": <JSON Schema
-  node>, "required": <bool>, "shared": <bool>, "acc": <dict with a
-  "rows" list, appended to in place> }
+  node>, "defs": <JSON Schema definitions>, "required": <bool>,
+  "shared": <bool>, "acc": <dict with a "rows" list, appended to in
+  place> }
 - Returns: nothing (mutating helper).
 
 Implementation notes:
 - Cells are escaped for a Markdown table (`|`, line breaks).
-- A per-target node with closed declaration keys (`x-crdkit-targetKeys`)
-  links its Per target cell to the "Token declarations" section and
+- A per-target node with closed declaration keys
+  (crdkit.schema.jsonDeclaration.internal) links its Per target cell to the "Token declarations" section and
   names its annotations.
 */}}
 {{- define "crdkit.schema.mdRow.internal" -}}
@@ -714,10 +715,12 @@ Implementation notes:
   {{- $key = printf "%s (shared)" $key -}}
 {{- end -}}
 {{- $perTarget := index $node "x-crdkit-perTarget" | default "" | toString -}}
-{{- if and (eq $perTarget "yes") (hasKey $node "x-crdkit-targetKeys") -}}
+{{- $declaration := dict -}}
+{{- include "crdkit.schema.jsonDeclaration.internal" (dict "node" $node "defs" .defs "out" $declaration) -}}
+{{- if and (eq $perTarget "yes") (hasKey $declaration "targetKeys") -}}
   {{- $perTarget = "[yes](#token-declarations)" -}}
   {{- $annotations := list -}}
-  {{- range $annotation := index $node "x-crdkit-annotations" | default list -}}
+  {{- range $annotation := $declaration.annotations -}}
     {{- $annotations = append $annotations (printf "`%s`" $annotation) -}}
   {{- end -}}
   {{- if $annotations -}}
@@ -782,8 +785,9 @@ crdkit.schema.generatedExample.internal (internal)
 Derives the example of a node the example values do not reach.
 
 Interface:
-- Params (dict): { "node": <JSON Schema node>, "out": <dict, "has"
-  (bool) and "value" are set in place> }
+- Params (dict): { "node": <JSON Schema node>, "defs": <JSON Schema
+  definitions>, "out": <dict, "has" (bool) and "value" are set in
+  place> }
 - Returns: nothing (mutating helper).
 
 Implementation notes:
@@ -794,7 +798,7 @@ Implementation notes:
   ("text" might not match); a map omits such properties.
 - A per-target node (`x-crdkit-perTarget: yes`) becomes `{default:
   <example>, prod: <example>}`; with closed declaration keys
-  (`x-crdkit-targetKeys`) without `prod`, the first target key replaces
+  (crdkit.schema.jsonDeclaration.internal) without `prod`, the first target key replaces
   `prod`.
 */}}
 {{- define "crdkit.schema.generatedExample.internal" -}}
@@ -822,13 +826,13 @@ Implementation notes:
   {{- $value = true -}}
 {{- else if eq $type "list" -}}
   {{- $item := dict -}}
-  {{- include "crdkit.schema.generatedExample.internal" (dict "node" $core.items "out" $item) -}}
+  {{- include "crdkit.schema.generatedExample.internal" (dict "node" $core.items "defs" .defs "out" $item) -}}
   {{- $value = ternary (list $item.value) (list) $item.has -}}
 {{- else if eq $type "map" -}}
   {{- $value = dict -}}
   {{- range $name := index $node "x-crdkit-order" | default (list) -}}
     {{- $child := dict -}}
-    {{- include "crdkit.schema.generatedExample.internal" (dict "node" (index $node.properties $name) "out" $child) -}}
+    {{- include "crdkit.schema.generatedExample.internal" (dict "node" (index $node.properties $name) "defs" $.defs "out" $child) -}}
     {{- if $child.has -}}
       {{- $_ := set $value $name $child.value -}}
     {{- end -}}
@@ -838,7 +842,9 @@ Implementation notes:
 {{- end -}}
 {{- if and $has (eq (index $node "x-crdkit-perTarget" | default "" | toString) "yes") -}}
   {{- $targetKey := "prod" -}}
-  {{- $closed := index $node "x-crdkit-targetKeys" | default list -}}
+  {{- $declaration := dict -}}
+  {{- include "crdkit.schema.jsonDeclaration.internal" (dict "node" $node "defs" .defs "out" $declaration) -}}
+  {{- $closed := $declaration.targetKeys | default list -}}
   {{- if and $closed (not (has "prod" $closed)) -}}
     {{- $targetKey = first $closed -}}
   {{- end -}}
@@ -858,7 +864,8 @@ Interface:
   "value": <case value>, "pairs": <list of {keys, value}: the example
   values found at the switch node and the keys leading to each>,
   "labels": <list of key labels from the root to the switch node>,
-  "out": <dict, "text" (YAML) and "generated" (bool) are set in place> }
+  "defs": <JSON Schema definitions>, "out": <dict, "text" (YAML) and
+  "generated" (bool) are set in place> }
 - Returns: nothing (mutating helper).
 
 Implementation notes:
@@ -884,7 +891,7 @@ Implementation notes:
 {{- end -}}
 {{- if $generated -}}
   {{- $body := dict -}}
-  {{- include "crdkit.schema.generatedExample.internal" (dict "node" .node "out" $body) -}}
+  {{- include "crdkit.schema.generatedExample.internal" (dict "node" .node "defs" .defs "out" $body) -}}
   {{- $wrapped := set $body.value .by .value -}}
   {{- range $label := reverse .labels -}}
     {{- $wrapped = dict $label $wrapped -}}
@@ -1013,10 +1020,10 @@ Implementation notes:
 {{- if $isMap -}}
   {{- range $name := $names -}}
     {{- $child := index $props $name -}}
-    {{- include "crdkit.schema.mdRow.internal" (dict "key" $name "node" $child "required" (has $name $required) "shared" (eq (index $child "x-crdkit-shared" | default false | toString) "true") "acc" $rows) -}}
+    {{- include "crdkit.schema.mdRow.internal" (dict "key" $name "node" $child "defs" $defs "required" (has $name $required) "shared" (eq (index $child "x-crdkit-shared" | default false | toString) "true") "acc" $rows) -}}
   {{- end -}}
   {{- if kindIs "map" $valuesNode -}}
-    {{- include "crdkit.schema.mdRow.internal" (dict "key" $label "node" $valuesNode "required" false "shared" false "acc" $rows) -}}
+    {{- include "crdkit.schema.mdRow.internal" (dict "key" $label "node" $valuesNode "defs" $defs "required" false "shared" false "acc" $rows) -}}
   {{- end -}}
 {{- end -}}
 {{- $nodeSections := index $node "x-crdkit-sections" | default (list) -}}
@@ -1031,7 +1038,7 @@ Implementation notes:
   {{- end -}}
   {{- if $case -}}
     {{- $example := dict -}}
-    {{- include "crdkit.schema.mdCaseExample.internal" (dict "node" $node "by" $case.by "value" $case.value "pairs" $pairs "labels" $labels "out" $example) -}}
+    {{- include "crdkit.schema.mdCaseExample.internal" (dict "node" $node "by" $case.by "value" $case.value "pairs" $pairs "labels" $labels "defs" $defs "out" $example) -}}
     {{- $parts = append $parts (printf "**Example**%s\n\n```yaml\n%s\n```" (ternary " (generated)" "" $example.generated) $example.text) -}}
   {{- end -}}
   {{- range $section := $nodeSections -}}
@@ -1385,8 +1392,8 @@ Implementation notes:
   shared closed definition instead of `tokenDeclaration`
   (crdkit.schema.declarationRef.internal): the key names are closed,
   the values are not typed (the value pass checks them per target).
-  The node carries `x-crdkit-targetKeys` (and `x-crdkit-annotations`)
-  for the Markdown and the viewer.
+  Readers get the keys from that definition
+  (crdkit.schema.jsonDeclaration.internal).
 */}}
 {{- define "crdkit.schema.jsonNode.internal" -}}
 {{- $node := .node -}}
@@ -1549,10 +1556,6 @@ Implementation notes:
 {{- if and $tokens (has $shape (list "scalar" "list")) (kindIs "slice" $targetKeys) -}}
   {{- $ref := include "crdkit.schema.declarationRef.internal" (dict "targetKeys" $targetKeys "annotations" ($node.annotations | default list) "acc" $acc) -}}
   {{- $wrapped = list $core (dict "$ref" $ref) (dict "$ref" "#/definitions/markers") -}}
-  {{- $_ := set $result "x-crdkit-targetKeys" $targetKeys -}}
-  {{- if $node.annotations -}}
-    {{- $_ := set $result "x-crdkit-annotations" $node.annotations -}}
-  {{- end -}}
 {{- else if and $tokens (has $shape (list "scalar" "list")) -}}
   {{- $wrapped = list $core (dict "$ref" "#/definitions/tokenDeclaration") (dict "$ref" "#/definitions/markers") -}}
 {{- else if and (eq $shape "scalar") (ne (toString $node.static) "true") (or (has $type (list "int" "number" "bool")) (hasKey $node "enum") (hasKey $node "pattern")) -}}
@@ -1569,44 +1572,45 @@ Implementation notes:
 {{- end -}}
 
 {{/*
-crdkit.schema.mdTargetKeys.internal (internal)
+crdkit.schema.jsonDeclaration.internal (internal)
 
-Collects the distinct closed declaration key sets of a JSON Schema
-generated by crdkit.schema.jsonSchema.
+Reads the closed declaration keys of a per-target JSON Schema node from
+the shared definition its declaration branch references (see
+crdkit.schema.declarationRef.internal).
 
 Interface:
-- Params (dict): { "node": <JSON Schema node>, "acc": <dict with a
-  "sets" list, appended to in place> }
+- Params (dict): { "node": <JSON Schema node>, "defs": <JSON Schema
+  definitions>, "out": <dict, "targetKeys" and "annotations" (lists)
+  are set in place; untouched for an open or non-per-target node> }
 - Returns: nothing (mutating helper).
 
 Implementation notes:
-- Follows `properties`, `additionalProperties` (when a node) and
-  `items`, through the `anyOf` core; switch cases are visited by the
-  caller from `definitions`.
-- A set is `x-crdkit-targetKeys` of a node; sets compare by value, in
-  order of first appearance.
+- The definition's `propertyNames.enum` is `<targetKeys>, default,
+  match, <annotations>`: split on `default` and `match`.
 */}}
-{{- define "crdkit.schema.mdTargetKeys.internal" -}}
-{{- $node := .node -}}
-{{- $acc := .acc -}}
-{{- if kindIs "map" $node -}}
-  {{- $set := index $node "x-crdkit-targetKeys" -}}
-  {{- if and (kindIs "slice" $set) (not (has (toJson $set) $acc.seen)) -}}
-    {{- $_ := set $acc "seen" (append $acc.seen (toJson $set)) -}}
-    {{- $_ := set $acc "sets" (append $acc.sets $set) -}}
-  {{- end -}}
-  {{- $core := $node -}}
-  {{- if hasKey $node "anyOf" -}}
-    {{- $core = first $node.anyOf -}}
-  {{- end -}}
-  {{- range $name, $child := $core.properties | default dict -}}
-    {{- include "crdkit.schema.mdTargetKeys.internal" (dict "node" $child "acc" $acc) -}}
-  {{- end -}}
-  {{- if kindIs "map" $core.additionalProperties -}}
-    {{- include "crdkit.schema.mdTargetKeys.internal" (dict "node" $core.additionalProperties "acc" $acc) -}}
-  {{- end -}}
-  {{- if kindIs "map" $core.items -}}
-    {{- include "crdkit.schema.mdTargetKeys.internal" (dict "node" $core.items "acc" $acc) -}}
+{{- define "crdkit.schema.jsonDeclaration.internal" -}}
+{{- $defs := .defs | default dict -}}
+{{- range $branch := .node.anyOf | default list -}}
+  {{- $ref := $branch | default dict | dig "$ref" "" | toString -}}
+  {{- $name := trimPrefix "#/definitions/" $ref -}}
+  {{- $enum := dig "propertyNames" "enum" list (index $defs $name | default dict) -}}
+  {{- if and $ref (has "default" $enum) (has "match" $enum) -}}
+    {{- $targetKeys := list -}}
+    {{- $annotations := list -}}
+    {{- $part := "keys" -}}
+    {{- range $key := $enum -}}
+      {{- if eq $key "default" -}}
+        {{- $part = "fixed" -}}
+      {{- else if eq $key "match" -}}
+        {{- $part = "annotations" -}}
+      {{- else if eq $part "keys" -}}
+        {{- $targetKeys = append $targetKeys $key -}}
+      {{- else if eq $part "annotations" -}}
+        {{- $annotations = append $annotations $key -}}
+      {{- end -}}
+    {{- end -}}
+    {{- $_ := set $.out "targetKeys" $targetKeys -}}
+    {{- $_ := set $.out "annotations" $annotations -}}
   {{- end -}}
 {{- end -}}
 {{- end -}}

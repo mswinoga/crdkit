@@ -173,6 +173,17 @@ var esc = function (s) { return String(s).replace(/[&<>"]/g, function (c) { retu
 var clone = function (v) { return JSON.parse(JSON.stringify(v)); };
 var keyPath = function (path, key) { return key.indexOf(".") >= 0 ? path + "[" + JSON.stringify(key) + "]" : (path ? path + "." + key : key); };
 var firstLine = function (s) { return String(s || "").split("\n")[0]; };
+// Closed declaration keys of a per-target node, read from the shared definition it references: propertyNames.enum = <targetKeys>, default, match, <annotations>.
+function declOf(n) {
+  var out = null;
+  (Array.isArray(n.anyOf) ? n.anyOf : []).forEach(function (b) {
+    var ref = b && typeof b["$ref"] === "string" ? b["$ref"] : "", d = DEFS[ref.replace("#/definitions/", "")];
+    var e = d && d.propertyNames && Array.isArray(d.propertyNames["enum"]) ? d.propertyNames["enum"] : [];
+    var i = e.indexOf("default"), j = e.indexOf("match");
+    if (!out && ref && i >= 0 && j > i) { out = { targetKeys: e.slice(0, i), annotations: e.slice(j + 1) }; }
+  });
+  return out;
+}
 
 function deepMerge(into, from) {
   Object.keys(from).forEach(function (k) {
@@ -262,7 +273,7 @@ function gen(node) {
     });
   } else { value = {}; }
   if (hasValue && String(node["x-crdkit-perTarget"] || "") === "yes") {
-    var closed = node["x-crdkit-targetKeys"], tk = Array.isArray(closed) && closed.length && closed.indexOf("prod") < 0 ? closed[0] : "prod", wrapped = { "default": value };
+    var decl = declOf(node), closed = decl && decl.targetKeys, tk = Array.isArray(closed) && closed.length && closed.indexOf("prod") < 0 ? closed[0] : "prod", wrapped = { "default": value };
     wrapped[tk] = value; value = wrapped;
   }
   return { has: hasValue, value: value };
@@ -625,8 +636,9 @@ function renderDetail() {
   } else {
     var facts = [["Type", badge(n)]], pt2 = String(n["x-crdkit-perTarget"] || "");
     if (PT_TEXT[pt2]) { facts.push(["Per target", esc(PT_TEXT[pt2])]); }
-    if (Array.isArray(n["x-crdkit-targetKeys"])) {
-      facts.push(["Declaration keys", n["x-crdkit-targetKeys"].concat(["default", "match"], n["x-crdkit-annotations"] || []).map(function (k) { return "<code>" + esc(k) + "</code>"; }).join(", ") +
+    var decl = declOf(n);
+    if (decl) {
+      facts.push(["Declaration keys", decl.targetKeys.concat(["default", "match"], decl.annotations).map(function (k) { return "<code>" + esc(k) + "</code>"; }).join(", ") +
         " — an exact target goes in <code>match</code>"]);
     }
     if (it.required) { facts.push(["Required", "yes"]); }

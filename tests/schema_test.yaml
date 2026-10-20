@@ -2587,8 +2587,6 @@ tests:
               - {"$ref": "#/definitions/markers"}
             x-crdkit-type: string
             x-crdkit-perTarget: "yes"
-            x-crdkit-targetKeys: [ALL, prod]
-            x-crdkit-annotations: [owner]
       - equal:
           path: results[0].json.properties.open.properties.num.anyOf[1]
           value: {"$ref": "#/definitions/targetDeclaration"}
@@ -2598,8 +2596,6 @@ tests:
       - equal:
           path: results[0].json.properties.open.properties.dev.properties.x.anyOf[1]
           value: {"$ref": "#/definitions/targetDeclaration2"}
-      - notExists:
-          path: results[0].json.properties.open.properties.num["x-crdkit-annotations"]
       - equal:
           path: results[0].json.definitions.targetDeclaration
           value:
@@ -2634,7 +2630,7 @@ tests:
           path: results[0].json.properties.host.anyOf[1]
           value: {"$ref": "#/definitions/tokenDeclaration"}
       - notExists:
-          path: results[0].json.properties.host["x-crdkit-targetKeys"]
+          path: results[0].json.definitions.targetDeclaration
 
   - it: 'docs: closed declarations link to one Token declarations section listing each key set'
     set:
