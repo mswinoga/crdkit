@@ -26,7 +26,7 @@ Interface:
     declarations; crdkit stores them but never interprets or
     resolves them. A name equal to a crdkit-internal key, "match" or
     "default" records an ERROR and is ignored.
-  - diag: optional {errors, warnings} seed (missing lists are filled in
+  - diag: optional {errors, warnings, infos} seed (missing lists are filled in
     with empty ones); crdkit only transports the seeded entries and
     appends new diagnostics as they arise, then emits them all
   - state: optional dict whose keys are copied into ctx before the chain
@@ -34,7 +34,7 @@ Interface:
     input); crdkit never reads it. A key equal to a crdkit ctx key
     records an ERROR and is ignored.
 - Returns: the rendered CR as YAML text, followed by its diagnostics as
-  `# ERROR:`/`# WARNING:` comment lines.
+  `# ERROR:`/`# WARNING:`/`# INFO:` comment lines.
 
 Implementation notes:
 - Pipeline: merge tokens -> build empty ctx.model -> run the chain (the
@@ -59,6 +59,9 @@ Implementation notes:
 {{- end -}}
 {{- if not (hasKey $diag "warnings") -}}
   {{- $diag = set $diag "warnings" (list) -}}
+{{- end -}}
+{{- if not (hasKey $diag "infos") -}}
+  {{- $diag = set $diag "infos" (list) -}}
 {{- end -}}
 {{- $root := .context -}}
 {{- $system := .system | default dict -}}

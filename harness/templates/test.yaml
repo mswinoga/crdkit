@@ -62,8 +62,8 @@ a real render goes through:
     crdkit.model.hasPath against the model as built so far and appends
     {path, found} to "hasPathResults" ("found" is the helper's raw
     string output: "true" or "").
-  - .Values.diagOps is a list of {level, message} ("error" or "warning")
-    recorded in order through crdkit.diag.error / crdkit.diag.warning on
+  - .Values.diagOps is a list of {level, message} ("error", "warning" or
+    "info") recorded in order through crdkit.diag.error|warning|info on
     the shared diag, so they append to whatever earlier ops recorded.
 
 "tokens" in the output is the LIVE ctx.tokens map, including whatever
@@ -152,6 +152,8 @@ substituted "structure" text.
     {{- include "crdkit.diag.error" (list $diag $op.message) -}}
   {{- else if eq $op.level "warning" -}}
     {{- include "crdkit.diag.warning" (list $diag $op.message) -}}
+  {{- else if eq $op.level "info" -}}
+    {{- include "crdkit.diag.info" (list $diag $op.message) -}}
   {{- end -}}
 {{- end }}
 

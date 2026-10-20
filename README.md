@@ -2,7 +2,7 @@
 
 Generic Helm **library chart**: target-aware token resolution/
 substitution, a diagnostics accumulator (never `fail()`s — emits
-`# ERROR:`/`# WARNING:` comments instead), and an integration-chain
+`# ERROR:`/`# WARNING:`/`# INFO:` comments instead), and an integration-chain
 dispatcher.
 
 crdkit has no knowledge of any specific CRD, and no concept of
@@ -33,7 +33,7 @@ Everything product-specific, as an explicit dict param — see
 - `tokenAnnotations`: list of token annotation names — metadata the
   library attaches to token declarations, e.g. an owning service
   (optional; see "Token model")
-- `diag`: optional `{errors, warnings}` seed; crdkit appends to it and
+- `diag`: optional `{errors, warnings, infos}` seed; crdkit appends to it and
   emits everything (the library can record its own pre-render
   diagnostics there)
 - `chain`: ordered list of fully-qualified integration template names
@@ -94,9 +94,10 @@ crdkit's concern.
   string `true` when the path exists (each intermediate node a map), an
   empty string otherwise: `{{ if include "crdkit.model.hasPath" (list
   .ctx.model "spec" "services") }}`.
-- `crdkit.diag.error` / `crdkit.diag.warning` — `(list diag message)`
-  append `message` to `diag.errors` / `diag.warnings` in place and return
-  `""`; an integration passes `.ctx.diag`:
+- `crdkit.diag.error` / `crdkit.diag.warning` / `crdkit.diag.info` —
+  `(list diag message)` append `message` to `diag.errors` /
+  `diag.warnings` / `diag.infos` in place and return `""` (INFO: a valid
+  outcome worth reporting, never a problem); an integration passes `.ctx.diag`:
   `{{- include "crdkit.diag.error" (list .ctx.diag "service 'X' is misconfigured") -}}`.
 - Order is the precedence policy: consumer labels first,
   `crdkit.standardLabels` second (wins on collision), then the rest of

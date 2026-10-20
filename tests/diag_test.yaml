@@ -16,3 +16,20 @@ tests:
       - equal:
           path: diag.warnings
           value: ["first warning", "second warning"]
+
+  - it: diag.info appends in call order to diag.infos, created when missing
+    set:
+      diagOps:
+        - {level: info, message: "first info"}
+        - {level: warning, message: "a warning"}
+        - {level: info, message: "second info"}
+    asserts:
+      - equal:
+          path: diag.infos
+          value: ["first info", "second info"]
+      - equal:
+          path: diag.warnings
+          value: ["a warning"]
+      - equal:
+          path: diag.errors
+          value: []
