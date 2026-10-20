@@ -22,6 +22,11 @@ Schema node (a dict):
   per-target (a token declaration, resolved per target), except below a
   per-target node, where only markers are allowed (see
   crdkit.schema.perTarget.internal)
+- targetKeys (any node): list of target keys a token declaration at or
+  below the node may use, next to `default` and `match`; inherited, a
+  descendant's own replaces it; absent everywhere = any key
+- annotations (scalar types, list): annotation keys a token declaration
+  at this node may use
 - map: properties ({key: node}), values (node for every other key;
   omitted = every other key is unknown), keys ({pattern, label?} for keys
   matched by "values"; label = documentation-only placeholder for a

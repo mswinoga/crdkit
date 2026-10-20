@@ -96,7 +96,7 @@ Interface:
 {{- if not (kindIs "map" $node) -}}
   {{- $found = append $found "node must be a map" -}}
 {{- else -}}
-  {{- $allowed := list "doc" "default" "required" "type" "enum" "pattern" "static" "properties" "values" "keys" "items" "switch" -}}
+  {{- $allowed := list "doc" "default" "required" "type" "enum" "pattern" "static" "properties" "values" "keys" "items" "switch" "targetKeys" "annotations" -}}
   {{- range $key, $_ := $node -}}
     {{- if not (has $key $allowed) -}}
       {{- $found = append $found (printf "unknown schema key '%s'" $key) -}}
@@ -127,7 +127,7 @@ Interface:
   {{- else if not $shape -}}
     {{- $found = append $found (printf "unknown type '%s'" $type) -}}
   {{- end -}}
-  {{- $appliesTo := dict "enum" (list "scalar") "pattern" (list "scalar") "static" (list "scalar") "properties" (list "map") "values" (list "map") "keys" (list "map") "items" (list "list") -}}
+  {{- $appliesTo := dict "enum" (list "scalar") "pattern" (list "scalar") "static" (list "scalar") "properties" (list "map") "values" (list "map") "keys" (list "map") "items" (list "list") "annotations" (list "scalar" "list") -}}
   {{- if $shape -}}
     {{- range $key, $shapes := $appliesTo -}}
       {{- if and (hasKey $node $key) (not (has $shape $shapes)) -}}
@@ -140,6 +140,19 @@ Interface:
   {{- end -}}
   {{- if and (hasKey $node "pattern") (not (kindIs "string" $node.pattern)) -}}
     {{- $found = append $found "'pattern' must be a string" -}}
+  {{- end -}}
+  {{- range $key := list "targetKeys" "annotations" -}}
+    {{- if hasKey $node $key -}}
+      {{- $strings := kindIs "slice" (index $node $key) -}}
+      {{- if $strings -}}
+        {{- range $item := index $node $key -}}
+          {{- $strings = and $strings (kindIs "string" $item) -}}
+        {{- end -}}
+      {{- end -}}
+      {{- if not $strings -}}
+        {{- $found = append $found (printf "'%s' must be a list of strings" $key) -}}
+      {{- end -}}
+    {{- end -}}
   {{- end -}}
   {{- range $flag := list "required" "static" -}}
     {{- if and (hasKey $node $flag) (not (kindIs "bool" (index $node $flag))) -}}
@@ -229,6 +242,71 @@ Implementation notes:
 {{- end -}}
 
 {{/*
+crdkit.schema.declarationKeys.internal (internal)
+
+The keys a token declaration at a node may use when target keys are in
+effect.
+
+Interface:
+- Params (dict): { "node": <checked node>, "targetKeys": <list of
+  strings in effect at the node> }
+- Returns YAML: { "value": [<target keys>..., default, match,
+  <node annotations>...] }
+*/}}
+{{- define "crdkit.schema.declarationKeys.internal" -}}
+value: {{ concat .targetKeys (list "default" "match") (.node.annotations | default list) | toYaml | nindent 2 }}
+{{- end -}}
+
+{{/*
+crdkit.schema.checkDeclaration.internal (internal)
+
+Checks the keys of one consumer token declaration against the keys in
+effect (crdkit.schema.declarationKeys.internal); part of the structural
+pass.
+
+Interface:
+- Params (dict): { "node": <checked node>, "value": <the declaration, a
+  dict>, "path": <values path>, "diag": <dict>, "targetKeys": <list of
+  strings in effect>, "out": <dict, written in place> }
+- Returns: nothing; sets out.value to the declaration without the keys
+  that failed (out.keep stays true).
+
+Implementation notes:
+- An unknown key → ERROR `'<path>.<key>' is not a target key — ignored;
+  allowed: <keys>; an exact target goes in 'match'`, key dropped.
+- `match` that is not a list of single-key maps → ERROR, dropped; its
+  regexes are checked at resolution (crdkit.matchRules).
+- Keys are visited in sorted order, so messages are stable.
+*/}}
+{{- define "crdkit.schema.checkDeclaration.internal" -}}
+{{- $diag := .diag -}}
+{{- $allowed := (include "crdkit.schema.declarationKeys.internal" (dict "node" .node "targetKeys" .targetKeys) | fromYaml).value -}}
+{{- $result := dict -}}
+{{- range $key := keys .value | sortAlpha -}}
+  {{- $entry := index $.value $key -}}
+  {{- $keyPath := include "crdkit.schema.path.internal" (dict "path" $.path "key" $key) -}}
+  {{- if not (has $key $allowed) -}}
+    {{- include "crdkit.diag.error" (list $diag (printf "'%s' is not a target key — ignored; allowed: %s; an exact target goes in 'match'" $keyPath (join ", " $allowed))) -}}
+  {{- else if eq $key "match" -}}
+    {{- $valid := kindIs "slice" $entry -}}
+    {{- if $valid -}}
+      {{- range $rule := $entry -}}
+        {{- $valid = and $valid (kindIs "map" $rule) (eq (len $rule) 1) -}}
+      {{- end -}}
+    {{- end -}}
+    {{- if $valid -}}
+      {{- $_ := set $result $key $entry -}}
+    {{- else -}}
+      {{- include "crdkit.diag.error" (list $diag (printf "'%s' must be a list of single-key maps {<regex>: <value>} — ignored" $keyPath)) -}}
+    {{- end -}}
+  {{- else -}}
+    {{- $_ := set $result $key $entry -}}
+  {{- end -}}
+{{- end -}}
+{{- $_ := set .out "value" $result -}}
+{{- end -}}
+
+{{/*
 crdkit.schema.walk.internal (internal)
 
 Validates one value against one node, recursively.
@@ -238,7 +316,8 @@ Interface:
   "path": <values path>, "diag": <dict>, "mode": "structural" |
   "resolved", "suffix": <text after the path in resolved-mode messages,
   e.g. " for target 'qa'">, "inTokens": <bool, an ancestor is
-  per-target>, "out": <dict, written in place> }
+  per-target>, "targetKeys": <inherited target keys, optional>, "out":
+  <dict, written in place> }
 - Returns: nothing; sets out.keep (bool) and out.value (structural:
   the normalized value — defaults applied, failing nodes dropped).
 
@@ -250,7 +329,9 @@ Implementation notes:
   ERROR; a node that fails is dropped (its parent's default then
   applies), a key failing "keys.pattern" with its value. A per-target
   node holding a dict is a token declaration: kept as written, checked
-  by the value pass. A string holding "@NAME@" markers skips type/enum/pattern —
+  by the value pass; with target keys in effect (the node's own
+  `targetKeys`, else the inherited ones) its keys are checked first
+  (crdkit.schema.checkDeclaration.internal). A string holding "@NAME@" markers skips type/enum/pattern —
   it is checked by the value pass once substituted.
 - resolved mode: the value is a resolved per-target value; every
   violation except an unknown key is an ERROR; scalars are checked
@@ -272,6 +353,10 @@ Implementation notes:
 {{- $_ := set $out "value" $value -}}
 {{- $shape := include "crdkit.schema.shape.internal" (dict "node" $node) -}}
 {{- $inTokens := .inTokens -}}
+{{- $targetKeys := .targetKeys -}}
+{{- if hasKey $node "targetKeys" -}}
+  {{- $targetKeys = $node.targetKeys -}}
+{{- end -}}
 {{- $tokens := include "crdkit.schema.perTarget.internal" (dict "node" $node "inTokens" $inTokens) -}}
 {{- $childInTokens := or $inTokens (ne $tokens "") -}}
 {{- $isDeclaration := and (not $resolved) $tokens (kindIs "map" $value) -}}
@@ -288,8 +373,10 @@ Implementation notes:
     {{- include $shapeDiag (list $diag (printf "'%s'%s has unknown value '%v'%s" $onPath $suffix (index $value $switch.by) $tail)) -}}
     {{- $_ := set $out "keep" false -}}
   {{- else -}}
-    {{- include "crdkit.schema.walk.internal" (dict "node" (index $switch.cases (toString (index $value $switch.by))) "value" $value "path" $path "diag" $diag "mode" $mode "suffix" $suffix "inTokens" $inTokens "out" $out) -}}
+    {{- include "crdkit.schema.walk.internal" (dict "node" (index $switch.cases (toString (index $value $switch.by))) "value" $value "path" $path "diag" $diag "mode" $mode "suffix" $suffix "inTokens" $inTokens "targetKeys" $targetKeys "out" $out) -}}
   {{- end -}}
+{{- else if and $isDeclaration (kindIs "slice" $targetKeys) -}}
+  {{- include "crdkit.schema.checkDeclaration.internal" (dict "node" $node "value" $value "path" $path "diag" $diag "targetKeys" $targetKeys "out" $out) -}}
 {{- else if or (eq $shape "any") $isDeclaration -}}
   {{/* kept as written */}}
 {{- else if eq $shape "scalar" -}}
@@ -326,7 +413,7 @@ Implementation notes:
         {{- $result = append $result $element -}}
       {{- else -}}
         {{- $elementOut := dict -}}
-        {{- include "crdkit.schema.walk.internal" (dict "node" $items "value" $element "path" $elementPath "diag" $diag "mode" $mode "suffix" $suffix "inTokens" $childInTokens "out" $elementOut) -}}
+        {{- include "crdkit.schema.walk.internal" (dict "node" $items "value" $element "path" $elementPath "diag" $diag "mode" $mode "suffix" $suffix "inTokens" $childInTokens "targetKeys" $targetKeys "out" $elementOut) -}}
         {{- if $elementOut.keep -}}
           {{- $result = append $result $elementOut.value -}}
         {{- end -}}
@@ -358,7 +445,7 @@ Implementation notes:
           {{- include "crdkit.diag.warning" (list $diag (printf "'%s'%s is not a known key%s" $childPath $suffix $tail)) -}}
         {{- else -}}
           {{- $childOut := dict -}}
-          {{- include "crdkit.schema.walk.internal" (dict "node" $childNode "value" $child "path" $childPath "diag" $diag "mode" $mode "suffix" $suffix "inTokens" $childInTokens "out" $childOut) -}}
+          {{- include "crdkit.schema.walk.internal" (dict "node" $childNode "value" $child "path" $childPath "diag" $diag "mode" $mode "suffix" $suffix "inTokens" $childInTokens "targetKeys" $targetKeys "out" $childOut) -}}
           {{- if $childOut.keep -}}
             {{- $_ := set $result $key $childOut.value -}}
           {{- end -}}

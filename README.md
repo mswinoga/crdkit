@@ -332,6 +332,8 @@ A schema is a tree of **nodes**; each node is a dict.
 | `keys` | `map` | `{pattern: <regex>, label?: <string>}` for keys matched by `values`; `label` is a documentation-only placeholder for a matched key (e.g. `<ID>`) | any key |
 | `items` | `list` | node for every element | `{type: any}` |
 | `switch` | node | `{by: <key>, cases: {<value>: <node>}}` | — |
+| `targetKeys` | all | list of target keys a token declaration at or below the node may use; inherited, a descendant's own replaces it | declarations open (any key) |
+| `annotations` | scalar types, `list` | list of annotation keys a token declaration at this node may use | none |
 
 Types:
 
@@ -368,6 +370,14 @@ Per-target values:
   in a scalar/list field is unambiguously a declaration
   (`{default: [a], prod: [a, b]}`); in a map field it would not be.
 - At most one per-target node on any path from the root.
+- Declaration keys: with `targetKeys` in effect (the node's own, else
+  the nearest ancestor's), a declaration may use those keys, `default`,
+  `match` (a list of single-key maps `{<regex>: <value>}`) and the
+  node's `annotations`; anything else is an ERROR, key dropped. An
+  exact target is not a key: it goes in `match`. Without `targetKeys`
+  any key is a target entry.
+- Only consumer values are checked (`crdkit.schema.validate`); library
+  token declarations never pass through the schema.
 
 Defaults and required:
 - `default` (on a `properties` entry) is inserted, as written, when the
@@ -432,7 +442,8 @@ Structural pass (`crdkit.schema.validate`):
 - Returns `{value: <normalized>}`: defaults applied, every failing node
   dropped (so its default applies instead).
 - Leaves per-target values for the value pass: a token declaration is
-  kept as written; a string holding `@NAME@` markers skips
+  kept as written (its keys checked when `targetKeys` are in effect); a
+  string holding `@NAME@` markers skips
   `type`/`enum`/`pattern`.
 - `type` is checked strictly on values as written (`"5"` is not an
   `int`; Helm decodes every number as float64, so an integral number
@@ -507,6 +518,8 @@ list elements are indexed: `services["a.b"].ports[0]`.
 | required | ERROR | `'<path>' is required` |
 | type / enum / pattern | ERROR | `'<path>' must be of type 'int' — ignored` |
 | markers in a static value | ERROR | `'<path>' must not contain '@NAME@' markers — ignored` |
+| declaration key | ERROR | `'<path>.<key>' is not a target key — ignored; allowed: <keys>; an exact target goes in 'match'` |
+| declaration `match` | ERROR | `'<path>.match' must be a list of single-key maps {<regex>: <value>} — ignored` |
 | value pass | ERROR | `'<path>' for target '<t>' must be of type 'int' — got '<v>'` |
 
 In the value pass every violation except an unknown key is an ERROR.
