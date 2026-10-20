@@ -4,7 +4,7 @@ crdkit.standardLabels (public)
 Standard labels computed from Helm's own context — not called
 automatically by crdkit.render; a specific library merges the result
 into its own `ctx.model.metadata.labels` from within its chain (see
-my-crd's `mycrd.integrations.preamble`).
+mdeploy's `mdeploy.integrations.copy`).
 
 Interface:
 - Params (dict): { "context": <root $> }

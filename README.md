@@ -7,18 +7,18 @@ dispatcher.
 
 crdkit has no knowledge of any specific CRD, and no concept of
 "environment"/"family"/"tier". All of that is supplied by a specific
-library chart (e.g. `my-crd`) that depends on crdkit and wraps
+library chart (e.g. `mdeploy`) that depends on crdkit and wraps
 `crdkit.render`.
 
 ## Who should depend on this
 
 Not app repos directly — crdkit sits underneath a **specific**
-CRD-rendering library chart (`my-crd` in this workspace), which app
-repos depend on instead. See `my-crd/README.md` for the consumer
+CRD-rendering library chart (`mdeploy` in this workspace), which app
+repos depend on instead. See `mdeploy/README.md` for the consumer
 contract.
 
 ```yaml
-# my-crd's Chart.yaml
+# mdeploy's Chart.yaml
 dependencies:
   - name: crdkit
     version: "0.0.0"
@@ -78,7 +78,7 @@ again — the chain populates it entirely, via
 crdkit's concern.
 
 ```gotemplate
-{{- define "mycrd.integrations.preamble" -}}
+{{- define "mylib.integrations.preamble" -}}
 {{- include "crdkit.dictMerge" (list .ctx.model (dict "apiVersion" "@API_GROUP@/v1" "kind" "SomeCR")) -}}
 {{- include "crdkit.dictMerge" (list .ctx.model "metadata" (dict "name" .ctx.root.Release.Name)) -}}
 {{- include "crdkit.dictMerge" (list .ctx.model "metadata" "labels" (dig "metadata" "labels" (dict) .ctx.root.Values)) -}}
@@ -213,7 +213,7 @@ after that, a generated value for the exact target (`_generated`, see
 "Generated values"); after that, the "no value found" diagnostic.
 
 ```gotemplate
-{{- define "mycrd.parentTarget" -}}
+{{- define "mylib.parentTarget" -}}
 {{- $target := .target -}}
 {{- $chain := dict "qa-01" "qa" "qa" "QA" "QA" "NONPROD" "prod-01" "prod" "prod" "PROD" -}}
 {{- if hasKey $chain $target -}}
@@ -223,8 +223,8 @@ after that, a generated value for the exact target (`_generated`, see
 ```
 
 ```yaml
-# mycrd.render passes this to crdkit.render:
-parentTargetTemplate: "mycrd.parentTarget"
+# mylib.render passes this to crdkit.render:
+parentTargetTemplate: "mylib.parentTarget"
 ```
 
 `tokens.REGION: {NONPROD: "us-east-1"}`, rendered with `target: qa-01`,
@@ -720,5 +720,5 @@ make test   # helm unittest harness -f '../tests/*_test.yaml'
 independent of any specific library's token content or CRD shape — see
 `CLAUDE.md`'s "Testing" section for sharp edges.
 
-crdkit is also exercised end-to-end through `../my-crd/harness` — see
-`../my-crd/README.md`.
+crdkit is also exercised end-to-end through `../mdeploy/harness` — see
+`../mdeploy/README.md`.

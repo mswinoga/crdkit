@@ -2,7 +2,7 @@
 harness.parentTarget (internal)
 
 Test-only "parentTarget" implementation, playing the role a real
-specific library's own template would play (e.g. "mycrd.parentTarget")
+specific library's own template would play (e.g. "mdeploy.parentTarget")
 — see crdkit.render's "parentTargetTemplate" param. Entirely data-driven so
 individual test cases can opt into a target-escalation chain just by
 setting values, with no need to define a bespoke template per test:

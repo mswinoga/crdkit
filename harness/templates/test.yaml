@@ -1,6 +1,6 @@
 {{/*
 Product-agnostic exercise of crdkit's critical internals — deliberately
-does NOT go through a "mycrd.render"-style wrapper. crdkit has no
+does NOT go through a "mdeploy.render"-style wrapper. crdkit has no
 specific library of its own, so "system"/"defaults" (normally supplied
 by a downstream library) are set directly via .Values here, letting
 tests exercise crdkit's own resolution/collision/diagnostics logic
