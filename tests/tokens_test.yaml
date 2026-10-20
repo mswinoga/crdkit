@@ -678,7 +678,7 @@ tests:
           path: diag.errors[0]
           value: "no value found for 'myField' — target chain exhausted at 'unrecognized' starting from 'unrecognized'"
 
-  # --- annotations: generic metadata attached to declarations ---
+  # --- token annotations: generic metadata attached to declarations ---
 
   - it: an annotation is written literally alongside target entries, no "value" wrapper
     set:
@@ -687,7 +687,7 @@ tests:
         DB_HOST:
           default: "db.internal"
           exposure: "main"
-      annotations:
+      tokenAnnotations:
         - "exposure"
     asserts:
       - equal:
@@ -704,7 +704,7 @@ tests:
         EXPOSED:
           default: "x"
           exposure: "bogus-value"
-      annotations:
+      tokenAnnotations:
         - "exposure"
     asserts:
       - equal:
@@ -723,7 +723,7 @@ tests:
       system.LOCKED_VAR:
         default: "x"
         exposure: "lib-value"
-      annotations:
+      tokenAnnotations:
         - "exposure"
     asserts:
       - equal:
@@ -739,7 +739,7 @@ tests:
       tokens:
         BROKEN:
           exposure: "main"
-      annotations:
+      tokenAnnotations:
         - "exposure"
       crossTargets:
         - "prod"
@@ -764,7 +764,7 @@ tests:
         DB_HOST:
           prod: "@HOST_NAME@.internal"
           exposure: "main"
-      annotations:
+      tokenAnnotations:
         - "exposure"
       crossTargets:
         - "prod"
@@ -1168,7 +1168,7 @@ tests:
   - it: "annotation on a defaults token is preserved after merge"
     set:
       target: prod
-      annotations:
+      tokenAnnotations:
         - "exposure"
       defaults:
         Y:
@@ -1203,7 +1203,7 @@ tests:
   - it: "a target equal to an annotation name does not hit the annotation key — default resolves"
     set:
       target: owner
-      annotations:
+      tokenAnnotations:
         - "owner"
       tokens:
         X:
@@ -1236,7 +1236,7 @@ tests:
   - it: "reserved annotation names are honored on a chained @ref@ resolution (reservedKeys threaded to nested lookups)"
     set:
       target: owner
-      annotations:
+      tokenAnnotations:
         - "owner"
       tokens:
         A: "pre-@X@"
@@ -1253,7 +1253,7 @@ tests:
   - it: "reserved annotation names are honored in crdkit.token.value for a cross target and in tokenDef"
     set:
       target: prod
-      annotations:
+      tokenAnnotations:
         - "owner"
       tokens:
         X:
@@ -1280,7 +1280,7 @@ tests:
   - it: "an annotation named 'match' is rejected with an ERROR and 'match' rules keep working"
     set:
       target: prod-07
-      annotations:
+      tokenAnnotations:
         - "match"
       tokens:
         X:
@@ -1295,12 +1295,12 @@ tests:
           value: "matched"
       - contains:
           path: diag.errors
-          content: "annotation name 'match' collides with a crdkit-reserved key and was ignored"
+          content: "token annotation name 'match' collides with a crdkit-reserved key and was ignored"
 
   - it: "an annotation named 'default' is rejected with an ERROR and 'default' keeps working as a fallback"
     set:
       target: anything
-      annotations:
+      tokenAnnotations:
         - "default"
       tokens:
         X:
@@ -1313,7 +1313,7 @@ tests:
           value: "d"
       - contains:
           path: diag.errors
-          content: "annotation name 'default' collides with a crdkit-reserved key and was ignored"
+          content: "token annotation name 'default' collides with a crdkit-reserved key and was ignored"
 
   # --- cache generations: a token mutation invalidates stale caches ---
 
@@ -1509,7 +1509,7 @@ tests:
           _gen: 5
           _generated: {}
           exposure: "e"
-      annotations:
+      tokenAnnotations:
         - "exposure"
     asserts:
       - lengthEqual:
@@ -1526,7 +1526,7 @@ tests:
   - it: "underlay on a missing token creates it with '_generated' for the target plus the annotations, and it resolves"
     set:
       target: prod-01
-      annotations:
+      tokenAnnotations:
         - "owner"
       tokenOps:
         - op: underlay
@@ -1677,7 +1677,7 @@ tests:
   - it: "underlay annotations never overwrite existing ones and fill missing ones"
     set:
       target: prod-01
-      annotations:
+      tokenAnnotations:
         - "owner"
         - "exposure"
       tokens:

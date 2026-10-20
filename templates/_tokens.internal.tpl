@@ -27,27 +27,27 @@ Implementation notes:
 crdkit.reservedKeys.internal (internal)
 
 Computes the complete list of reserved (non-entry) keys: built-in crdkit
-keys (_value, _gen, _generated, match) plus every annotation name that
-does NOT collide; colliding annotation names are dropped with an ERROR.
+keys (_value, _gen, _generated, match) plus every token annotation name
+that does NOT collide; colliding names are dropped with an ERROR.
 
 Interface:
-- Params (dict): { "annotations": <list of strings>, "diag": <dict> }
+- Params (dict): { "tokenAnnotations": <list of strings>, "diag": <dict> }
 - Returns YAML: { "value": <list of reserved key names> }
 
 Implementation notes:
-- An annotation named like a built-in key OR "default" collides:
+- A token annotation named like a built-in key OR "default" collides:
   "default" stays a target entry, so it can't also be an annotation.
 - The list is computed once per render (crdkit.render) and handed to
   every resolution helper through ctx.reservedKeys.
 */}}
 {{- define "crdkit.reservedKeys.internal" -}}
-{{- $annotations := .annotations | default (list) -}}
+{{- $annotations := .tokenAnnotations | default (list) -}}
 {{- $diag := .diag -}}
 {{- $collisionCheck := list "_value" "_gen" "_generated" "match" "default" -}}
 {{- $result := list "_value" "_gen" "_generated" "match" -}}
 {{- range $annot := $annotations -}}
   {{- if has $annot $collisionCheck -}}
-    {{- include "crdkit.diag.error" (list $diag (printf "annotation name '%s' collides with a crdkit-reserved key and was ignored" $annot)) -}}
+    {{- include "crdkit.diag.error" (list $diag (printf "token annotation name '%s' collides with a crdkit-reserved key and was ignored" $annot)) -}}
   {{- else -}}
     {{- $result = append $result $annot -}}
   {{- end -}}

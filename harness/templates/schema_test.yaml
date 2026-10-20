@@ -30,7 +30,7 @@ it renders empty lists — never interferes with a bare `helm template`.
 {{- $diag := dict "errors" (list) "warnings" (list) -}}
 {{- $target := .Values.target | default "" -}}
 {{- $reservedKeys := (include "crdkit.reservedKeys.internal" (dict
-      "annotations" (.Values.annotations | default (list)) "diag" $diag) | fromYaml).value -}}
+      "tokenAnnotations" (.Values.tokenAnnotations | default (list)) "diag" $diag) | fromYaml).value -}}
 {{- $tokens := include "crdkit.tokens.merge.internal" (dict
       "tokens" (.Values.tokens | default dict)
       "diag" $diag

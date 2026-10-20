@@ -13,6 +13,6 @@ parentTargetMap: {}
 chainSetsApiVersionKind: false
 diagSeed: {}
 renderState: {}
-annotations: []
+tokenAnnotations: []
 tokenDefs: {}
 schemaOps: []

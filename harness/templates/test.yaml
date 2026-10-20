@@ -75,7 +75,7 @@ substituted "structure" text.
 {{- $target := .Values.target | default "" -}}
 
 {{- $reservedKeysYaml := include "crdkit.reservedKeys.internal" (dict
-      "annotations" (.Values.annotations | default (list)) "diag" $diag) -}}
+      "tokenAnnotations" (.Values.tokenAnnotations | default (list)) "diag" $diag) -}}
 {{- $reservedKeys := ($reservedKeysYaml | fromYaml).value -}}
 
 {{- $tokens := include "crdkit.tokens.merge.internal" (dict

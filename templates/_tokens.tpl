@@ -24,12 +24,13 @@ Token declaration shape (what a consumer/integration writes/reads on
 - Reserved dict keys (never target entries): the crdkit-internal keys
   "_value" (memoization cache), "_gen" (generation the cache belongs to)
   and "_generated" (values registered by crdkit.token.underlay), "match"
-  (regex rules), and every ANNOTATION name the calling library passes to
-  crdkit.render (crdkit.reservedKeys.internal). "default" is NOT
+  (regex rules), and every TOKEN ANNOTATION name the calling library
+  passes to crdkit.render as `tokenAnnotations`
+  (crdkit.reservedKeys.internal). "default" is NOT
   reserved — it's an ordinary target entry that crdkit ALSO treats as a
   hardcoded fallback (see crdkit.resolveEntry.internal). Every other key
   IS a target entry.
-- Annotations are static metadata on a declaration (e.g. an owner or an
+- Token annotations are static metadata on a declaration (e.g. an owner or an
   exposure marker). crdkit never interprets their names or values and
   never resolves them; a library reads them directly off
   `ctx.tokens[NAME]`.

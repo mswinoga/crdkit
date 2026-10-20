@@ -30,8 +30,9 @@ dependencies:
 Everything product-specific, as an explicit dict param — see
 `templates/_render.tpl`'s doc comment for the full list:
 - `system`/`defaults` token dicts
-- `annotations`: list of annotation names the library attaches to token
-  declarations (optional; see "Token model")
+- `tokenAnnotations`: list of token annotation names — metadata the
+  library attaches to token declarations, e.g. an owning service
+  (optional; see "Token model")
 - `diag`: optional `{errors, warnings}` seed; crdkit appends to it and
   emits everything (the library can record its own pre-render
   diagnostics there)
@@ -243,7 +244,7 @@ above).
   - crdkit-internal: `_value` (memoization cache), `_gen` (cache
     generation), `_generated` (generated values)
   - `match` (ordered regex rules)
-  - every annotation name passed to `crdkit.render`
+  - every token annotation name passed to `crdkit.render`
   Every other key, including `default`, IS a target entry.
 - Resolving a token (`crdkit.token.value`) returns a separate shape,
   `{value}` — the interpolated result for one name+target pair (a
@@ -252,7 +253,7 @@ above).
 ```yaml
 tokens:
   DB_HOST:
-    owner: payments            # an annotation (library passed annotations: [owner])
+    owner: payments            # a token annotation (library passed tokenAnnotations: [owner])
     default: "db.internal"     # goes through the normal dedicated-attribute/match/parentTarget resolution
 ```
 
@@ -260,7 +261,7 @@ tokens:
   directly regardless of taxonomy, even under `crdkit.noParentTarget`.
   A token with no `default` key that can't resolve for a target
   produces the ordinary "no value found" diagnostic, lazily.
-- Annotations are static metadata: crdkit stores them, never resolves
+- Token annotations are static metadata: crdkit stores them, never resolves
   or validates them, and never knows their names. A library reads them
   directly off the declaration (`ctx.tokens.DB_HOST.owner`) and owns
   any policy (validation, locking). An annotation name equal to a

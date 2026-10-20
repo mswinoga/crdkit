@@ -20,9 +20,10 @@ Interface:
     crdkit.noParentTarget (no escalation)
   - chain: ordered list of fully-qualified integration template names
     (called in list order) — the ONLY thing that builds ctx.model
-  - annotations: optional list of annotation names supplied by the
-    library. Each becomes a reserved key (never a target entry) on token
-    declarations; crdkit stores annotations but never interprets or
+  - tokenAnnotations: optional list of token annotation names supplied
+    by the library (metadata on token declarations, e.g. an owning
+    service). Each becomes a reserved key (never a target entry) on token
+    declarations; crdkit stores them but never interprets or
     resolves them. A name equal to a crdkit-internal key, "match" or
     "default" records an ERROR and is ignored.
   - diag: optional {errors, warnings} seed (missing lists are filled in
@@ -65,7 +66,7 @@ Implementation notes:
 {{- $parentTargetTemplate := .parentTargetTemplate | default "crdkit.noParentTarget" -}}
 
 {{- $reservedKeysYaml := include "crdkit.reservedKeys.internal" (dict
-      "annotations" (.annotations | default (list)) "diag" $diag) -}}
+      "tokenAnnotations" (.tokenAnnotations | default (list)) "diag" $diag) -}}
 {{- $reservedKeys := ($reservedKeysYaml | fromYaml).value -}}
 
 {{- $tokensYaml := include "crdkit.tokens.merge.internal" (dict
