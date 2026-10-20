@@ -3,7 +3,7 @@ templates:
   - schema_test.yaml
 tests:
 
-  - it: the page embeds the JSON Schema in a script element and nothing else between its tags
+  - it: the page embeds the compact JSON Schema in a script element and nothing else between its tags
     set:
       schemaOps:
         - op: html
@@ -16,7 +16,7 @@ tests:
     asserts:
       - matchRegex:
           path: results[0].text
-          pattern: '<script type="application/json" id="crdkit-schema">\{\n[^<]*"x-crdkit-type": "map"[^<]*\}</script>\n<script>'
+          pattern: '<script type="application/json" id="crdkit-schema">\{[^\n<]*"type":"object"[^\n<]*\}</script>\n<script>'
       - matchRegex:
           path: results[0].text
           pattern: 'id="crdkit-schema">[^<]*Closes with \\u003c/script\\u003e if unescaped'
@@ -89,7 +89,7 @@ tests:
           pattern: 'SCHEMA\.\$id'
       - matchRegex:
           path: results[0].text
-          pattern: '"\$id": "https://example.com/v1/input.schema.json"'
+          pattern: '"\$id":"https://example.com/v1/input.schema.json"'
       - matchRegex:
           path: results[0].outside
           pattern: 'Editor support'
@@ -125,4 +125,4 @@ tests:
           pattern: 'function declOf\(n\)'
       - matchRegex:
           path: results[0].text
-          pattern: '"enum": \[\s*"ALL",\s*"default",\s*"match",\s*"owner"\s*\]'
+          pattern: '"enum":\["ALL","default","match","owner"\]'

@@ -168,7 +168,17 @@ var DEFS = SCHEMA.definitions || {};
 var has = function (o, k) { return o !== null && typeof o === "object" && Object.prototype.hasOwnProperty.call(o, k); };
 var isMap = function (v) { return v !== null && typeof v === "object" && !Array.isArray(v); };
 var core = function (n) { return (n && Array.isArray(n.anyOf) ? n.anyOf[0] : n) || {}; };
-var typeOf = function (n) { return String(n["x-crdkit-type"] || "any"); };
+// Type and per-target kind from standard keywords (mirror crdkit.schema.jsonType.internal / jsonPerTarget.internal).
+var JSON_TYPES = { string: "string", integer: "int", number: "number", boolean: "bool", object: "map", array: "list" };
+var typeOf = function (n) {
+  var t = core(n).type;
+  return has(n, "x-crdkit-switch") ? "map" : Array.isArray(t) ? "scalar" : JSON_TYPES[t] || "any";
+};
+var ptOf = function (n) {
+  if (has(n, "x-crdkit-perTarget")) { return String(n["x-crdkit-perTarget"]); }
+  if ((Array.isArray(n.anyOf) ? n.anyOf : []).some(function (b) { return b && typeof b["$ref"] === "string" && b["$ref"] !== "#/definitions/markers"; })) { return "yes"; }
+  return ["string", "int", "number", "bool", "scalar"].indexOf(typeOf(n)) >= 0 ? "markers" : "";
+};
 var esc = function (s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
 var clone = function (v) { return JSON.parse(JSON.stringify(v)); };
 var keyPath = function (path, key) { return key.indexOf(".") >= 0 ? path + "[" + JSON.stringify(key) + "]" : (path ? path + "." + key : key); };
@@ -272,7 +282,7 @@ function gen(node) {
       if (child.has) { value[name] = child.value; }
     });
   } else { value = {}; }
-  if (hasValue && String(node["x-crdkit-perTarget"] || "") === "yes") {
+  if (hasValue && ptOf(node) === "yes") {
     var decl = declOf(node), closed = decl && decl.targetKeys, tk = Array.isArray(closed) && closed.length && closed.indexOf("prod") < 0 ? closed[0] : "prod", wrapped = { "default": value };
     wrapped[tk] = value; value = wrapped;
   }
@@ -306,14 +316,25 @@ function refDef(ref) {
   if (typeof ref !== "string") { return null; }
   try { return DEFS[decodeURIComponent(ref.replace("#/definitions/", ""))] || null; } catch (e) { return null; }
 }
-function walk(spec, parent, pairs, labels) {
+// Example values reaching a child (mirror crdkit.schema.examples.internal): property, values entry outside the properties, list item; a case filters by its switch value.
+function exFor(n, s, ex) {
+  var out = [], props = n.properties || {}, keep = function (v) { if (v !== null && v !== undefined) { out.push(v); } };
+  ex.forEach(function (v) {
+    if (s.items) { if (Array.isArray(v)) { v.forEach(keep); } }
+    else if (!isMap(v)) { return; }
+    else if (s.values) { Object.keys(v).sort().forEach(function (k) { if (!has(props, k)) { keep(v[k]); } }); }
+    else if (has(v, s.name)) { keep(v[s.name]); }
+  });
+  return out;
+}
+function walk(spec, parent, pairs, labels, ex) {
   var n = spec.node, c = core(n);
   var it = add({
     kind: "key", node: n, core: c, path: spec.path, label: spec.label, parent: parent, kids: [],
     depth: parent ? parent.depth + 1 : 0, isRoot: !parent, required: !!spec.required, shared: !!spec.shared,
     inShared: !!spec.shared || !!(parent && parent.kind === "key" && parent.inShared),
     caseOf: parent ? (parent.kind === "case" ? parent : parent.caseOf) : null,
-    pairs: pairs, labels: labels
+    pairs: pairs, labels: labels, ex: ex
   });
   if (has(n, "x-crdkit-switch")) {
     var sw = n["x-crdkit-switch"];
@@ -326,7 +347,8 @@ function walk(spec, parent, pairs, labels) {
         kind: "case", node: def, core: def, path: ck, label: v, caseValue: v, by: sw.by, sw: rec, owner: it,
         parent: it, kids: [], depth: it.depth + 1, pairs: pairs, labels: labels, caseOf: null
       });
-      childSpecs(def, ck).forEach(function (s) { walk(s, ci, [], labels.concat(s.items ? [] : [s.label])); });
+      var caseEx = ex.filter(function (x) { return isMap(x) && has(x, sw.by) && String(x[sw.by]) === v; });
+      childSpecs(def, ck).forEach(function (s) { walk(s, ci, [], labels.concat(s.items ? [] : [s.label]), exFor(def, s, caseEx)); });
     });
     return it;
   }
@@ -345,14 +367,14 @@ function walk(spec, parent, pairs, labels) {
         }
       });
     }
-    walk(s, it, next, labels.concat(s.items ? [] : [s.label]));
+    walk(s, it, next, labels.concat(s.items ? [] : [s.label]), exFor(n, s, ex));
   });
   return it;
 }
 function type_isMap(n) { return typeOf(n) === "map"; }
 
 var rootPairs = Array.isArray(SCHEMA.examples) && SCHEMA.examples.length ? [{ keys: [], value: SCHEMA.examples[0] }] : [];
-walk({ node: SCHEMA, path: "", label: SCHEMA.title || "Values" }, null, rootPairs, []);
+walk({ node: SCHEMA, path: "", label: SCHEMA.title || "Values" }, null, rootPairs, [], Array.isArray(SCHEMA.examples) ? SCHEMA.examples : []);
 
 // A case's example: the matching example entries wrapped in their ancestor keys, else generated.
 function caseExample(ci) {
@@ -417,7 +439,7 @@ function classify() {
   var hits = 0;
   ITEMS.forEach(function (it) {
     if (it.off || it.isRoot) { return; }
-    var pt = it.kind === "key" && String(it.node["x-crdkit-perTarget"] || "") === "yes";
+    var pt = it.kind === "key" && ptOf(it.node) === "yes";
     it.match = (!q || nameHit(it.kind === "case", it.by || "", it.label)) && (!state.onlyPt || pt);
     if (it.match) { hits++; }
   });
@@ -482,7 +504,7 @@ function drawRow(it, searching) {
       '<span class="badge ty-case">case</span>' + (rows ? '<span class="gen">generates ' + rows + "</span>" : "");
   } else {
     var ph = !it.isRoot && it.label.charAt(0) === "<";
-    var t = typeOf(n), pt = String(n["x-crdkit-perTarget"] || "");
+    var t = typeOf(n), pt = ptOf(n);
     html += '<span class="k' + (ph ? " ph" : "") + '">' + esc(it.label) + (it.required ? '<span class="req">*</span>' : "") + "</span>" +
       (it.isRoot ? "" : '<span class="colon">:</span>') + '<span class="badge ty-' + esc(t) + '">' + esc(t) + "</span>" +
       (pt === "yes" ? '<span class="pt pt-yes">per-target</span>' : pt === "markers" ? '<span class="pt pt-markers">markers</span>' : "") +
@@ -606,9 +628,9 @@ function sectionsHtml(list) {
 }
 function block(title, inner) { return inner ? '<div class="block"><div class="eyebrow">' + title + "</div>" + inner + "</div>" : ""; }
 function keyExamples(it) {
-  var n = it.node;
-  if (Array.isArray(n.examples) && n.examples.length) {
-    return block("Examples", n.examples.map(function (v) { return "<pre>" + esc(toYaml(v)) + "</pre>"; }).join(""));
+  var n = it.node, seen = {}, ex = (it.ex || []).filter(function (v) { var id = JSON.stringify(v); return has(seen, id) ? false : (seen[id] = true); });
+  if (ex.length) {
+    return block("Examples", ex.map(function (v) { return "<pre>" + esc(toYaml(v)) + "</pre>"; }).join(""));
   }
   if (has(n, "x-crdkit-switch")) { return ""; }
   var g = gen(n);
@@ -619,7 +641,7 @@ function renderDetail() {
   if (it.kind === "case") {
     var ex = caseExample(it);
     var rows = it.kids.map(function (k) {
-      var pt = String(k.node["x-crdkit-perTarget"] || "");
+      var pt = ptOf(k.node);
       return "<tr><td>" + go(k.path, k.label) + (k.required ? '<span class="req">*</span>' : "") + "</td><td>" + badge(k.node) +
         (k.shared ? ' <span class="pt pt-shared">shared</span>' : "") +
         (pt === "yes" ? ' <span class="pt pt-yes">per-target</span>' : pt === "markers" ? ' <span class="pt pt-markers">markers</span>' : "") +
@@ -634,7 +656,7 @@ function renderDetail() {
       sectionsHtml(n["x-crdkit-sections"]) +
       (others ? '<p class="empty-note">Other ' + esc(it.by) + "s: " + others + "</p>" : "");
   } else {
-    var facts = [["Type", badge(n)]], pt2 = String(n["x-crdkit-perTarget"] || "");
+    var facts = [["Type", badge(n)]], pt2 = ptOf(n);
     if (PT_TEXT[pt2]) { facts.push(["Per target", esc(PT_TEXT[pt2])]); }
     var decl = declOf(n);
     if (decl) {

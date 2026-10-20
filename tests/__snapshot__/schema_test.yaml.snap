@@ -91,9 +91,7 @@
     |
       {
         "$schema": "http://json-schema.org/draft-07/schema#",
-        "additionalProperties": {
-          "x-crdkit-type": "any"
-        },
+        "additionalProperties": {},
         "definitions": {
           "markers": {
             "pattern": "@[A-Za-z0-9_.]+@",
@@ -101,21 +99,12 @@
           },
           "services.*[type=environment]": {
             "additionalProperties": false,
-            "examples": [
-              {
-                "environment": {
-                  "A": "x"
-                },
-                "type": "environment"
-              }
-            ],
             "properties": {
               "enabled": {
                 "default": true,
                 "type": "boolean",
                 "x-crdkit-perTarget": "no",
-                "x-crdkit-shared": true,
-                "x-crdkit-type": "bool"
+                "x-crdkit-shared": true
               },
               "environment": {
                 "additionalProperties": {
@@ -136,21 +125,13 @@
                   ],
                   "examples": [
                     "x"
-                  ],
-                  "x-crdkit-perTarget": "yes",
-                  "x-crdkit-type": "scalar"
+                  ]
                 },
-                "examples": [
-                  {
-                    "A": "x"
-                  }
-                ],
                 "propertyNames": {
                   "pattern": "^[A-Z]+$"
                 },
                 "type": "object",
-                "x-crdkit-keyLabel": "\u003ckey\u003e",
-                "x-crdkit-type": "map"
+                "x-crdkit-keyLabel": "\u003ckey\u003e"
               },
               "type": {
                 "examples": [
@@ -165,8 +146,7 @@
                   "boolean"
                 ],
                 "x-crdkit-perTarget": "no",
-                "x-crdkit-shared": true,
-                "x-crdkit-type": "scalar"
+                "x-crdkit-shared": true
               }
             },
             "required": [
@@ -178,28 +158,17 @@
               "enabled",
               "environment"
             ],
-            "x-crdkit-path": "services.*[type=environment]",
-            "x-crdkit-type": "map"
+            "x-crdkit-path": "services.*[type=environment]"
           },
           "services.*[type=greeter]": {
             "additionalProperties": false,
-            "examples": [
-              {
-                "greeting": "hi",
-                "ports": [
-                  80
-                ],
-                "type": "greeter"
-              }
-            ],
             "markdownDescription": "**Generated variables**\n\n| Variable | Value |\n| --- | --- |\n| APP_GREETER | APP |",
             "properties": {
               "enabled": {
                 "default": true,
                 "type": "boolean",
                 "x-crdkit-perTarget": "no",
-                "x-crdkit-shared": true,
-                "x-crdkit-type": "bool"
+                "x-crdkit-shared": true
               },
               "greeting": {
                 "anyOf": [
@@ -216,10 +185,7 @@
                 "description": "File content.",
                 "examples": [
                   "hi"
-                ],
-                "markdownDescription": "File content.",
-                "x-crdkit-perTarget": "yes",
-                "x-crdkit-type": "string"
+                ]
               },
               "ports": {
                 "anyOf": [
@@ -235,9 +201,7 @@
                       ],
                       "examples": [
                         80
-                      ],
-                      "x-crdkit-perTarget": "markers",
-                      "x-crdkit-type": "int"
+                      ]
                     },
                     "type": "array"
                   },
@@ -247,14 +211,7 @@
                   {
                     "$ref": "#/definitions/markers"
                   }
-                ],
-                "examples": [
-                  [
-                    80
-                  ]
-                ],
-                "x-crdkit-perTarget": "yes",
-                "x-crdkit-type": "list"
+                ]
               },
               "type": {
                 "examples": [
@@ -269,8 +226,7 @@
                   "boolean"
                 ],
                 "x-crdkit-perTarget": "no",
-                "x-crdkit-shared": true,
-                "x-crdkit-type": "scalar"
+                "x-crdkit-shared": true
               }
             },
             "required": [
@@ -298,8 +254,7 @@
                 ],
                 "title": "Generated variables"
               }
-            ],
-            "x-crdkit-type": "map"
+            ]
           },
           "tokenDeclaration": {
             "minProperties": 1,
@@ -341,8 +296,7 @@
               "number",
               "boolean"
             ],
-            "x-crdkit-perTarget": "no",
-            "x-crdkit-type": "scalar"
+            "x-crdkit-perTarget": "no"
           },
           "services": {
             "additionalProperties": {
@@ -378,21 +332,6 @@
                   }
                 }
               ],
-              "examples": [
-                {
-                  "greeting": "hi",
-                  "ports": [
-                    80
-                  ],
-                  "type": "greeter"
-                },
-                {
-                  "environment": {
-                    "A": "x"
-                  },
-                  "type": "environment"
-                }
-              ],
               "properties": {
                 "type": {
                   "enum": [
@@ -415,45 +354,24 @@
                   "environment": "#/definitions/services.*%5Btype=environment%5D",
                   "greeter": "#/definitions/services.*%5Btype=greeter%5D"
                 }
-              },
-              "x-crdkit-type": "map"
-            },
-            "examples": [
-              {
-                "APP": {
-                  "greeting": "hi",
-                  "ports": [
-                    80
-                  ],
-                  "type": "greeter"
-                },
-                "VARS": {
-                  "environment": {
-                    "A": "x"
-                  },
-                  "type": "environment"
-                }
               }
-            ],
+            },
             "propertyNames": {
               "pattern": "^[A-Z0-9_]+$"
             },
             "type": "object",
-            "x-crdkit-keyLabel": "\u003cID\u003e",
-            "x-crdkit-type": "map"
+            "x-crdkit-keyLabel": "\u003cID\u003e"
           },
           "target": {
             "description": "Render target.",
             "examples": [
               "prod"
             ],
-            "markdownDescription": "Render target.",
             "not": {
               "pattern": "@[A-Za-z0-9_.]+@"
             },
             "type": "string",
-            "x-crdkit-perTarget": "no",
-            "x-crdkit-type": "string"
+            "x-crdkit-perTarget": "no"
           }
         },
         "required": [
@@ -466,6 +384,5 @@
           "target",
           "renderMode",
           "services"
-        ],
-        "x-crdkit-type": "map"
+        ]
       }

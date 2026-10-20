@@ -578,10 +578,11 @@ renderer.
   the library's schema define is `include`d, not `fromYaml`-ed.
 - `htmlLink`: URL of the HTML reference, linked from the Markdown title.
 - `example`: example values (a dict, usually `.Values` of an example
-  file). Every node gets `examples`, the values found at its path
-  (through a `values` map: every entry; through a switch: the entries
-  whose `by` key equals the case value). A node the example does not
-  reach shows a generated example, marked as generated: `default`, else
+  file). The root and every scalar node get `examples`, the values
+  found at its path (through a `values` map: every entry; through a
+  switch: the entries whose `by` key equals the case value); the viewer
+  derives the same for maps and lists from the root example. A node the
+  example does not reach shows a generated example, marked as generated: `default`, else
   the first `enum` value, else a value per type.
 - `sections`: `{<node path>: [{title, doc?, columns?, rows?, code?}]}`
   adds library-written tables and YAML blocks to a node. A node path is
@@ -605,7 +606,13 @@ renderer.
 Schema for editors and the viewer; the DSL maps keyword by keyword
 (`type`, `properties`, `required`, `additionalProperties`,
 `propertyNames`, `enum`, `pattern`, `default`, `doc` →
-`description`/`markdownDescription`).
+`description`, plus `markdownDescription` when it differs).
+- Readers derive what standard keywords already say: the DSL type from
+  `type` (of the `anyOf` core; `integer` → int, `object` → map, `array`
+  → list, the type list → scalar, none → any), "per target" from a
+  declaration `$ref` in `anyOf`, "markers" for other scalars.
+  `x-crdkit-perTarget: "no"` is stored only for a static scalar or a
+  list that is not per-target.
 - Key order is emitted as `x-crdkit-order`; flow-map keys sort
   alphabetically after the positioned ones.
 - Per-target nodes are `anyOf` [type, `tokenDeclaration`, `markers`];
@@ -625,7 +632,10 @@ Schema for editors and the viewer; the DSL maps keyword by keyword
   `definitions["<node path>[<by>=<case>]"]`, selected by `allOf`
   `if/then`; properties identical in every case (two or more) carry
   `x-crdkit-shared`.
-- `examples` and `x-crdkit-sections` come from `example` and `sections`.
+- `examples` (root and scalar nodes) and `x-crdkit-sections` come from
+  `example` and `sections`.
+- The viewer embeds the schema compact; the `json` format stays
+  pretty-printed (diffable).
 - `id` (string, optional) becomes the root `$id`: the URL the committed
   file is served from, ideally pinned to a release tag (convention
   `v<chart version>`). Empty or absent → no `$id`; a non-string records an ERROR and is ignored.

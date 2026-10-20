@@ -1350,9 +1350,8 @@ tests:
           value:
             tokenDeclaration: {type: object, minProperties: 1}
             markers: {type: string, pattern: "@[A-Za-z0-9_.]+@"}
-      - equal:
+      - notExists:
           path: results[0].json["x-crdkit-type"]
-          value: map
       - lengthEqual:
           path: diag.errors
           count: 0
@@ -1392,23 +1391,21 @@ tests:
             enum: [ab, ac]
             default: ab
             not: {pattern: "@[A-Za-z0-9_.]+@"}
-            x-crdkit-type: string
             x-crdkit-perTarget: "no"
       - equal:
           path: results[0].json.properties.i
-          value: {type: integer, x-crdkit-type: int, x-crdkit-perTarget: "no"}
+          value: {type: integer, x-crdkit-perTarget: "no"}
       - equal:
           path: results[0].json.properties.num
-          value: {type: number, x-crdkit-type: number, x-crdkit-perTarget: "no"}
+          value: {type: number, x-crdkit-perTarget: "no"}
       - equal:
           path: results[0].json.properties.flag
-          value: {type: boolean, x-crdkit-type: bool, x-crdkit-perTarget: "no"}
+          value: {type: boolean, x-crdkit-perTarget: "no"}
       - equal:
           path: results[0].json.properties.c
           value:
             type: [string, number, boolean]
             not: {pattern: "@[A-Za-z0-9_.]+@"}
-            x-crdkit-type: scalar
             x-crdkit-perTarget: "no"
 
   - it: 'jsonSchema: markers allowed below a per-target node on an int/number/bool wrap it in anyOf with the markers definition'
@@ -1434,8 +1431,6 @@ tests:
             anyOf:
               - {type: integer}
               - {"$ref": "#/definitions/markers"}
-            x-crdkit-type: int
-            x-crdkit-perTarget: markers
       - equal:
           path: results[0].json.properties.l.anyOf[0].items.properties.num.anyOf[0]
           value: {type: number}
@@ -1444,7 +1439,7 @@ tests:
           value: {type: boolean}
       - equal:
           path: results[0].json.properties.l.anyOf[0].items.properties.s
-          value: {type: string, x-crdkit-type: string, x-crdkit-perTarget: markers}
+          value: {type: string}
 
   - it: 'jsonSchema: a marker-accepting string or scalar with enum or pattern is wrapped in anyOf, a plain one is not'
     set:
@@ -1470,8 +1465,6 @@ tests:
             anyOf:
               - {type: string, enum: [a, b]}
               - {"$ref": "#/definitions/markers"}
-            x-crdkit-type: string
-            x-crdkit-perTarget: markers
       - equal:
           path: results[0].json.properties.l.anyOf[0].items.properties.sp.anyOf
           value:
@@ -1484,14 +1477,13 @@ tests:
             - {"$ref": "#/definitions/markers"}
       - equal:
           path: results[0].json.properties.l.anyOf[0].items.properties.plain
-          value: {type: string, x-crdkit-type: string, x-crdkit-perTarget: markers}
+          value: {type: string}
       - equal:
           path: results[0].json.properties.locked
           value:
             type: string
             pattern: "^a"
             not: {pattern: "@[A-Za-z0-9_.]+@"}
-            x-crdkit-type: string
             x-crdkit-perTarget: "no"
 
   - it: 'jsonSchema: a per-target scalar or list is anyOf [type, declaration, markers]'
@@ -1511,8 +1503,6 @@ tests:
               - {type: string}
               - {"$ref": "#/definitions/tokenDeclaration"}
               - {"$ref": "#/definitions/markers"}
-            x-crdkit-type: string
-            x-crdkit-perTarget: "yes"
       - equal:
           path: results[0].json.properties.ports.anyOf[0]
           value:
@@ -1521,14 +1511,11 @@ tests:
               anyOf:
                 - {type: integer}
                 - {"$ref": "#/definitions/markers"}
-              x-crdkit-type: int
-              x-crdkit-perTarget: markers
       - equal:
           path: results[0].json.properties.ports.anyOf[1]
           value: {"$ref": "#/definitions/tokenDeclaration"}
-      - equal:
+      - notExists:
           path: results[0].json.properties.ports["x-crdkit-perTarget"]
-          value: "yes"
 
   - it: 'jsonSchema: a list below a per-target list is a plain array, items default to any'
     set:
@@ -1544,12 +1531,11 @@ tests:
           path: results[0].json.properties.plain.anyOf[0].items
           value:
             type: array
-            items: {x-crdkit-type: any}
-            x-crdkit-type: list
+            items: {}
             x-crdkit-perTarget: "no"
       - equal:
           path: results[0].json.properties.free
-          value: {x-crdkit-type: any}
+          value: {}
 
   - it: 'jsonSchema: closed map, open map, required, keys pattern and label, order'
     set:
@@ -1582,7 +1568,7 @@ tests:
           value: [zeta, alpha]
       - equal:
           path: results[0].json.properties.open.additionalProperties
-          value: {x-crdkit-type: any}
+          value: {}
       - equal:
           path: results[0].json.properties.open.propertyNames
           value: {pattern: "^[A-Z]+$"}
@@ -1681,9 +1667,6 @@ tests:
               zeta: "#/definitions/*%5Btype=zeta%5D"
               alpha: "#/definitions/*%5Btype=alpha%5D"
       - equal:
-          path: results[0].json.additionalProperties["x-crdkit-type"]
-          value: map
-      - equal:
           path: results[0].json.definitions["*[type=alpha]"].additionalProperties
           value: false
       - equal:
@@ -1747,7 +1730,7 @@ tests:
       - notExists:
           path: results[0].json.definitions["[kind=only]"].properties.kind["x-crdkit-shared"]
 
-  - it: 'jsonSchema: examples come through a values map and a switch, unique, per node'
+  - it: 'jsonSchema: examples come through a values map and a switch, unique, on the root and value nodes only'
     set:
       schemaOps:
         - op: jsonSchema
@@ -1784,17 +1767,10 @@ tests:
           value: [prod]
       - notExists:
           path: results[0].json.properties.untouched.examples
-      - equal:
+      - notExists:
           path: results[0].json.properties.services.additionalProperties.examples
-          value:
-            - {type: a, size: 1}
-            - {type: b, size: 1}
-            - {type: a, size: 2}
-      - equal:
+      - notExists:
           path: results[0].json.definitions["services.*[type=a]"].examples
-          value:
-            - {type: a, size: 1}
-            - {type: a, size: 2}
       - equal:
           path: results[0].json.definitions["services.*[type=a]"].properties.size.examples
           value: [1, 2]
@@ -1804,8 +1780,10 @@ tests:
       - equal:
           path: results[0].json.definitions["services.*[type=b]"].properties.type.examples
           value: [b]
+      - notExists:
+          path: results[0].json.properties.services.examples
       - equal:
-          path: results[0].json.properties.services.examples[0].Y
+          path: results[0].json.examples[0].services.Y
           value: {type: b, size: 1}
 
   - it: 'jsonSchema: examples also reach list items and a values entry outside the properties'
@@ -1840,10 +1818,8 @@ tests:
           example:
             ports: [80, 443, 80]
     asserts:
-      - equal:
+      - notExists:
           path: results[0].json.properties.ports.examples
-          value:
-            - [80, 443, 80]
       - equal:
           path: results[0].json.properties.ports.anyOf[0].items.examples
           value: [80, 443]
@@ -2013,7 +1989,7 @@ tests:
           path: diag.errors
           value: []
 
-  - it: 'document: html returns the viewer page embedding the same JSON'
+  - it: 'document: html returns the viewer page embedding the same JSON, compact'
     set:
       schemaOps:
         - op: document
@@ -2026,10 +2002,10 @@ tests:
           pattern: '^<!doctype html>'
       - matchRegex:
           path: results[0].text
-          pattern: 'id="crdkit-schema">\{\n  "\$schema"'
+          pattern: 'id="crdkit-schema">\{"\$schema":'
       - matchRegex:
           path: results[0].text
-          pattern: '"title": "Doc"'
+          pattern: '"title":"Doc"'
 
   - it: 'document: md returns the Markdown reference with the HTML link'
     set:
@@ -2149,7 +2125,7 @@ tests:
           pattern: '"\$id": "https://example.com/v1/input.schema.json"'
       - matchRegex:
           path: results[1].text
-          pattern: 'id="crdkit-schema">\{\n  "\$id": "https://example.com/v1/input.schema.json"'
+          pattern: 'id="crdkit-schema">\{"\$id":"https://example.com/v1/input.schema.json"'
       - matchRegex:
           path: results[2].text
           pattern: '# Doc\n\n\*\*Editor support\*\*[^\n]*\n\n```yaml\n# yaml-language-server: \$schema=https://example.com/v1/input.schema.json\n```\n\n```yaml\ntarget:'
@@ -2585,8 +2561,6 @@ tests:
               - {type: string}
               - {"$ref": "#/definitions/targetDeclaration.owner"}
               - {"$ref": "#/definitions/markers"}
-            x-crdkit-type: string
-            x-crdkit-perTarget: "yes"
       - equal:
           path: results[0].json.properties.open.properties.num.anyOf[1]
           value: {"$ref": "#/definitions/targetDeclaration"}

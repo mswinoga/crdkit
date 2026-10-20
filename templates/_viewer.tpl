@@ -23,8 +23,9 @@ Interface:
 - Returns: the HTML document as plain text.
 
 Implementation notes:
-- The schema is embedded as `<script type="application/json"
-  id="crdkit-schema">`, every `</` written as `<\/`.
+- The schema is embedded compact (re-encoded with toJson) as `<script
+  type="application/json" id="crdkit-schema">`, every `</` written as
+  `<\/`.
 - The viewer follows the same generated-example rules as
   crdkit.schema.generatedExample.internal, so the HTML and the Markdown
   agree.
@@ -33,5 +34,5 @@ Implementation notes:
 {{- $schema := .schema | default "{}" -}}
 {{- $js := $schema | fromJson -}}
 {{- $title := .title | default $js.title | default "Values" -}}
-{{- include "crdkit.schema.viewer.internal" (dict "title" $title "json" $schema) -}}
+{{- include "crdkit.schema.viewer.internal" (dict "title" $title "json" ($js | toJson)) -}}
 {{- end -}}

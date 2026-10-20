@@ -519,8 +519,9 @@ Interface:
 Implementation notes:
 - The schema arrives as text because key order lives only there
   (crdkit.schema.order.internal); the text is parsed here.
-- Examples: every node gets `examples`, the unique example values found
-  at its path (see crdkit.schema.examples.internal). Generated examples
+- Examples: the root and every scalar node get `examples`, the unique
+  example values found at its path (see crdkit.schema.examples.internal);
+  readers derive map and list examples from the root's. Generated examples
   for unreached nodes are not stored: the viewer and the Markdown derive
   them.
 - Sections attach to the node named by their node path (values path with

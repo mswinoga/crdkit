@@ -628,6 +628,69 @@ Implementation notes:
 {{- end -}}
 
 {{/*
+crdkit.schema.jsonType.internal (internal)
+
+Returns the values-schema type of a JSON Schema node, read from its
+standard keywords.
+
+Interface:
+- Params (dict): { "node": <JSON Schema node> }
+- Returns: plain text `string`, `int`, `number`, `bool`, `scalar`,
+  `map`, `list` or `any`.
+
+Implementation notes:
+- Reads the `anyOf` core of a wrapped node; a switch node is a `map`;
+  no `type` is `any`; the type list `[string, number, boolean]` is
+  `scalar`.
+*/}}
+{{- define "crdkit.schema.jsonType.internal" -}}
+{{- $core := .node -}}
+{{- if hasKey .node "anyOf" -}}
+  {{- $core = first .node.anyOf -}}
+{{- end -}}
+{{- if hasKey .node "x-crdkit-switch" -}}
+map
+{{- else if kindIs "slice" $core.type -}}
+scalar
+{{- else -}}
+{{- get (dict "string" "string" "integer" "int" "number" "number" "boolean" "bool" "object" "map" "array" "list") ($core.type | default "" | toString) | default "any" -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+crdkit.schema.jsonPerTarget.internal (internal)
+
+Returns how a JSON Schema node's value may vary, read from its keywords.
+
+Interface:
+- Params (dict): { "node": <JSON Schema node> }
+- Returns: plain text `yes` (per target: plain value or token
+  declaration), `markers` (`@NAME@` markers only), `no` (static) or an
+  empty string (a map, a switch or `any`).
+
+Implementation notes:
+- `x-crdkit-perTarget` is stored only for `no`; `yes` is an `anyOf`
+  branch referencing a declaration definition (any `$ref` but
+  markers); otherwise a scalar type is `markers`.
+*/}}
+{{- define "crdkit.schema.jsonPerTarget.internal" -}}
+{{- $declaration := false -}}
+{{- range $branch := .node.anyOf | default list -}}
+  {{- $ref := $branch | default dict | dig "$ref" "" | toString -}}
+  {{- if and $ref (ne $ref "#/definitions/markers") -}}
+    {{- $declaration = true -}}
+  {{- end -}}
+{{- end -}}
+{{- if hasKey .node "x-crdkit-perTarget" -}}
+{{- index .node "x-crdkit-perTarget" -}}
+{{- else if $declaration -}}
+yes
+{{- else if has (include "crdkit.schema.jsonType.internal" (dict "node" .node)) (list "string" "int" "number" "bool" "scalar") -}}
+markers
+{{- end -}}
+{{- end -}}
+
+{{/*
 crdkit.schema.mdType.internal (internal)
 
 Spells the Type cell of a Markdown table row.
@@ -643,12 +706,12 @@ Interface:
 {{- if hasKey $node "anyOf" -}}
   {{- $core = first $node.anyOf -}}
 {{- end -}}
-{{- $text := index $node "x-crdkit-type" | default "any" | toString -}}
+{{- $text := include "crdkit.schema.jsonType.internal" (dict "node" $node) -}}
 {{- if hasKey $node "x-crdkit-switch" -}}
   {{- $switch := index $node "x-crdkit-switch" -}}
   {{- $text = printf "map, by `%s`: %s" $switch.by (join ", " $switch.cases) -}}
 {{- else if hasKey $core "items" -}}
-  {{- $text = printf "list of %s" (index $core.items "x-crdkit-type" | default "any") -}}
+  {{- $text = printf "list of %s" (include "crdkit.schema.jsonType.internal" (dict "node" $core.items)) -}}
 {{- end -}}
 {{- if hasKey $core "enum" -}}
   {{- $text = printf "%s, one of: %s" $text (join ", " ($core.enum | toStrings)) -}}
@@ -674,7 +737,7 @@ Interface:
 Implementation notes:
 - `markdownDescription` is the doc followed by the rendered sections
   (crdkit.schema.jsonNode.internal); the sections are cut off again by
-  rendering them the same way.
+  rendering them the same way. Absent when equal to `description`.
 */}}
 {{- define "crdkit.schema.mdDoc.internal" -}}
 {{- $node := .node -}}
@@ -682,7 +745,7 @@ Implementation notes:
 {{- range $section := index $node "x-crdkit-sections" | default (list) -}}
   {{- $rendered = append $rendered (include "crdkit.schema.sectionMarkdown.internal" (dict "section" $section)) -}}
 {{- end -}}
-{{- index $node "markdownDescription" | default "" | toString | trimSuffix (join "\n\n" $rendered) | trim -}}
+{{- index $node "markdownDescription" | default $node.description | default "" | toString | trimSuffix (join "\n\n" $rendered) | trim -}}
 {{- end -}}
 
 {{/*
@@ -714,7 +777,7 @@ Implementation notes:
 {{- if .shared -}}
   {{- $key = printf "%s (shared)" $key -}}
 {{- end -}}
-{{- $perTarget := index $node "x-crdkit-perTarget" | default "" | toString -}}
+{{- $perTarget := include "crdkit.schema.jsonPerTarget.internal" (dict "node" $node) -}}
 {{- $declaration := dict -}}
 {{- include "crdkit.schema.jsonDeclaration.internal" (dict "node" $node "defs" .defs "out" $declaration) -}}
 {{- if and (eq $perTarget "yes") (hasKey $declaration "targetKeys") -}}
@@ -796,7 +859,8 @@ Implementation notes:
   map its properties' examples, any `{}`.
 - A string or scalar with a `pattern` and no `default`/`enum` has none
   ("text" might not match); a map omits such properties.
-- A per-target node (`x-crdkit-perTarget: yes`) becomes `{default:
+- A per-target node (crdkit.schema.jsonPerTarget.internal `yes`)
+  becomes `{default:
   <example>, prod: <example>}`; with closed declaration keys
   (crdkit.schema.jsonDeclaration.internal) without `prod`, the first target key replaces
   `prod`.
@@ -807,7 +871,7 @@ Implementation notes:
 {{- if hasKey $node "anyOf" -}}
   {{- $core = first $node.anyOf -}}
 {{- end -}}
-{{- $type := index $node "x-crdkit-type" | default "any" | toString -}}
+{{- $type := include "crdkit.schema.jsonType.internal" (dict "node" $node) -}}
 {{- $has := true -}}
 {{- $value := "" -}}
 {{- if hasKey $node "default" -}}
@@ -840,7 +904,7 @@ Implementation notes:
 {{- else -}}
   {{- $value = dict -}}
 {{- end -}}
-{{- if and $has (eq (index $node "x-crdkit-perTarget" | default "" | toString) "yes") -}}
+{{- if and $has (eq (include "crdkit.schema.jsonPerTarget.internal" (dict "node" $node)) "yes") -}}
   {{- $targetKey := "prod" -}}
   {{- $declaration := dict -}}
   {{- include "crdkit.schema.jsonDeclaration.internal" (dict "node" $node "defs" .defs "out" $declaration) -}}
@@ -930,20 +994,20 @@ Implementation notes:
 {{- if hasKey $node "anyOf" -}}
   {{- $core = first $node.anyOf -}}
 {{- end -}}
-{{- $type := index $node "x-crdkit-type" | default "any" | toString -}}
+{{- $type := include "crdkit.schema.jsonType.internal" (dict "node" $node) -}}
 {{- $childPad := $pad -}}
 {{- if ne .name "" -}}
   {{- $short := $type -}}
   {{- if hasKey $node "x-crdkit-switch" -}}
     {{- $short = printf "map, by %s" (index $node "x-crdkit-switch").by -}}
   {{- else if hasKey $core "items" -}}
-    {{- $short = printf "list of %s" (index $core.items "x-crdkit-type" | default "any") -}}
+    {{- $short = printf "list of %s" (include "crdkit.schema.jsonType.internal" (dict "node" $core.items)) -}}
   {{- end -}}
   {{- $parts := list $short -}}
   {{- if .required -}}
     {{- $parts = append $parts "required" -}}
   {{- end -}}
-  {{- if eq (index $node "x-crdkit-perTarget" | default "" | toString) "yes" -}}
+  {{- if eq (include "crdkit.schema.jsonPerTarget.internal" (dict "node" $node)) "yes" -}}
     {{- $parts = append $parts "per target" -}}
   {{- end -}}
   {{- $_ := set $acc "lines" (append $acc.lines (printf "%s%s%s:  # %s" $lead $pad .name (join ", " $parts))) -}}
@@ -966,11 +1030,11 @@ Implementation notes:
   {{- end -}}
 {{- else if hasKey $core "items" -}}
   {{- $items := $core.items -}}
-  {{- if eq (index $items "x-crdkit-type" | default "any" | toString) "map" -}}
+  {{- if eq (include "crdkit.schema.jsonType.internal" (dict "node" $items)) "map" -}}
     {{- $_ := set $acc "lines" (append $acc.lines (printf "%s%s-" $lead $childPad)) -}}
     {{- include "crdkit.schema.mdSkeleton.internal" (dict "name" "" "node" $items "path" (printf "%s[]" $path) "defs" $defs "required" false "lead" $lead "pad" (printf "%s    " $pad) "acc" $acc) -}}
   {{- else -}}
-    {{- $_ := set $acc "lines" (append $acc.lines (printf "%s%s- # %s" $lead $childPad (index $items "x-crdkit-type" | default "any"))) -}}
+    {{- $_ := set $acc "lines" (append $acc.lines (printf "%s%s- # %s" $lead $childPad (include "crdkit.schema.jsonType.internal" (dict "node" $items)))) -}}
   {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -1008,7 +1072,7 @@ Implementation notes:
 {{- if hasKey $node "anyOf" -}}
   {{- $core = first $node.anyOf -}}
 {{- end -}}
-{{- $type := index $node "x-crdkit-type" | default "any" | toString -}}
+{{- $type := include "crdkit.schema.jsonType.internal" (dict "node" $node) -}}
 {{- $isSwitch := hasKey $node "x-crdkit-switch" -}}
 {{- $isMap := and (eq $type "map") (not $isSwitch) -}}
 {{- $names := index $node "x-crdkit-order" | default (list) -}}
@@ -1415,7 +1479,7 @@ Implementation notes:
 {{- $type := $node.type | default "map" | toString -}}
 {{- $tokens := include "crdkit.schema.perTarget.internal" (dict "node" $node "inTokens" $inTokens) -}}
 {{- $childInTokens := or $inTokens (ne $tokens "") -}}
-{{- $meta := dict "x-crdkit-type" $type -}}
+{{- $meta := dict -}}
 {{- $core := dict -}}
 {{- if hasKey $node "default" -}}
   {{- $_ := set $meta "default" (index $node "default") -}}
@@ -1430,12 +1494,15 @@ Implementation notes:
   {{- range $section := $nodeSections -}}
     {{- $parts = append $parts (include "crdkit.schema.sectionMarkdown.internal" (dict "section" $section)) -}}
   {{- end -}}
-  {{- $_ := set $meta "markdownDescription" (join "\n\n" $parts) -}}
+  {{- $markdown := join "\n\n" $parts -}}
+  {{- if ne $markdown ($meta.description | default "") -}}
+    {{- $_ := set $meta "markdownDescription" $markdown -}}
+  {{- end -}}
 {{- end -}}
 {{- if $nodeSections -}}
   {{- $_ := set $meta "x-crdkit-sections" $nodeSections -}}
 {{- end -}}
-{{- if $instances -}}
+{{- if and $instances (or (eq $path "") (not (or $isSwitch (has $shape (list "map" "list"))))) -}}
   {{- $seenExamples := dict -}}
   {{- $examples := list -}}
   {{- range $instance := $instances -}}
@@ -1534,7 +1601,9 @@ Implementation notes:
   {{- $childOut := dict -}}
   {{- include "crdkit.schema.jsonNode.internal" (dict "node" ($node.items | default (dict "type" "any")) "schemaPath" (include "crdkit.schema.path.internal" (dict "path" $sp "key" "items")) "nodePath" (printf "%s[]" $path) "inTokens" $childInTokens "instances" $childInstances.instances "order" $order "sections" $sections "targetKeys" $targetKeys "acc" $acc "out" $childOut) -}}
   {{- $_ := set $core "items" $childOut.result -}}
-  {{- $_ := set $meta "x-crdkit-perTarget" (ternary "yes" "no" (ne $tokens "")) -}}
+  {{- if not $tokens -}}
+    {{- $_ := set $meta "x-crdkit-perTarget" "no" -}}
+  {{- end -}}
 {{- else if eq $shape "scalar" -}}
   {{- if eq $type "scalar" -}}
     {{- $_ := set $core "type" (list "string" "number" "boolean") -}}
@@ -1549,7 +1618,9 @@ Implementation notes:
   {{- if and (eq (toString $node.static) "true") (has $type (list "string" "scalar")) -}}
     {{- $_ := set $core "not" (dict "pattern" (include "crdkit.markerPattern.internal" (dict))) -}}
   {{- end -}}
-  {{- $_ := set $meta "x-crdkit-perTarget" (ternary "yes" (ternary "no" "markers" (eq (toString $node.static) "true")) (ne $tokens "")) -}}
+  {{- if and (not $tokens) (eq (toString $node.static) "true") -}}
+    {{- $_ := set $meta "x-crdkit-perTarget" "no" -}}
+  {{- end -}}
 {{- end -}}
 {{- $result := $meta -}}
 {{- $wrapped := list -}}
