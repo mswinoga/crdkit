@@ -151,6 +151,12 @@ Interface:
       {{- end -}}
       {{- if not $strings -}}
         {{- $found = append $found (printf "'%s' must be a list of strings" $key) -}}
+      {{- else -}}
+        {{- range $reserved := list "default" "match" -}}
+          {{- if has $reserved (index $node $key) -}}
+            {{- $found = append $found (printf "'%s' must not list '%s' (always allowed)" $key $reserved) -}}
+          {{- end -}}
+        {{- end -}}
       {{- end -}}
     {{- end -}}
   {{- end -}}
@@ -1375,10 +1381,10 @@ Implementation notes:
   marker is a valid string). The annotations stay on the outer node.
 - Each switch case is stored in acc.definitions under its node path.
 - With target keys in effect (the node's own `targetKeys`, else the
-  inherited ones) a per-target node's declaration branch is a closed
-  object instead of `tokenDeclaration`: target keys and `default` take
-  the node's value (type or markers), `match` a list of single-key
-  objects, each annotation a string; `additionalProperties: false`.
+  inherited ones) a per-target node's declaration branch references a
+  shared closed definition instead of `tokenDeclaration`
+  (crdkit.schema.declarationRef.internal): the key names are closed,
+  the values are not typed (the value pass checks them per target).
   The node carries `x-crdkit-targetKeys` (and `x-crdkit-annotations`)
   for the Markdown and the viewer.
 */}}
@@ -1541,16 +1547,8 @@ Implementation notes:
 {{- $result := $meta -}}
 {{- $wrapped := list -}}
 {{- if and $tokens (has $shape (list "scalar" "list")) (kindIs "slice" $targetKeys) -}}
-  {{- $markers := dict "$ref" "#/definitions/markers" -}}
-  {{- $entry := dict "anyOf" (list $core $markers) -}}
-  {{- $properties := dict "match" (dict "type" "array" "items" (dict "type" "object" "minProperties" 1 "maxProperties" 1 "additionalProperties" $entry)) -}}
-  {{- range $key := concat $targetKeys (list "default") -}}
-    {{- $_ := set $properties $key $entry -}}
-  {{- end -}}
-  {{- range $annotation := $node.annotations | default list -}}
-    {{- $_ := set $properties $annotation (dict "type" "string") -}}
-  {{- end -}}
-  {{- $wrapped = list $core (dict "type" "object" "properties" $properties "additionalProperties" false "minProperties" 1) $markers -}}
+  {{- $ref := include "crdkit.schema.declarationRef.internal" (dict "targetKeys" $targetKeys "annotations" ($node.annotations | default list) "acc" $acc) -}}
+  {{- $wrapped = list $core (dict "$ref" $ref) (dict "$ref" "#/definitions/markers") -}}
   {{- $_ := set $result "x-crdkit-targetKeys" $targetKeys -}}
   {{- if $node.annotations -}}
     {{- $_ := set $result "x-crdkit-annotations" $node.annotations -}}
@@ -1611,4 +1609,51 @@ Implementation notes:
     {{- include "crdkit.schema.mdTargetKeys.internal" (dict "node" $core.items "acc" $acc) -}}
   {{- end -}}
 {{- end -}}
+{{- end -}}
+
+{{/*
+crdkit.schema.declarationRef.internal (internal)
+
+Returns the `$ref` of the shared closed token declaration definition
+for one key set, creating the definition on first use.
+
+Interface:
+- Params (dict): { "targetKeys": <list of target keys>, "annotations":
+  <list of annotation keys>, "acc": <crdkit.schema.jsonNode.internal's
+  acc: "definitions" written, "declarations" registry created> }
+- Returns: plain text `#/definitions/<name>`.
+
+Implementation notes:
+- Definition: an object with at least one key, key names closed to the
+  target keys, `default`, `match` and the annotations (`propertyNames`
+  enum); `match` a list of single-key objects, annotations strings;
+  other values untyped.
+- Name: `targetDeclaration`, a number from the second distinct
+  `targetKeys` set (`targetDeclaration2`), then `.<annotation>` per
+  annotation. No `[`: never read as a switch case.
+*/}}
+{{- define "crdkit.schema.declarationRef.internal" -}}
+{{- $acc := .acc -}}
+{{- if not (hasKey $acc "declarations") -}}
+  {{- $_ := set $acc "declarations" (dict "keySets" (dict) "names" (dict)) -}}
+{{- end -}}
+{{- $registry := $acc.declarations -}}
+{{- $keysId := toJson .targetKeys -}}
+{{- if not (hasKey $registry.keySets $keysId) -}}
+  {{- $_ := set $registry.keySets $keysId (len $registry.keySets) -}}
+{{- end -}}
+{{- $index := index $registry.keySets $keysId -}}
+{{- $name := ternary "targetDeclaration" (printf "targetDeclaration%d" (add1 $index)) (eq (int $index) 0) -}}
+{{- range $annotation := .annotations -}}
+  {{- $name = printf "%s.%s" $name $annotation -}}
+{{- end -}}
+{{- if not (hasKey $acc.definitions $name) -}}
+  {{- $properties := dict "match" (dict "type" "array" "items" (dict "type" "object" "minProperties" 1 "maxProperties" 1)) -}}
+  {{- range $annotation := .annotations -}}
+    {{- $_ := set $properties $annotation (dict "type" "string") -}}
+  {{- end -}}
+  {{- $names := concat .targetKeys (list "default" "match") .annotations -}}
+  {{- $_ := set $acc.definitions $name (dict "type" "object" "minProperties" 1 "propertyNames" (dict "enum" $names) "properties" $properties) -}}
+{{- end -}}
+{{- include "crdkit.schema.ref.internal" (dict "key" $name) -}}
 {{- end -}}

@@ -332,7 +332,7 @@ A schema is a tree of **nodes**; each node is a dict.
 | `keys` | `map` | `{pattern: <regex>, label?: <string>}` for keys matched by `values`; `label` is a documentation-only placeholder for a matched key (e.g. `<ID>`) | any key |
 | `items` | `list` | node for every element | `{type: any}` |
 | `switch` | node | `{by: <key>, cases: {<value>: <node>}}` | — |
-| `targetKeys` | all | list of target keys a token declaration at or below the node may use; inherited, a descendant's own replaces it | declarations open (any key) |
+| `targetKeys` | all | list of target keys a token declaration at or below the node may use (not `default`/`match`: always allowed); inherited, a descendant's own replaces it | declarations open (any key) |
 | `annotations` | scalar types, `list` | list of annotation keys a token declaration at this node may use | none |
 
 Types:
@@ -609,10 +609,12 @@ Schema for editors and the viewer; the DSL maps keyword by keyword
 - Key order is emitted as `x-crdkit-order`; flow-map keys sort
   alphabetically after the positioned ones.
 - Per-target nodes are `anyOf` [type, `tokenDeclaration`, `markers`];
-  with `targetKeys` in effect the declaration branch is a closed object
-  (target keys and `default` → the node's value or a marker, `match` →
-  list of single-key objects, annotations → string,
-  `additionalProperties: false`), and the node carries
+  with `targetKeys` in effect the declaration branch references a
+  shared definition per key set and annotations (`targetDeclaration`,
+  `targetDeclaration2`, …, `.<annotation>` appended): key names closed
+  (`propertyNames` enum: target keys, `default`, `match`, annotations),
+  `match` a list of single-key objects, values untyped (the value pass
+  checks them per target), and the node carries
   `x-crdkit-targetKeys` / `x-crdkit-annotations`; the Markdown links
   its Per target cell to a final "Token declarations" section, the
   viewer lists the keys;

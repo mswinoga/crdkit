@@ -2533,7 +2533,7 @@ tests:
           path: diag.errors
           value: []
 
-  - it: 'self-check: targetKeys and annotations must be lists of strings; annotations only on a scalar or list'
+  - it: 'self-check: targetKeys and annotations must be lists of strings without default/match; annotations only on a scalar or list'
     set:
       schemaOps:
         - op: check
@@ -2544,6 +2544,7 @@ tests:
               a: {type: scalar, annotations: [1]}
               b: {type: map, annotations: [x]}
               c: {type: list, targetKeys: [dev], annotations: [x]}
+              d: {type: string, targetKeys: [ALL, default], annotations: [match]}
     asserts:
       - equal:
           path: results[0].ok
@@ -2553,9 +2554,11 @@ tests:
           value:
             - "schema invalid: properties.a: 'annotations' must be a list of strings"
             - "schema invalid: properties.b: 'annotations' does not apply to type 'map'"
+            - "schema invalid: properties.d: 'targetKeys' must not list 'default' (always allowed)"
+            - "schema invalid: properties.d: 'annotations' must not list 'match' (always allowed)"
             - "schema invalid: (root): 'targetKeys' must be a list of strings"
 
-  - it: 'jsonSchema: with targetKeys the declaration branch is a closed object; annotations only on their node'
+  - it: 'jsonSchema: with targetKeys the declaration branch references a shared closed definition per key set and annotations'
     set:
       schemaOps:
         - op: jsonSchema
@@ -2568,39 +2571,55 @@ tests:
                 type: map
                 properties:
                   num: {type: int}
+                  name: {type: string}
+                  dev:
+                    type: map
+                    targetKeys: [dev]
+                    properties:
+                      x: {type: string}
     asserts:
       - equal:
           path: results[0].json.properties.host
           value:
             anyOf:
               - {type: string}
-              - type: object
-                minProperties: 1
-                additionalProperties: false
-                properties:
-                  ALL: {anyOf: [{type: string}, {"$ref": "#/definitions/markers"}]}
-                  prod: {anyOf: [{type: string}, {"$ref": "#/definitions/markers"}]}
-                  default: {anyOf: [{type: string}, {"$ref": "#/definitions/markers"}]}
-                  match:
-                    type: array
-                    items:
-                      type: object
-                      minProperties: 1
-                      maxProperties: 1
-                      additionalProperties: {anyOf: [{type: string}, {"$ref": "#/definitions/markers"}]}
-                  owner: {type: string}
+              - {"$ref": "#/definitions/targetDeclaration.owner"}
               - {"$ref": "#/definitions/markers"}
             x-crdkit-type: string
             x-crdkit-perTarget: "yes"
             x-crdkit-targetKeys: [ALL, prod]
             x-crdkit-annotations: [owner]
+      - equal:
+          path: results[0].json.properties.open.properties.num.anyOf[1]
+          value: {"$ref": "#/definitions/targetDeclaration"}
+      - equal:
+          path: results[0].json.properties.open.properties.name.anyOf[1]
+          value: {"$ref": "#/definitions/targetDeclaration"}
+      - equal:
+          path: results[0].json.properties.open.properties.dev.properties.x.anyOf[1]
+          value: {"$ref": "#/definitions/targetDeclaration2"}
       - notExists:
           path: results[0].json.properties.open.properties.num["x-crdkit-annotations"]
       - equal:
-          path: results[0].json.properties.open.properties.num.anyOf[1].properties.default
-          value: {anyOf: [{type: integer}, {"$ref": "#/definitions/markers"}]}
-      - notExists:
-          path: results[0].json.properties.open.properties.num.anyOf[1].properties.owner
+          path: results[0].json.definitions.targetDeclaration
+          value:
+            type: object
+            minProperties: 1
+            propertyNames: {enum: [ALL, prod, default, match]}
+            properties:
+              match: {type: array, items: {type: object, minProperties: 1, maxProperties: 1}}
+      - equal:
+          path: results[0].json.definitions["targetDeclaration.owner"]
+          value:
+            type: object
+            minProperties: 1
+            propertyNames: {enum: [ALL, prod, default, match, owner]}
+            properties:
+              match: {type: array, items: {type: object, minProperties: 1, maxProperties: 1}}
+              owner: {type: string}
+      - equal:
+          path: results[0].json.definitions.targetDeclaration2.propertyNames
+          value: {enum: [dev, default, match]}
 
   - it: 'jsonSchema: without targetKeys a per-target node keeps the open tokenDeclaration'
     set:
