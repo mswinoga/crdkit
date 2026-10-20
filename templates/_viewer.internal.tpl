@@ -261,7 +261,10 @@ function gen(node) {
       if (child.has) { value[name] = child.value; }
     });
   } else { value = {}; }
-  if (hasValue && String(node["x-crdkit-perTarget"] || "") === "yes") { value = { "default": value, "prod": value }; }
+  if (hasValue && String(node["x-crdkit-perTarget"] || "") === "yes") {
+    var closed = node["x-crdkit-targetKeys"], tk = Array.isArray(closed) && closed.length && closed.indexOf("prod") < 0 ? closed[0] : "prod", wrapped = { "default": value };
+    wrapped[tk] = value; value = wrapped;
+  }
   return { has: hasValue, value: value };
 }
 
@@ -622,6 +625,10 @@ function renderDetail() {
   } else {
     var facts = [["Type", badge(n)]], pt2 = String(n["x-crdkit-perTarget"] || "");
     if (PT_TEXT[pt2]) { facts.push(["Per target", esc(PT_TEXT[pt2])]); }
+    if (Array.isArray(n["x-crdkit-targetKeys"])) {
+      facts.push(["Declaration keys", n["x-crdkit-targetKeys"].concat(["default", "match"], n["x-crdkit-annotations"] || []).map(function (k) { return "<code>" + esc(k) + "</code>"; }).join(", ") +
+        " — an exact target goes in <code>match</code>"]);
+    }
     if (it.required) { facts.push(["Required", "yes"]); }
     if (has(n, "default")) { facts.push(["Default", "<code>" + esc(JSON.stringify(n["default"])) + "</code>"]); }
     if (it.core.propertyNames && it.core.propertyNames.pattern) { facts.push(["Keys", "match <code>" + esc(it.core.propertyNames.pattern) + "</code>"]); }

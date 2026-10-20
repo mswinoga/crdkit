@@ -444,7 +444,10 @@ Interface:
   - one `## <node path>` section per switch case: doc, keys table
     (shared keys marked), example as a YAML block (generated when the
     schema's examples do not reach the case), sections (tables, `code`
-    as YAML blocks).
+    as YAML blocks);
+  - when per-target nodes have closed declaration keys
+    (`targetKeys`), a final `## Token declarations` section listing
+    each distinct key set (crdkit.schema.mdTargetKeys.internal).
 
 Implementation notes:
 - Reads the extensions of crdkit.schema.jsonSchema (`x-crdkit-order`,
@@ -474,6 +477,24 @@ Implementation notes:
 {{- $acc := dict "sections" (list) -}}
 {{- include "crdkit.schema.mdNode.internal" (dict "node" $js "path" "" "defs" $defs "pairs" $pairs "labels" (list) "acc" $acc) -}}
 {{- $parts = concat $parts $acc.sections -}}
+{{- $keySets := dict "sets" (list) "seen" (list) -}}
+{{- include "crdkit.schema.mdTargetKeys.internal" (dict "node" $js "acc" $keySets) -}}
+{{- range $name := keys $defs | sortAlpha -}}
+  {{- include "crdkit.schema.mdTargetKeys.internal" (dict "node" (index $defs $name) "acc" $keySets) -}}
+{{- end -}}
+{{- if $keySets.sets -}}
+  {{- $lines := list "## Token declarations" "A per-target value is a plain value or a token declaration: a map with these keys (plus the annotations named in its row). An exact target is not a key: it goes in `match`, a list of `{<regex>: <value>}`." -}}
+  {{- $bullets := list -}}
+  {{- range $set := $keySets.sets -}}
+    {{- $keys := list -}}
+    {{- range $key := concat $set (list "default" "match") -}}
+      {{- $keys = append $keys (printf "`%s`" $key) -}}
+    {{- end -}}
+    {{- $bullets = append $bullets (printf "- %s" (join ", " $keys)) -}}
+  {{- end -}}
+  {{- $lines = append $lines (join "\n" $bullets) -}}
+  {{- $parts = append $parts (join "\n\n" $lines) -}}
+{{- end -}}
 {{- join "\n\n" $parts }}
 {{ end -}}
 

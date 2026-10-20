@@ -609,6 +609,13 @@ Schema for editors and the viewer; the DSL maps keyword by keyword
 - Key order is emitted as `x-crdkit-order`; flow-map keys sort
   alphabetically after the positioned ones.
 - Per-target nodes are `anyOf` [type, `tokenDeclaration`, `markers`];
+  with `targetKeys` in effect the declaration branch is a closed object
+  (target keys and `default` → the node's value or a marker, `match` →
+  list of single-key objects, annotations → string,
+  `additionalProperties: false`), and the node carries
+  `x-crdkit-targetKeys` / `x-crdkit-annotations`; the Markdown links
+  its Per target cell to a final "Token declarations" section, the
+  viewer lists the keys;
   a marker-accepting `int`/`number`/`bool`, or `string`/`scalar` with
   `enum` or `pattern`, is `anyOf` [type, `markers`]; `static: true` on a
   `string`/`scalar` adds a `not` pattern.

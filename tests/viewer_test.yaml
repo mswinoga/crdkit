@@ -103,3 +103,23 @@ tests:
       - notMatchRegex:
           path: results[0].text
           pattern: '"\$id"'
+
+  - it: the viewer lists closed declaration keys and uses a declared key in generated examples
+    set:
+      schemaOps:
+        - op: html
+          schemaText: |
+            type: map
+            targetKeys: [ALL]
+            properties:
+              host: {type: string, annotations: [owner]}
+    asserts:
+      - matchRegex:
+          path: results[0].outside
+          pattern: 'facts.push\(\["Declaration keys"'
+      - matchRegex:
+          path: results[0].outside
+          pattern: 'closed.indexOf\("prod"\) < 0 \? closed\[0\] : "prod"'
+      - matchRegex:
+          path: results[0].text
+          pattern: '"x-crdkit-targetKeys": \[\s*"ALL"\s*\]'

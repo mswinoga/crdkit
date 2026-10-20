@@ -2554,3 +2554,133 @@ tests:
             - "schema invalid: properties.a: 'annotations' must be a list of strings"
             - "schema invalid: properties.b: 'annotations' does not apply to type 'map'"
             - "schema invalid: (root): 'targetKeys' must be a list of strings"
+
+  - it: 'jsonSchema: with targetKeys the declaration branch is a closed object; annotations only on their node'
+    set:
+      schemaOps:
+        - op: jsonSchema
+          schemaText: |
+            type: map
+            targetKeys: [ALL, prod]
+            properties:
+              host: {type: string, annotations: [owner]}
+              open:
+                type: map
+                properties:
+                  num: {type: int}
+    asserts:
+      - equal:
+          path: results[0].json.properties.host
+          value:
+            anyOf:
+              - {type: string}
+              - type: object
+                minProperties: 1
+                additionalProperties: false
+                properties:
+                  ALL: {anyOf: [{type: string}, {"$ref": "#/definitions/markers"}]}
+                  prod: {anyOf: [{type: string}, {"$ref": "#/definitions/markers"}]}
+                  default: {anyOf: [{type: string}, {"$ref": "#/definitions/markers"}]}
+                  match:
+                    type: array
+                    items:
+                      type: object
+                      minProperties: 1
+                      maxProperties: 1
+                      additionalProperties: {anyOf: [{type: string}, {"$ref": "#/definitions/markers"}]}
+                  owner: {type: string}
+              - {"$ref": "#/definitions/markers"}
+            x-crdkit-type: string
+            x-crdkit-perTarget: "yes"
+            x-crdkit-targetKeys: [ALL, prod]
+            x-crdkit-annotations: [owner]
+      - notExists:
+          path: results[0].json.properties.open.properties.num["x-crdkit-annotations"]
+      - equal:
+          path: results[0].json.properties.open.properties.num.anyOf[1].properties.default
+          value: {anyOf: [{type: integer}, {"$ref": "#/definitions/markers"}]}
+      - notExists:
+          path: results[0].json.properties.open.properties.num.anyOf[1].properties.owner
+
+  - it: 'jsonSchema: without targetKeys a per-target node keeps the open tokenDeclaration'
+    set:
+      schemaOps:
+        - op: jsonSchema
+          schemaText: |
+            type: map
+            properties:
+              host: {type: string, annotations: [owner]}
+    asserts:
+      - equal:
+          path: results[0].json.properties.host.anyOf[1]
+          value: {"$ref": "#/definitions/tokenDeclaration"}
+      - notExists:
+          path: results[0].json.properties.host["x-crdkit-targetKeys"]
+
+  - it: 'docs: closed declarations link to one Token declarations section listing each key set'
+    set:
+      schemaOps:
+        - op: docs
+          schemaText: |
+            type: map
+            targetKeys: [ALL, prod]
+            properties:
+              host: {type: string, annotations: [owner], doc: "Host."}
+              port: {type: int, doc: "Port."}
+              sub:
+                type: map
+                targetKeys: [dev]
+                doc: "Sub."
+                properties:
+                  x: {type: string, doc: "X."}
+    asserts:
+      - matchRegex:
+          path: results[0].text
+          pattern: '\| `host` \| string \| \[yes\]\(#token-declarations\), annotations: `owner` \| Host\. \|'
+      - matchRegex:
+          path: results[0].text
+          pattern: '\| `port` \| int \| \[yes\]\(#token-declarations\) \| Port\. \|'
+      - matchRegex:
+          path: results[0].text
+          pattern: '## Token declarations\n\nA per-target value is a plain value or a token declaration[^\n]*\n\n- `ALL`, `prod`, `default`, `match`\n- `dev`, `default`, `match`\n$'
+
+  - it: 'docs: without targetKeys there is no Token declarations section'
+    set:
+      schemaOps:
+        - op: docs
+          schemaText: |
+            type: map
+            properties:
+              host: {type: string, doc: "Host."}
+    asserts:
+      - notMatchRegex:
+          path: results[0].text
+          pattern: 'Token declarations'
+      - matchRegex:
+          path: results[0].text
+          pattern: '\| `host` \| string \| yes \| Host\. \|'
+
+  - it: 'docs: a generated per-target example uses a declared target key when prod is not one'
+    set:
+      schemaOps:
+        - op: docs
+          schemaText: |
+            type: map
+            targetKeys: [ALL]
+            properties:
+              svc:
+                switch:
+                  by: kind
+                  cases:
+                    a:
+                      type: map
+                      properties:
+                        kind: {type: string, static: true}
+                        host: {type: string}
+    asserts:
+      - matchRegex:
+          path: results[0].text
+          pattern: 'host:\n\s+ALL: text\n\s+default: text'
+      - notMatchRegex:
+          path: results[0].text
+          pattern: 'prod: text'
