@@ -1253,11 +1253,15 @@ Spells a definitions key as a JSON Schema `$ref`.
 Interface:
 - Params (dict): { "key": <definitions key> }
 - Returns: `#/definitions/<key>` as plain text, the key escaped as a
-  JSON Pointer segment (`~0`, `~1`) and a URI fragment (`%25`, `%5B`,
-  `%5D`, `%22`, `%20`, `%23`, `%3C`, `%3E`).
+  JSON Pointer segment (`~0`, `~1`) and a URI fragment (`%25`, `%22`,
+  `%20`, `%23`, `%3C`, `%3E`).
+
+Implementation notes:
+- `[`/`]` stay literal: switch-case keys use them, and several parsers
+  resolve `%5B`/`%5D` without percent-decoding.
 */}}
 {{- define "crdkit.schema.ref.internal" -}}
-{{- $key := .key | replace "~" "~0" | replace "/" "~1" | replace "%" "%25" | replace "[" "%5B" | replace "]" "%5D" | replace "\"" "%22" | replace " " "%20" | replace "#" "%23" | replace "<" "%3C" | replace ">" "%3E" -}}
+{{- $key := .key | replace "~" "~0" | replace "/" "~1" | replace "%" "%25" | replace "\"" "%22" | replace " " "%20" | replace "#" "%23" | replace "<" "%3C" | replace ">" "%3E" -}}
 {{- printf "#/definitions/%s" $key -}}
 {{- end -}}
 

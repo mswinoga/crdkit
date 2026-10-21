@@ -1655,17 +1655,17 @@ tests:
           path: results[0].json.additionalProperties.allOf
           value:
             - if: {properties: {type: {const: zeta}}, required: [type]}
-              then: {"$ref": "#/definitions/*%5Btype=zeta%5D"}
+              then: {"$ref": "#/definitions/*[type=zeta]"}
             - if: {properties: {type: {const: alpha}}, required: [type]}
-              then: {"$ref": "#/definitions/*%5Btype=alpha%5D"}
+              then: {"$ref": "#/definitions/*[type=alpha]"}
       - equal:
           path: results[0].json.additionalProperties["x-crdkit-switch"]
           value:
             by: type
             cases: [zeta, alpha]
             refs:
-              zeta: "#/definitions/*%5Btype=zeta%5D"
-              alpha: "#/definitions/*%5Btype=alpha%5D"
+              zeta: "#/definitions/*[type=zeta]"
+              alpha: "#/definitions/*[type=alpha]"
       - equal:
           path: results[0].json.definitions["*[type=alpha]"].additionalProperties
           value: false

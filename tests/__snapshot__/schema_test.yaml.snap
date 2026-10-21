@@ -313,7 +313,7 @@
                     ]
                   },
                   "then": {
-                    "$ref": "#/definitions/services.*%5Btype=greeter%5D"
+                    "$ref": "#/definitions/services.*[type=greeter]"
                   }
                 },
                 {
@@ -328,7 +328,7 @@
                     ]
                   },
                   "then": {
-                    "$ref": "#/definitions/services.*%5Btype=environment%5D"
+                    "$ref": "#/definitions/services.*[type=environment]"
                   }
                 }
               ],
@@ -351,8 +351,8 @@
                   "environment"
                 ],
                 "refs": {
-                  "environment": "#/definitions/services.*%5Btype=environment%5D",
-                  "greeter": "#/definitions/services.*%5Btype=greeter%5D"
+                  "environment": "#/definitions/services.*[type=environment]",
+                  "greeter": "#/definitions/services.*[type=greeter]"
                 }
               }
             },
