@@ -320,13 +320,13 @@ A schema is a tree of **nodes**; each node is a dict.
 
 | Key | Applies to | Meaning | Omitted |
 |---|---|---|---|
-| `type` | all | the value's shape and scalar type (see "Types") | self-check ERROR (a `switch` node is a map) |
+| `type` | all | the value's shape and scalar type after substitution — what a handler reads and the CR carries (see "Types") | self-check ERROR (a `switch` node is a map) |
 | `doc` | all | Markdown text for the reference | allowed |
 | `default` | all | value inserted when the key is absent | none |
 | `required` | all | the key must be present | `false` |
 | `enum` | scalar types | list of allowed values (compared as strings) | any |
 | `pattern` | scalar types | regex on the value's string form, unanchored | any |
-| `static` | scalar types | `true` → the value is used as written: a `@NAME@` marker is an ERROR, never per-target | `false` |
+| `static` | scalar types | `true` → the value is used as written: a `@NAME@` marker or a token declaration is an ERROR, never per-target; never below a per-target node | `false` (markers allowed; per-target at the declaration level) |
 | `properties` | `map` | `{<key>: <node>}` for named keys | none |
 | `values` | `map` | node for every key not in `properties` | closed: other keys → WARNING |
 | `keys` | `map` | `{pattern: <regex>, label?: <string>}` for keys matched by `values`; `label` is a documentation-only placeholder for a matched key (e.g. `<ID>`) | any key |
@@ -365,7 +365,10 @@ Per-target values:
   a token (see "Target escalation").
 - Per-target on every scalar type and `list` node — except a `static:
   true` scalar and any node below a per-target node (there, markers
-  only).
+  only). The topmost such node on a path is the declaration level.
+- `static: true` below a per-target node is a self-check ERROR (a
+  switch case's `by` key excepted): an entry of a declaration may vary,
+  so it is never literal.
 - Only scalar types/`list`: a declaration is always a dict, so a dict
   in a scalar/list field is unambiguously a declaration
   (`{default: [a], prod: [a, b]}`); in a map field it would not be.
@@ -420,8 +423,9 @@ however often the schema is checked:
 - unknown node key, an unknown or omitted `type`, a key on a type it
   doesn't apply to, a non-bool flag, a non-list `enum`, malformed
   `keys`/`switch`;
-- `static` on a type other than a scalar type; `default` with
-  `required: true`;
+- `static` on a type other than a scalar type, or below a per-target
+  node (`'static' does not apply below a per-target node`; a switch
+  case's `by` key excepted); `default` with `required: true`;
 - a switch case not declaring its `by` key as a static scalar.
 
 An invalid regex in `pattern`/`keys.pattern` aborts the render
@@ -510,19 +514,22 @@ list elements are indexed: `services["a.b"].ports[0]`.
 
 | Check | Level | Message |
 |---|---|---|
-| shape mismatch | WARNING | `'<path>' must be a map — ignored` |
+| shape mismatch | WARNING (ERROR on a `required: true` node) | `'<path>' must be a map — ignored` |
 | unknown key | WARNING | `'<path>' is not a known key — ignored` |
 | key pattern | ERROR | `key '<path>' must match '<re>' — ignored` |
-| switch, no key | WARNING | `'<path>' has no '<by>' — ignored` |
-| switch, no case | WARNING | `'<path>.<by>' has unknown value '<v>' — ignored` |
+| switch, no key | WARNING (ERROR on a `required: true` node) | `'<path>' has no '<by>' — ignored` |
+| switch, no case | WARNING (ERROR on a `required: true` node) | `'<path>.<by>' has unknown value '<v>' — ignored` |
 | required | ERROR | `'<path>' is required` |
 | type / enum / pattern | ERROR | `'<path>' must be of type 'int' — ignored` |
 | markers in a static value | ERROR | `'<path>' must not contain '@NAME@' markers — ignored` |
+| map in a static scalar | ERROR | `'<path>' is static — a token declaration is not allowed — ignored` |
 | declaration key | ERROR | `'<path>.<key>' is not a target key — ignored; allowed: <keys>; an exact target goes in 'match'` |
 | declaration `match` | ERROR | `'<path>.match' must be a list of single-key maps {<regex>: <value>} — ignored` |
 | value pass | ERROR | `'<path>' for target '<t>' must be of type 'int' — got '<v>'` |
 
 In the value pass every violation except an unknown key is an ERROR.
+A dropped `required: true` value is always an ERROR: the required
+check reads the input as written, so it never reports it.
 
 ### Templates
 

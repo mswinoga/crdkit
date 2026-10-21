@@ -5,8 +5,9 @@ defines); crdkit validates values against it, normalizes them, checks
 per-target values and renders a Markdown reference.
 
 Schema node (a dict):
-- type: the value's shape and scalar type (omitted only on a "switch"
-  node, a map):
+- type: the value's shape and scalar type after substitution — what a
+  handler reads and the CR carries (omitted only on a "switch" node, a
+  map):
   - string | int | number | bool — a scalar of that type
   - scalar — any scalar
   - map, list — that shape
@@ -17,11 +18,15 @@ Schema node (a dict):
 - required omitted = false; doc and default are optional
 - scalar types: enum (list), pattern (regex, unanchored), static
   (true → the value is used as written: "@NAME@" markers rejected, never
-  per-target; omitted = false)
-- scalar types and list: every non-static node may hold markers and be
-  per-target (a token declaration, resolved per target), except below a
-  per-target node, where only markers are allowed (see
-  crdkit.schema.perTarget.internal)
+  per-target; omitted = false) — the only variability flag
+- scalar types and list: every non-static node may hold markers; the
+  topmost one on a path (the declaration level) may also be per-target
+  (a token declaration, resolved per target); below a per-target node
+  only markers, and `static: true` there is a self-check ERROR (except a
+  switch case's `by` key) — see crdkit.schema.perTarget.internal
+- a shape mismatch or unmatched switch on a `required: true` node is an
+  ERROR (elsewhere a WARNING); a map on a static scalar is an ERROR;
+  both drop the value
 - targetKeys (any node): list of target keys a token declaration at or
   below the node may use, next to `default` and `match`; inherited, a
   descendant's own replaces it; absent everywhere = any key
@@ -125,7 +130,8 @@ Implementation notes:
 - A schema that failed to parse (Helm's `fromYaml` error dict, a single
   `Error` key) is reported as such.
 - Rules: known node keys only; a known type (or a switch); each key on a
-  type it applies to; `static` only on a scalar type; never `default`
+  type it applies to; `static` only on a scalar type, never below a
+  per-target node (a switch case's `by` key excepted); never `default`
   together with `required: true`; every switch case declares the switch
   key as a scalar type with `static: true`.
 */}}

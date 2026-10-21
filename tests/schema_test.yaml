@@ -217,6 +217,66 @@ tests:
           path: diag.errors
           count: 0
 
+  - it: a shape mismatch or unmatched switch on a required node is an ERROR; optional ones stay WARNINGs
+    set:
+      schemaOps:
+        - op: validate
+          schema:
+            type: map
+            properties:
+              m: {type: map, required: true}
+              l: {type: list, required: true}
+              s: {type: scalar, required: true}
+              opt: {type: map}
+              sw:
+                required: true
+                switch:
+                  by: kind
+                  cases:
+                    a:
+                      type: map
+                      properties:
+                        kind: {type: string, static: true}
+          values: {m: "x", l: "x", s: [1], opt: "x", sw: {kind: b}}
+    asserts:
+      - equal:
+          path: results[0].value
+          value: {}
+      - equal:
+          path: diag.errors
+          value:
+            - "'l' must be a list — ignored"
+            - "'m' must be a map — ignored"
+            - "'s' must be a scalar — ignored"
+            - "'sw.kind' has unknown value 'b' — ignored"
+      - equal:
+          path: diag.warnings
+          value:
+            - "'opt' must be a map — ignored"
+
+  - it: a map on a static scalar is an ERROR, dropped; a required one is not reported again
+    set:
+      schemaOps:
+        - op: validate
+          schema:
+            type: map
+            properties:
+              enabled: {type: bool, static: true, default: true}
+              kind: {type: string, static: true, required: true}
+          values: {enabled: {PROD: false}, kind: {default: a}}
+    asserts:
+      - equal:
+          path: results[0].value
+          value: {enabled: true}
+      - equal:
+          path: diag.errors
+          value:
+            - "'enabled' is static — a token declaration is not allowed — ignored"
+            - "'kind' is static — a token declaration is not allowed — ignored"
+      - lengthEqual:
+          path: diag.warnings
+          count: 0
+
   - it: a root value of the wrong shape comes back as an empty map
     set:
       schemaOps:
@@ -1049,7 +1109,7 @@ tests:
                           mode: {type: string, static: true, enum: [fast, slow]}
                           port: {type: int, default: 80}
                           name: {type: string, static: true, pattern: "^[a-z]+$"}
-                          hosts: {type: list, items: {type: scalar, static: true}}
+                          hosts: {type: list, items: {type: scalar}}
                           flag: {type: bool, static: true}
     asserts:
       - matchRegex:
@@ -1157,17 +1217,17 @@ tests:
           value:
             greeting: {default: hi, prod: hello}
             hosts: {default: [1], prod: [2, x]}
-      - equal:
+      - lengthEqual:
           path: diag.warnings
-          value:
-            - "'pinned' must be a scalar — ignored"
-            - "'type' must be a scalar — ignored"
+          count: 0
       - equal:
           path: diag.errors
           value:
+            - "'pinned' is static — a token declaration is not allowed — ignored"
+            - "'type' is static — a token declaration is not allowed — ignored"
             - "'hosts[1]' for target 'prod' must be of type 'int' — got 'x'"
 
-  - it: 'a static scalar below a per-target list is a valid schema'
+  - it: 'static below a per-target node is a self-check ERROR'
     set:
       schemaOps:
         - op: check
@@ -1175,6 +1235,40 @@ tests:
             type: map
             properties:
               hosts: {type: list, items: {type: scalar, static: true}}
+              nested:
+                type: list
+                items:
+                  type: map
+                  properties:
+                    port: {type: int, static: true}
+    asserts:
+      - equal:
+          path: results[0].ok
+          value: ""
+      - equal:
+          path: diag.errors
+          value:
+            - "schema invalid: properties.hosts.items: 'static' does not apply below a per-target node"
+            - "schema invalid: properties.nested.items.properties.port: 'static' does not apply below a per-target node"
+
+  - it: 'a static switch key below a per-target list is a valid schema'
+    set:
+      schemaOps:
+        - op: check
+          schema:
+            type: map
+            properties:
+              routes:
+                type: list
+                items:
+                  switch:
+                    by: kind
+                    cases:
+                      plain:
+                        type: map
+                        properties:
+                          kind: {type: string, static: true}
+                          host: {type: string}
     asserts:
       - equal:
           path: results[0].ok

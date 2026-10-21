@@ -82,9 +82,15 @@ Recursive self-check of one schema node; collects every problem.
 
 Interface:
 - Params (dict): { "node": <any>, "path": <schema path string>,
-  "inTokens": <bool, an ancestor is per-target>, "problems": <dict
-  with a "list" key, appended to in place> }
+  "inTokens": <bool, an ancestor is per-target>, "switchBy": <the
+  switch key, on a switch case node only>, "isSwitchBy": <bool, the
+  node is a switch case's `by` key>, "problems": <dict with a "list"
+  key, appended to in place> }
 - Returns: nothing.
+
+Implementation notes:
+- `static: true` below a per-target node is a problem, except on a
+  switch case's `by` key: it selects the case, never a value.
 */}}
 {{- define "crdkit.schema.checkNode.internal" -}}
 {{- $node := .node -}}
@@ -114,7 +120,7 @@ Interface:
     {{- else -}}
       {{- range $caseValue, $caseNode := $switch.cases -}}
         {{- $casePath := printf "%sswitch.cases.%s" $prefix $caseValue -}}
-        {{- include "crdkit.schema.checkNode.internal" (dict "node" $caseNode "path" $casePath "inTokens" $inTokens "problems" $problems) -}}
+        {{- include "crdkit.schema.checkNode.internal" (dict "node" $caseNode "path" $casePath "inTokens" $inTokens "switchBy" $switch.by "problems" $problems) -}}
         {{- $onNode := "" -}}
         {{- if and (kindIs "map" $caseNode) (kindIs "map" $caseNode.properties) -}}
           {{- $onNode = index $caseNode.properties $switch.by -}}
@@ -165,6 +171,9 @@ Interface:
       {{- $found = append $found (printf "'%s' must be a bool" $flag) -}}
     {{- end -}}
   {{- end -}}
+  {{- if and $inTokens (eq (toString $node.static) "true") (not .isSwitchBy) -}}
+    {{- $found = append $found "'static' does not apply below a per-target node" -}}
+  {{- end -}}
   {{- if and (hasKey $node "default") (eq (toString $node.required) "true") -}}
     {{- $found = append $found "'default' and 'required: true' exclude each other" -}}
   {{- end -}}
@@ -179,7 +188,7 @@ Interface:
       {{- $found = append $found "'properties' must be a map" -}}
     {{- else -}}
       {{- range $key, $child := $node.properties -}}
-        {{- include "crdkit.schema.checkNode.internal" (dict "node" $child "path" (printf "%sproperties.%s" $prefix $key) "inTokens" $childInTokens "problems" $problems) -}}
+        {{- include "crdkit.schema.checkNode.internal" (dict "node" $child "path" (printf "%sproperties.%s" $prefix $key) "inTokens" $childInTokens "isSwitchBy" (and (kindIs "string" $.switchBy) (eq $key $.switchBy)) "problems" $problems) -}}
       {{- end -}}
     {{- end -}}
   {{- end -}}
@@ -330,9 +339,13 @@ Interface:
 Implementation notes:
 - Results travel through "out", not YAML: a YAML round-trip would turn
   every value into its decoded form at each level.
-- structural mode: shape mismatch / unknown key / unmatched switch →
-  WARNING; required / type / enum / pattern / markers / keys.pattern →
-  ERROR; a node that fails is dropped (its parent's default then
+- structural mode: shape mismatch / unmatched switch → WARNING, ERROR
+  on a `required: true` node (the required check reads the input as
+  written, so the drop would pass silently); unknown key → WARNING;
+  required / type / enum / pattern / markers / keys.pattern → ERROR; a
+  map on a static scalar node → ERROR, whatever `required` says (a
+  fallback to the default would invert e.g. `enabled: {PROD: false}`);
+  a node that fails is dropped (its parent's default then
   applies), a key failing "keys.pattern" with its value. A per-target
   node holding a dict is a token declaration: kept as written, checked
   by the value pass; with target keys in effect (the node's own
@@ -353,7 +366,7 @@ Implementation notes:
 {{- $mode := .mode -}}
 {{- $suffix := .suffix | default "" -}}
 {{- $resolved := eq $mode "resolved" -}}
-{{- $shapeDiag := ternary "crdkit.diag.error" "crdkit.diag.warning" $resolved -}}
+{{- $shapeDiag := ternary "crdkit.diag.error" "crdkit.diag.warning" (or $resolved (eq (toString $node.required) "true")) -}}
 {{- $tail := ternary "" " — ignored" $resolved -}}
 {{- $_ := set $out "keep" true -}}
 {{- $_ := set $out "value" $value -}}
@@ -386,7 +399,10 @@ Implementation notes:
 {{- else if or (eq $shape "any") $isDeclaration -}}
   {{/* kept as written */}}
 {{- else if eq $shape "scalar" -}}
-  {{- if or (kindIs "map" $value) (kindIs "slice" $value) -}}
+  {{- if and (not $resolved) (kindIs "map" $value) (eq (toString $node.static) "true") -}}
+    {{- include "crdkit.diag.error" (list $diag (printf "'%s' is static — a token declaration is not allowed — ignored" $path)) -}}
+    {{- $_ := set $out "keep" false -}}
+  {{- else if or (kindIs "map" $value) (kindIs "slice" $value) -}}
     {{- include $shapeDiag (list $diag (printf "'%s'%s must be a scalar%s" $path $suffix $tail)) -}}
     {{- $_ := set $out "keep" false -}}
   {{- else -}}

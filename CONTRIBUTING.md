@@ -339,8 +339,10 @@ in the file-level doc comment of `templates/_schema.tpl`.
   every call, independent of `seen`, so a repeated call returns the
   same value. A failing value or one still holding a marker (e.g. left
   for the final substitution pass) is returned unconverted.
-- Severities: shape mismatch / unknown key / unmatched switch → WARNING;
-  required / type / enum / pattern / markers in a `static` value → ERROR; every value-pass
+- Severities: shape mismatch / unmatched switch → WARNING, ERROR on a
+  `required: true` node (the required check reads the input as written
+  and would miss the drop); unknown key → WARNING; required / type /
+  enum / pattern / markers or a map in a `static` value → ERROR; every value-pass
   violation → ERROR naming the target. Static values are type-checked
   strictly, resolved values "parses as".
 - Per-target: every non-static scalar-type or `list` node may be a
@@ -348,7 +350,10 @@ in the file-level doc comment of `templates/_schema.tpl`.
   except below a per-target node, where only markers are allowed
   (`crdkit.schema.perTarget.internal`, the one place deciding it; every
   walker threads `inTokens`). `static: true` (scalar types only) marks a
-  value used as written: no markers, never per-target. Other omitted
+  value used as written: no markers, never per-target, never below a
+  per-target node (self-check ERROR; a switch case's `by` key excepted,
+  `checkNode.internal` threads `switchBy`). `type` is the type after
+  substitution. Other omitted
   keys: `type` → self-check ERROR (except a switch node), `required`
   false, `static` false, map without `values` closed, `items` any.
 - `switch` uses `by:`, never `on:` — Helm's `fromYaml` speaks YAML 1.1
