@@ -622,7 +622,10 @@ Schema for editors and the viewer; the DSL maps keyword by keyword
   list that is not per-target.
 - Key order is emitted as `x-crdkit-order`; flow-map keys sort
   alphabetically after the positioned ones.
-- Per-target nodes are `anyOf` [type, `tokenDeclaration`, `markers`];
+- Per-target nodes are `anyOf` [type, `tokenDeclaration`], plus a
+  `markers` branch on an `int`/`number`/`bool` or a `string`/`scalar`
+  with `enum` or `pattern` (a marker is a valid plain string; a list
+  never holds one: substitution is text);
   with `targetKeys` in effect the declaration branch references a
   shared definition per key set and annotations (`targetDeclaration`,
   `targetDeclaration2`, …, `.<annotation>` appended): key names closed
@@ -632,9 +635,11 @@ Schema for editors and the viewer; the DSL maps keyword by keyword
   from that definition (enum order: target keys, `default`, `match`,
   annotations), the Markdown links the Per target cell to a final
   "Token declarations" section, the viewer lists the keys;
-  a marker-accepting `int`/`number`/`bool`, or `string`/`scalar` with
-  `enum` or `pattern`, is `anyOf` [type, `markers`]; `static: true` on a
-  `string`/`scalar` adds a `not` pattern.
+  a non-per-target marker-accepting `int`/`number`/`bool`, or
+  `string`/`scalar` with `enum` or `pattern`, is `anyOf` [type,
+  `markers`]; `static: true` on a `string`/`scalar` adds `not: {$ref:
+  markers}` (not a `$ref` to a static definition: draft-07 ignores
+  keywords next to `$ref`).
 - A switch case is a complete, closed schema under
   `definitions["<node path>[<by>=<case>]"]`, selected by `allOf`
   `if/then`; properties identical in every case (two or more) carry

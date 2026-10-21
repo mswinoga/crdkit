@@ -118,9 +118,6 @@
                     },
                     {
                       "$ref": "#/definitions/tokenDeclaration"
-                    },
-                    {
-                      "$ref": "#/definitions/markers"
                     }
                   ],
                   "examples": [
@@ -138,7 +135,7 @@
                   "environment"
                 ],
                 "not": {
-                  "pattern": "@[A-Za-z0-9_.]+@"
+                  "$ref": "#/definitions/markers"
                 },
                 "type": [
                   "string",
@@ -177,9 +174,6 @@
                   },
                   {
                     "$ref": "#/definitions/tokenDeclaration"
-                  },
-                  {
-                    "$ref": "#/definitions/markers"
                   }
                 ],
                 "description": "File content.",
@@ -207,9 +201,6 @@
                   },
                   {
                     "$ref": "#/definitions/tokenDeclaration"
-                  },
-                  {
-                    "$ref": "#/definitions/markers"
                   }
                 ]
               },
@@ -218,7 +209,7 @@
                   "greeter"
                 ],
                 "not": {
-                  "pattern": "@[A-Za-z0-9_.]+@"
+                  "$ref": "#/definitions/markers"
                 },
                 "type": [
                   "string",
@@ -289,7 +280,7 @@
               "deploy"
             ],
             "not": {
-              "pattern": "@[A-Za-z0-9_.]+@"
+              "$ref": "#/definitions/markers"
             },
             "type": [
               "string",
@@ -368,7 +359,7 @@
               "prod"
             ],
             "not": {
-              "pattern": "@[A-Za-z0-9_.]+@"
+              "$ref": "#/definitions/markers"
             },
             "type": "string",
             "x-crdkit-perTarget": "no"

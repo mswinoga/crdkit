@@ -1484,7 +1484,7 @@ tests:
             pattern: "^a"
             enum: [ab, ac]
             default: ab
-            not: {pattern: "@[A-Za-z0-9_.]+@"}
+            not: {"$ref": "#/definitions/markers"}
             x-crdkit-perTarget: "no"
       - equal:
           path: results[0].json.properties.i
@@ -1499,7 +1499,7 @@ tests:
           path: results[0].json.properties.c
           value:
             type: [string, number, boolean]
-            not: {pattern: "@[A-Za-z0-9_.]+@"}
+            not: {"$ref": "#/definitions/markers"}
             x-crdkit-perTarget: "no"
 
   - it: 'jsonSchema: markers allowed below a per-target node on an int/number/bool wrap it in anyOf with the markers definition'
@@ -1577,10 +1577,10 @@ tests:
           value:
             type: string
             pattern: "^a"
-            not: {pattern: "@[A-Za-z0-9_.]+@"}
+            not: {"$ref": "#/definitions/markers"}
             x-crdkit-perTarget: "no"
 
-  - it: 'jsonSchema: a per-target scalar or list is anyOf [type, declaration, markers]'
+  - it: 'jsonSchema: a per-target string, scalar or list is anyOf [type, declaration]; an int or constrained string adds markers'
     set:
       schemaOps:
         - op: jsonSchema
@@ -1588,7 +1588,10 @@ tests:
             type: map
             properties:
               host: {type: string}
+              any: {type: scalar}
               ports: {type: list, items: {type: int}}
+              port: {type: int}
+              mode: {type: string, enum: [a, b]}
     asserts:
       - equal:
           path: results[0].json.properties.host
@@ -1596,7 +1599,26 @@ tests:
             anyOf:
               - {type: string}
               - {"$ref": "#/definitions/tokenDeclaration"}
-              - {"$ref": "#/definitions/markers"}
+      - equal:
+          path: results[0].json.properties.any.anyOf
+          value:
+            - {type: [string, number, boolean]}
+            - {"$ref": "#/definitions/tokenDeclaration"}
+      - lengthEqual:
+          path: results[0].json.properties.ports.anyOf
+          count: 2
+      - equal:
+          path: results[0].json.properties.port.anyOf
+          value:
+            - {type: integer}
+            - {"$ref": "#/definitions/tokenDeclaration"}
+            - {"$ref": "#/definitions/markers"}
+      - equal:
+          path: results[0].json.properties.mode.anyOf
+          value:
+            - {type: string, enum: [a, b]}
+            - {"$ref": "#/definitions/tokenDeclaration"}
+            - {"$ref": "#/definitions/markers"}
       - equal:
           path: results[0].json.properties.ports.anyOf[0]
           value:
@@ -2654,7 +2676,6 @@ tests:
             anyOf:
               - {type: string}
               - {"$ref": "#/definitions/targetDeclaration.owner"}
-              - {"$ref": "#/definitions/markers"}
       - equal:
           path: results[0].json.properties.open.properties.num.anyOf[1]
           value: {"$ref": "#/definitions/targetDeclaration"}

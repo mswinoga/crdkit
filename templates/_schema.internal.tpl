@@ -1464,12 +1464,18 @@ Implementation notes:
 - Structural keywords (`type`, `enum`, `pattern`, `not`, `items`,
   `properties` …) and annotation keywords (`description`, `default`,
   `examples`, `x-crdkit-*`) are collected apart. A per-target scalar or
-  list, and a marker-accepting scalar that a marker could violate (an
-  int/number/bool, or a string/scalar with `enum` or `pattern`), wrap
-  the structural part in `anyOf` with the markers definition; the
-  render substitutes before it checks, the editor cannot. A marker-
-  accepting string/scalar without `enum`/`pattern` stays unwrapped (a
-  marker is a valid string). The annotations stay on the outer node.
+  list wraps the structural part in `anyOf` with its declaration
+  branch; the markers branch is added only where a marker could violate
+  the structural part (an int/number/bool, or a string/scalar with
+  `enum` or `pattern`): the render substitutes before it checks, the
+  editor cannot. A plain string/scalar accepts a marker as a string; a
+  list never holds one (substitution is text, a marker never becomes a
+  list). A non-per-target marker-accepting scalar of the violable kind
+  is `anyOf` [type, markers]; any other stays unwrapped. The
+  annotations stay on the outer node.
+- A static string/scalar carries `not: {$ref: markers}`, not a `$ref`
+  to a static definition: draft-07 ignores keywords next to `$ref`
+  (`enum`, `pattern`, `description`).
 - Each switch case is stored in acc.definitions under its node path.
 - With target keys in effect (the node's own `targetKeys`, else the
   inherited ones) a per-target node's declaration branch references a
@@ -1636,7 +1642,7 @@ Implementation notes:
     {{- end -}}
   {{- end -}}
   {{- if and (eq (toString $node.static) "true") (has $type (list "string" "scalar")) -}}
-    {{- $_ := set $core "not" (dict "pattern" (include "crdkit.markerPattern.internal" (dict))) -}}
+    {{- $_ := set $core "not" (dict "$ref" "#/definitions/markers") -}}
   {{- end -}}
   {{- if and (not $tokens) (eq (toString $node.static) "true") -}}
     {{- $_ := set $meta "x-crdkit-perTarget" "no" -}}
@@ -1644,12 +1650,17 @@ Implementation notes:
 {{- end -}}
 {{- $result := $meta -}}
 {{- $wrapped := list -}}
-{{- if and $tokens (has $shape (list "scalar" "list")) (kindIs "slice" $targetKeys) -}}
-  {{- $ref := include "crdkit.schema.declarationRef.internal" (dict "targetKeys" $targetKeys "annotations" ($node.annotations | default list) "acc" $acc) -}}
-  {{- $wrapped = list $core (dict "$ref" $ref) (dict "$ref" "#/definitions/markers") -}}
-{{- else if and $tokens (has $shape (list "scalar" "list")) -}}
-  {{- $wrapped = list $core (dict "$ref" "#/definitions/tokenDeclaration") (dict "$ref" "#/definitions/markers") -}}
-{{- else if and (eq $shape "scalar") (ne (toString $node.static) "true") (or (has $type (list "int" "number" "bool")) (hasKey $node "enum") (hasKey $node "pattern")) -}}
+{{- $violable := and (eq $shape "scalar") (ne (toString $node.static) "true") (or (has $type (list "int" "number" "bool")) (hasKey $node "enum") (hasKey $node "pattern")) -}}
+{{- if and $tokens (has $shape (list "scalar" "list")) -}}
+  {{- $ref := "#/definitions/tokenDeclaration" -}}
+  {{- if kindIs "slice" $targetKeys -}}
+    {{- $ref = include "crdkit.schema.declarationRef.internal" (dict "targetKeys" $targetKeys "annotations" ($node.annotations | default list) "acc" $acc) -}}
+  {{- end -}}
+  {{- $wrapped = list $core (dict "$ref" $ref) -}}
+  {{- if $violable -}}
+    {{- $wrapped = append $wrapped (dict "$ref" "#/definitions/markers") -}}
+  {{- end -}}
+{{- else if $violable -}}
   {{- $wrapped = list $core (dict "$ref" "#/definitions/markers") -}}
 {{- end -}}
 {{- if $wrapped -}}

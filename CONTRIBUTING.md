@@ -394,7 +394,10 @@ title?, htmlLink?, id?, diag}`) is the one entry point: it makes one
   `markdownDescription`); everything else crdkit adds is an
   `x-crdkit-*` extension (order, per-target, shared properties,
   sections) that editors ignore.
-- Per-target nodes are `anyOf` [type, `tokenDeclaration`, `markers`]. A
+- Per-target nodes are `anyOf` [type, `tokenDeclaration`], `markers`
+  added only where a marker could violate the type (`int`/`number`/
+  `bool`, `enum`, `pattern`); a static string/scalar carries `not:
+  {$ref: markers}` (draft-07 ignores keywords next to a `$ref`). A
   switch case is a complete, closed schema under
   `definitions["<node path>[<by>=<case>]"]`, selected by `allOf` `if/then`;
   properties identical in every case carry `x-crdkit-shared`.
