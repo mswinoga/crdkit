@@ -187,15 +187,18 @@ from the templates alone.
   (valid only for the current generation, see "Resolution model") →
   dedicated-attribute key → `match:` (against the exact original target
   only, never retried at an escalated rung) → walk
-  `parentTargetTemplate`, caching every rung visited → `default`
+  `parentTargetTemplate` → `default`
   fallback (see "Token model details" below) → `_generated[<exact
   target>]` (values from `crdkit.token.underlay`, lowest priority) →
   "no value found" ERROR. `match:` must be checked before any
   cache-tier hit from the walk, or a broader cached rung could steal
   precedence from a target-specific `match:` rule.
-- A value found in `_generated` is cached ONLY under `_value[<target>]`,
-  never under walked rungs — rungs are shared across targets,
-  `_generated` is per target.
+- Caching: under `_value[<exact target>]` always; under every rung
+  walked only when the selected entry holds no marker (a map/list:
+  checked on its `toJson`). Rungs are shared across targets: a
+  marker-holding entry substitutes per target, and a value found in
+  `_generated` is per target — both cached under the exact target only,
+  so each target resolved in one render gets its own value.
 - **GOTCHA**: a bare `{{- index $map $target -}}` as a define's
   trailing, unassigned output, for a missing key, renders as the
   literal text `<no value>` (not an empty string) once it crosses an

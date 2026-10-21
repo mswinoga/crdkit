@@ -15,6 +15,10 @@ Resolution is lazy, per-target, and memoized:
 - A declared-but-never-used broken token produces no diagnostic.
 - Resolving the same token for a target OTHER than the one driving the
   current render is a first-class, cheap operation (not a re-render).
+  Each target gets its own value, also within one render: a rung cache
+  holds only marker-free entries, so a marker-holding entry
+  (`@LOGICAL_ENV@`, a per-target token) is substituted per target
+  (crdkit.resolveEntry.internal).
 
 Token declaration shape (what a consumer/integration writes/reads on
 `ctx.tokens[NAME]`):

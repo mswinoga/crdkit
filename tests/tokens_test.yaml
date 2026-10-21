@@ -1439,6 +1439,169 @@ tests:
           path: tokenDefs.D._value.prod-01
           value: "d-new"
 
+  # --- cache per target: a marker-holding entry is never cached at a rung ---
+
+  - it: "a marker-holding default resolves per target in one render (prod-01, then prodp) — never cached at a rung"
+    set:
+      target: prod-01
+      tokens:
+        KS:
+          default: "t"
+          prod: "p"
+        CERT:
+          default: "@KS@/c"
+      parentTargetMap:
+        prod-01: prod
+        prod: PROD
+        prodp: PROD
+        PROD: ALL
+      tokenOps:
+        - op: resolve
+          name: CERT
+          target: prod-01
+        - op: resolve
+          name: CERT
+          target: prodp
+    asserts:
+      - equal:
+          path: opsResolved[0].value
+          value: "p/c"
+      - equal:
+          path: opsResolved[1].value
+          value: "t/c"
+      - equal:
+          path: tokens.CERT._value
+          value:
+            prod-01: "p/c"
+            prodp: "t/c"
+      - equal:
+          path: tokens.KS._value.prod
+          value: "p"
+      - lengthEqual:
+          path: diag.errors
+          count: 0
+
+  - it: "a marker-holding default resolves per target in one render (prodp, then prod-01)"
+    set:
+      target: prod-01
+      tokens:
+        KS:
+          default: "t"
+          prod: "p"
+        CERT:
+          default: "@KS@/c"
+      parentTargetMap:
+        prod-01: prod
+        prod: PROD
+        prodp: PROD
+        PROD: ALL
+      tokenOps:
+        - op: resolve
+          name: CERT
+          target: prodp
+        - op: resolve
+          name: CERT
+          target: prod-01
+    asserts:
+      - equal:
+          path: opsResolved[0].value
+          value: "t/c"
+      - equal:
+          path: opsResolved[1].value
+          value: "p/c"
+      - equal:
+          path: tokens.CERT._value
+          value:
+            prodp: "t/c"
+            prod-01: "p/c"
+
+  - it: "a marker-holding entry found at a shared rung substitutes per target; a map entry is checked as a whole"
+    set:
+      target: qa
+      tokens:
+        L:
+          qa: "a"
+          qam1: "b"
+          qap1: "c"
+        URL:
+          QA: "x-@L@"
+        CFG:
+          QA:
+            url: "y-@L@"
+            port: 8080
+      parentTargetMap:
+        qa: QA
+        qam1: QA
+        qap1: QA
+      tokenOps:
+        - op: resolve
+          name: URL
+          target: qa
+        - op: resolve
+          name: URL
+          target: qam1
+        - op: resolve
+          name: URL
+          target: qap1
+        - op: resolve
+          name: CFG
+          target: qam1
+        - op: resolve
+          name: CFG
+          target: qap1
+    asserts:
+      - equal:
+          path: opsResolved[0].value
+          value: "x-a"
+      - equal:
+          path: opsResolved[1].value
+          value: "x-b"
+      - equal:
+          path: opsResolved[2].value
+          value: "x-c"
+      - equal:
+          path: opsResolved[4].value
+          value:
+            url: "y-c"
+            port: 8080
+      - notExists:
+          path: tokens.URL._value.QA
+      - notExists:
+          path: tokens.CFG._value.QA
+
+  - it: "a marker-free entry above the target is cached at every rung walked; a later target reaching that rung gets the same value"
+    set:
+      target: prod-01
+      tokens:
+        X:
+          PROD:
+            host: "h"
+            port: 443
+      parentTargetMap:
+        prod-01: prod
+        prod: PROD
+        prodp: PROD
+      tokenOps:
+        - op: resolve
+          name: X
+          target: prod-01
+        - op: resolve
+          name: X
+          target: prodp
+    asserts:
+      - equal:
+          path: opsResolved[1].value
+          value:
+            host: "h"
+            port: 443
+      - equal:
+          path: tokens.X._value
+          value:
+            prod-01: {host: "h", port: 443}
+            prod: {host: "h", port: 443}
+            PROD: {host: "h", port: 443}
+            prodp: {host: "h", port: 443}
+
   # --- crdkit-internal keys in declarations are stripped at merge ---
 
   - it: "a user declaration with '_generated' loses the key, warns, and still resolves"

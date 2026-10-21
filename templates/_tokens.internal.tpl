@@ -162,10 +162,9 @@ Implementation notes:
   3. `match:` — regex rules tried once, against the exact target only
      (never retried at an escalated rung).
   4. walk `parentTargetTemplate` one rung at a time, checking a literal
-     key (or cache) at each rung; every rung visited gets cached.
-     `match:` must be checked before any cache-tier hit from the walk,
-     or a broader cached rung could steal precedence from a
-     target-specific `match:` rule.
+     key (or cache) at each rung. `match:` must be checked before any
+     cache-tier hit from the walk, or a broader cached rung could steal
+     precedence from a target-specific `match:` rule.
   5. `default` fallback, checked directly, after the walk is
      exhausted — regardless of taxonomy. Must run after the walk (not
      before), since "def" can have both a `default` entry and a
@@ -176,6 +175,13 @@ Implementation notes:
      to a rung) and is cached ONLY under `_value[<target>]`: rungs are
      shared across targets, `_generated` is per target.
   7. none of the above: the "no value found" ERROR.
+- Caching: the result is cached under the exact target always, and
+  under every rung walked only when the selected entry holds no marker
+  (a map/list: checked on its `toJson`) — a marker-free entry
+  substitutes to the same value for every target reaching that rung. A
+  marker-holding entry (`_generated` too) is cached under the exact
+  target only: its substitution depends on the target, so another
+  target re-walks the ladder.
 - A "def" that's a bare scalar (not a dict) has nowhere to attach a
   `_value` cache, so it's resolved fresh every call — cheap, since
   there's no ladder to walk.
@@ -295,8 +301,13 @@ value: {{ index $cache $target | toYaml | nindent 2 }}
   {{- $substituted := include "crdkit.substituteStructure.internal" (dict "value" $rawValue "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" (append $resolving $fieldId) "reservedKeys" $reservedKeys "gen" $gen) | fromYaml -}}
   {{- $resolvedValue := $substituted.value -}}
   {{- if $cacheable -}}
-    {{/* rungs are shared across targets but _generated is per target: a generated value must not leak into rung caches. */}}
-    {{- if $fromGenerated -}}
+    {{- $rawText := $rawValue -}}
+    {{- if or (kindIs "map" $rawValue) (kindIs "slice" $rawValue) -}}
+      {{- $rawText = toJson $rawValue -}}
+    {{- end -}}
+    {{- $hasMarker := and (kindIs "string" $rawText) (regexMatch (include "crdkit.markerPattern.internal" (dict)) $rawText) -}}
+    {{/* rungs are shared across targets: a generated value (per target) or a marker-holding entry (substituted per target) must not leak into rung caches. */}}
+    {{- if or $fromGenerated $hasMarker -}}
       {{- $_ := set $cache $target $resolvedValue -}}
     {{- else -}}
       {{- range $rung := $rungsWalked -}}
