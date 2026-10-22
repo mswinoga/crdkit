@@ -82,15 +82,16 @@ Recursive self-check of one schema node; collects every problem.
 
 Interface:
 - Params (dict): { "node": <any>, "path": <schema path string>,
-  "inTokens": <bool, an ancestor is per-target>, "switchBy": <the
-  switch key, on a switch case node only>, "isSwitchBy": <bool, the
-  node is a switch case's `by` key>, "problems": <dict with a "list"
-  key, appended to in place> }
+  "inTokens": <bool, an ancestor is per-target>, "switchBy": <list of
+  the switch's `by` and `unless.key`, on a switch case node only>,
+  "isSwitchBy": <bool, the node is a switch case's `by` or
+  `unless.key`>, "problems": <dict with a "list" key, appended to in
+  place> }
 - Returns: nothing.
 
 Implementation notes:
 - `static: true` below a per-target node is a problem, except on a
-  switch case's `by` key: it selects the case, never a value.
+  switch case's `by` / `unless.key`: they select the case, never a value.
 */}}
 {{- define "crdkit.schema.checkNode.internal" -}}
 {{- $node := .node -}}
@@ -115,18 +116,31 @@ Implementation notes:
       {{- $found = append $found (printf "'switch' requires type 'map', got '%s'" $type) -}}
     {{- end -}}
     {{- $switch := $node.switch -}}
-    {{- if not (and (kindIs "map" $switch) (kindIs "string" $switch.by) (kindIs "map" $switch.cases) (eq (len $switch) 2)) -}}
-      {{- $found = append $found "'switch' must be {by: <key>, cases: {<value>: <node>}}" -}}
+    {{- if not (and (kindIs "map" $switch) (kindIs "string" $switch.by) (kindIs "map" $switch.cases) (eq (len (omit $switch "unless")) 2)) -}}
+      {{- $found = append $found "'switch' must be {by: <key>, cases: {<value>: <node>}, unless?: {key: <key>, value: <scalar>}}" -}}
     {{- else -}}
+      {{- $keys := list $switch.by -}}
+      {{- if hasKey $switch "unless" -}}
+        {{- $unless := $switch.unless -}}
+        {{- if not (and (kindIs "map" $unless) (eq (len $unless) 2) (kindIs "string" $unless.key) (hasKey $unless "value") (not (kindIs "map" $unless.value)) (not (kindIs "slice" $unless.value)) (not (kindIs "invalid" $unless.value))) -}}
+          {{- $found = append $found "'switch.unless' must be {key: <key>, value: <scalar>}" -}}
+        {{- else if eq $unless.key $switch.by -}}
+          {{- $found = append $found (printf "'switch.unless.key' must differ from 'by' ('%s')" $switch.by) -}}
+        {{- else -}}
+          {{- $keys = append $keys $unless.key -}}
+        {{- end -}}
+      {{- end -}}
       {{- range $caseValue, $caseNode := $switch.cases -}}
         {{- $casePath := printf "%sswitch.cases.%s" $prefix $caseValue -}}
-        {{- include "crdkit.schema.checkNode.internal" (dict "node" $caseNode "path" $casePath "inTokens" $inTokens "switchBy" $switch.by "problems" $problems) -}}
-        {{- $onNode := "" -}}
-        {{- if and (kindIs "map" $caseNode) (kindIs "map" $caseNode.properties) -}}
-          {{- $onNode = index $caseNode.properties $switch.by -}}
-        {{- end -}}
-        {{- if not (and (eq (include "crdkit.schema.shape.internal" (dict "node" $onNode)) "scalar") (eq (toString $onNode.static) "true")) -}}
-          {{- $found = append $found (printf "case '%s' must declare '%s' as a scalar type with 'static: true'" $caseValue $switch.by) -}}
+        {{- include "crdkit.schema.checkNode.internal" (dict "node" $caseNode "path" $casePath "inTokens" $inTokens "switchBy" $keys "problems" $problems) -}}
+        {{- range $key := $keys -}}
+          {{- $onNode := "" -}}
+          {{- if and (kindIs "map" $caseNode) (kindIs "map" $caseNode.properties) -}}
+            {{- $onNode = index $caseNode.properties $key -}}
+          {{- end -}}
+          {{- if not (and (eq (include "crdkit.schema.shape.internal" (dict "node" $onNode)) "scalar") (eq (toString $onNode.static) "true")) -}}
+            {{- $found = append $found (printf "case '%s' must declare '%s' as a scalar type with 'static: true'" $caseValue $key) -}}
+          {{- end -}}
         {{- end -}}
       {{- end -}}
     {{- end -}}
@@ -188,7 +202,7 @@ Implementation notes:
       {{- $found = append $found "'properties' must be a map" -}}
     {{- else -}}
       {{- range $key, $child := $node.properties -}}
-        {{- include "crdkit.schema.checkNode.internal" (dict "node" $child "path" (printf "%sproperties.%s" $prefix $key) "inTokens" $childInTokens "isSwitchBy" (and (kindIs "string" $.switchBy) (eq $key $.switchBy)) "problems" $problems) -}}
+        {{- include "crdkit.schema.checkNode.internal" (dict "node" $child "path" (printf "%sproperties.%s" $prefix $key) "inTokens" $childInTokens "isSwitchBy" (and (kindIs "slice" $.switchBy) (has $key $.switchBy)) "problems" $problems) -}}
       {{- end -}}
     {{- end -}}
   {{- end -}}
@@ -322,6 +336,35 @@ Implementation notes:
 {{- end -}}
 
 {{/*
+crdkit.schema.switchCase.internal
+
+The case a switch selects for a map value, reduced on an `unless` hit.
+
+Interface:
+- Params (dict): { "switch": <switch node: {by, cases, unless?}>, "value":
+  <map whose `by` value names an existing case>, "out": <dict, written
+  in place> }
+- Returns: nothing; sets out.node (case node) and out.value (value).
+
+Implementation notes:
+- `unless` hit = `unless.key` equal to `unless.value` by `toJson`
+  (type-strict). Then node and value keep only the `by` and
+  `unless.key` properties: every other key is dropped without a
+  diagnostic.
+*/}}
+{{- define "crdkit.schema.switchCase.internal" -}}
+{{- $switch := .switch -}}
+{{- $node := index $switch.cases (toString (index .value $switch.by)) -}}
+{{- $value := .value -}}
+{{- if and (hasKey $switch "unless") (hasKey $value $switch.unless.key) (eq (toJson (index $value $switch.unless.key)) (toJson $switch.unless.value)) -}}
+  {{- $node = merge (dict "properties" (pick ($node.properties | default dict) $switch.by $switch.unless.key)) (omit $node "properties") -}}
+  {{- $value = pick $value $switch.by $switch.unless.key -}}
+{{- end -}}
+{{- $_ := set .out "node" $node -}}
+{{- $_ := set .out "value" $value -}}
+{{- end -}}
+
+{{/*
 crdkit.schema.walk.internal (internal)
 
 Validates one value against one node, recursively.
@@ -392,7 +435,9 @@ Implementation notes:
     {{- include $shapeDiag (list $diag (printf "'%s'%s has unknown value '%v'%s" $onPath $suffix (index $value $switch.by) $tail)) -}}
     {{- $_ := set $out "keep" false -}}
   {{- else -}}
-    {{- include "crdkit.schema.walk.internal" (dict "node" (index $switch.cases (toString (index $value $switch.by))) "value" $value "path" $path "diag" $diag "mode" $mode "suffix" $suffix "inTokens" $inTokens "targetKeys" $targetKeys "out" $out) -}}
+    {{- $case := dict -}}
+    {{- include "crdkit.schema.switchCase.internal" (dict "switch" $switch "value" $value "out" $case) -}}
+    {{- include "crdkit.schema.walk.internal" (dict "node" $case.node "value" $case.value "path" $path "diag" $diag "mode" $mode "suffix" $suffix "inTokens" $inTokens "targetKeys" $targetKeys "out" $out) -}}
   {{- end -}}
 {{- else if and $isDeclaration (kindIs "slice" $targetKeys) -}}
   {{- include "crdkit.schema.checkDeclaration.internal" (dict "node" $node "value" $value "path" $path "diag" $diag "targetKeys" $targetKeys "out" $out) -}}
@@ -599,7 +644,9 @@ Implementation notes:
   {{- if kindIs "map" $value -}}
     {{- $selected := toString (index $value $node.switch.by) -}}
     {{- if and (not (kindIs "invalid" (index $value $node.switch.by))) (hasKey $node.switch.cases $selected) -}}
-      {{- include "crdkit.schema.valuesWalk.internal" (merge (dict "node" (index $node.switch.cases $selected) "value" $value "path" $path "inTokens" $inTokens "out" $out) $common) -}}
+      {{- $case := dict -}}
+      {{- include "crdkit.schema.switchCase.internal" (dict "switch" $node.switch "value" $value "out" $case) -}}
+      {{- include "crdkit.schema.valuesWalk.internal" (merge (dict "node" $case.node "value" $case.value "path" $path "inTokens" $inTokens "out" $out) $common) -}}
     {{- end -}}
   {{- end -}}
 {{- else if eq $shape "any" -}}
@@ -726,6 +773,9 @@ Interface:
 {{- if hasKey $node "x-crdkit-switch" -}}
   {{- $switch := index $node "x-crdkit-switch" -}}
   {{- $text = printf "map, by `%s`: %s" $switch.by (join ", " $switch.cases) -}}
+  {{- if hasKey $switch "unless" -}}
+    {{- $text = printf "%s; unless `%s: %s`" $text $switch.unless.key (toJson $switch.unless.value) -}}
+  {{- end -}}
 {{- else if hasKey $core "items" -}}
   {{- $text = printf "list of %s" (include "crdkit.schema.jsonType.internal" (dict "node" $core.items)) -}}
 {{- end -}}
@@ -1572,13 +1622,20 @@ Implementation notes:
     {{- $_ := set $caseOut.result "x-crdkit-path" $caseKey -}}
     {{- $_ := set $acc.definitions $caseKey $caseOut.result -}}
     {{- $_ := set $refs $caseValue $ref -}}
-    {{- $allOf = append $allOf (dict "if" (dict "properties" (dict $by (dict "const" $caseValue)) "required" (list $by)) "then" (dict "$ref" $ref)) -}}
+    {{- $if := dict "properties" (dict $by (dict "const" $caseValue)) "required" (list $by) -}}
+    {{- if hasKey $node.switch "unless" -}}
+      {{- $_ := set $if.properties $node.switch.unless.key (dict "not" (dict "const" $node.switch.unless.value)) -}}
+    {{- end -}}
+    {{- $allOf = append $allOf (dict "if" $if "then" (dict "$ref" $ref)) -}}
   {{- end -}}
   {{- $_ := set $core "type" "object" -}}
   {{- $_ := set $core "required" (list $by) -}}
   {{- $_ := set $core "properties" (dict $by (dict "enum" $caseValues)) -}}
   {{- $_ := set $core "allOf" $allOf -}}
   {{- $_ := set $meta "x-crdkit-switch" (dict "by" $by "cases" $caseValues "refs" $refs) -}}
+  {{- if hasKey $node.switch "unless" -}}
+    {{- $_ := set (index $meta "x-crdkit-switch") "unless" (pick $node.switch.unless "key" "value") -}}
+  {{- end -}}
 {{- else if eq $shape "map" -}}
   {{- $_ := set $core "type" "object" -}}
   {{- $props := $node.properties | default dict -}}

@@ -671,6 +671,7 @@ function renderDetail() {
     if (has(n, "x-crdkit-switch")) {
       var sw = n["x-crdkit-switch"];
       facts.push(["Switch", "by <code>" + esc(sw.by) + "</code>: " + (sw.cases || []).map(function (v) { return go(it.path + "[" + sw.by + "=" + v + "]", v); }).join(", ")]);
+      if (isMap(sw.unless)) { facts.push(["Unless", "<code>" + esc(sw.unless.key + ": " + JSON.stringify(sw.unless.value)) + "</code>: only <code>" + esc(sw.by) + "</code> and <code>" + esc(sw.unless.key) + "</code> are checked"]); }
     }
     if (it.caseOf) {
       var co = it.caseOf, rest = it.path.slice(co.path.length);

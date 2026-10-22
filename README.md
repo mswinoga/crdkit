@@ -331,7 +331,7 @@ A schema is a tree of **nodes**; each node is a dict.
 | `values` | `map` | node for every key not in `properties` | closed: other keys → WARNING |
 | `keys` | `map` | `{pattern: <regex>, label?: <string>}` for keys matched by `values`; `label` is a documentation-only placeholder for a matched key (e.g. `<ID>`) | any key |
 | `items` | `list` | node for every element | `{type: any}` |
-| `switch` | node | `{by: <key>, cases: {<value>: <node>}}` | — |
+| `switch` | node | `{by: <key>, cases: {<value>: <node>}, unless?: {key: <key>, value: <scalar>}}` | — |
 | `targetKeys` | all | list of target keys a token declaration at or below the node may use (not `default`/`match`: always allowed); inherited, a descendant's own replaces it | declarations open (any key) |
 | `annotations` | scalar types, `list` | list of annotation keys a token declaration at this node may use | none |
 
@@ -356,8 +356,16 @@ Switch:
 - Every case must declare the `by` key as a scalar type with `static:
   true` — the case is chosen before anything is resolved.
 - No case for the value, or no `by` key → WARNING, node dropped.
-- The key is `by`, never `on`: Helm's `fromYaml` speaks YAML 1.1 and
-  reads an `on:`/`yes:`/`no:` KEY as a boolean.
+- `unless: {key, value}`: a map whose `key` equals `value` (type-strict)
+  is checked against its case reduced to `by` + `key`; every other key
+  is dropped without a diagnostic (structural and value pass). Every
+  case declares `unless.key` as a static scalar too. JSON Schema: each
+  case's `if` excludes the hit, so only the switch core applies
+  (`x-crdkit-switch.unless` records it for the docs). E.g. `unless:
+  {key: enabled, value: false}` lets a disabled entry stay incomplete.
+- The keys are `by` and `unless`, never `on`/`off`: Helm's `fromYaml`
+  speaks YAML 1.1 and reads an `on:`/`off:`/`yes:`/`no:` KEY as a
+  boolean.
 
 Per-target values:
 - A per-target node's value may be a plain value or a token declaration
@@ -425,8 +433,9 @@ however often the schema is checked:
   `keys`/`switch`;
 - `static` on a type other than a scalar type, or below a per-target
   node (`'static' does not apply below a per-target node`; a switch
-  case's `by` key excepted); `default` with `required: true`;
-- a switch case not declaring its `by` key as a static scalar.
+  case's `by` / `unless.key` excepted); `default` with `required: true`;
+- a switch case not declaring its `by` key (or `unless.key`) as a
+  static scalar; a malformed `unless` or `unless.key` equal to `by`.
 
 An invalid regex in `pattern`/`keys.pattern` aborts the render
 (`mustRegexMatch`), like a `match:` rule.

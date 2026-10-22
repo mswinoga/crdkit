@@ -580,6 +580,112 @@ tests:
             - "'services.D' has no 'type' — ignored"
             - "'services.E' must be a map — ignored"
 
+  - it: 'a switch unless hit checks only by and unless.key; other keys are dropped silently'
+    set:
+      schemaOps:
+        - op: validate
+          path: services
+          schema:
+            type: map
+            values:
+              switch:
+                by: type
+                unless: {key: enabled, value: false}
+                cases:
+                  greeter:
+                    type: map
+                    properties:
+                      type: {type: scalar, static: true, required: true}
+                      enabled: {type: bool, static: true, default: true}
+                      greeting: {type: string, required: true}
+          values:
+            A: {type: greeter, enabled: false, extra: 1}
+            B: {type: greeter, enabled: "false"}
+            C: {type: greeter, greeting: hi}
+            D: {type: other, enabled: false}
+    asserts:
+      - equal:
+          path: results[0].value
+          value:
+            A: {type: greeter, enabled: false}
+            B: {type: greeter, enabled: true}
+            C: {type: greeter, enabled: true, greeting: hi}
+      - equal:
+          path: diag.errors
+          value:
+            - "'services.B.enabled' must be of type 'bool' — ignored"
+            - "'services.B.greeting' is required"
+      - equal:
+          path: diag.warnings
+          value:
+            - "'services.D.type' has unknown value 'other' — ignored"
+
+  - it: 'the value pass skips every other key of a switch unless hit'
+    set:
+      target: prod
+      schemaOps:
+        - op: validateValues
+          path: services
+          schema:
+            type: map
+            values:
+              switch:
+                by: type
+                unless: {key: enabled, value: false}
+                cases:
+                  greeter:
+                    type: map
+                    properties:
+                      type: {type: scalar, static: true}
+                      enabled: {type: bool, static: true}
+                      count: {type: int}
+          values:
+            A: {type: greeter, enabled: false, count: {prod: x}}
+            B: {type: greeter, count: {prod: y}}
+    asserts:
+      - equal:
+          path: diag.errors
+          value:
+            - "'services.B.count' for target 'prod' must be of type 'int' — got 'y'"
+
+  - it: 'a malformed switch unless is a self-check ERROR'
+    set:
+      schemaOps:
+        - op: check
+          schema:
+            type: map
+            values:
+              switch:
+                by: type
+                unless: {key: type, value: false}
+                cases:
+                  a: {type: map, properties: {type: {type: scalar, static: true}}}
+        - op: check
+          schema:
+            type: map
+            values:
+              switch:
+                by: type
+                unless: {key: enabled, value: [false]}
+                cases:
+                  a: {type: map, properties: {type: {type: scalar, static: true}}}
+        - op: check
+          schema:
+            type: map
+            values:
+              switch:
+                by: type
+                unless: {key: enabled, value: false}
+                cases:
+                  a: {type: map, properties: {type: {type: scalar, static: true}, enabled: {type: bool}}}
+    asserts:
+      - equal:
+          path: diag.errors
+          value:
+            - "schema invalid: values: 'switch.unless.key' must differ from 'by' ('type')"
+            - "schema invalid: values: 'switch.unless' must be {key: <key>, value: <scalar>}"
+            - "schema invalid: values: case 'a' must declare 'enabled' as a scalar type with 'static: true'"
+
   # --- value pass (per-target values) ---
 
   - it: 'a per-target value valid for the target records nothing'
@@ -2788,3 +2894,56 @@ tests:
       - notMatchRegex:
           path: results[0].text
           pattern: 'prod: text'
+
+  - it: 'jsonSchema: a switch unless excludes the hit from every case; the Markdown type names it'
+    set:
+      schemaOps:
+        - op: jsonSchema
+          schemaText: |
+            type: map
+            properties:
+              services:
+                type: map
+                values:
+                  switch:
+                    by: type
+                    unless: {key: enabled, value: false}
+                    cases:
+                      greeter:
+                        type: map
+                        properties:
+                          type: {type: string, static: true}
+                          enabled: {type: bool, static: true}
+        - op: docs
+          schemaText: |
+            type: map
+            properties:
+              services:
+                type: map
+                values:
+                  switch:
+                    by: type
+                    unless: {key: enabled, value: false}
+                    cases:
+                      greeter:
+                        type: map
+                        properties:
+                          type: {type: string, static: true}
+                          enabled: {type: bool, static: true}
+    asserts:
+      - equal:
+          path: results[0].json.properties.services.additionalProperties.allOf[0]["if"]
+          value:
+            properties:
+              type: {const: greeter}
+              enabled: {not: {const: false}}
+            required: [type]
+      - equal:
+          path: results[0].json.properties.services.additionalProperties["x-crdkit-switch"].unless
+          value: {key: enabled, value: false}
+      - matchRegex:
+          path: results[1].text
+          pattern: "unless `enabled: false`"
+      - lengthEqual:
+          path: diag.errors
+          count: 0

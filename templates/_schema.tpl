@@ -39,7 +39,11 @@ Schema node (a dict):
 - list: items (node for every element; omitted = {type: any})
 - switch: {by: <key>, cases: {<value>: <node>}} — picks the node for a
   map by the value of one of its keys ("by", not "on": YAML 1.1, which
-  Helm's fromYaml speaks, reads an `on:` key as the boolean true)
+  Helm's fromYaml speaks, reads an `on:` key as the boolean true); optional
+  unless: {key: <key>, value: <scalar>} — a map whose `key` equals `value`
+  (toJson) is checked against its case reduced to `by` + `key`, every
+  other key dropped silently; in JSON Schema such a map selects no case
+  ("unless", not "off": YAML 1.1 again)
 
 Diagnostics paths are dotted values paths: a key containing "." goes in
 brackets (`a["b.c"]`), list elements are indexed (`a.b[0]`).
@@ -133,7 +137,8 @@ Implementation notes:
   type it applies to; `static` only on a scalar type, never below a
   per-target node (a switch case's `by` key excepted); never `default`
   together with `required: true`; every switch case declares the switch
-  key as a scalar type with `static: true`.
+  key (and `unless.key`) as a scalar type with `static: true`; `unless` is
+  `{key, value: <scalar>}` with `key` ≠ `by`.
 */}}
 {{- define "crdkit.schema.check" -}}
 {{- $diag := .diag -}}
