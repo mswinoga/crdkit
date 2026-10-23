@@ -15,6 +15,9 @@ Libraries built on crdkit (e.g. mdeploy) depend on it via `file://`.
   workspace viewers), `lint` (the rules `lint.sh` forwards to),
   `reference` (`docs/defines.md`) and `diagnostics`
   (`docs/diagnostics.md`).
+- `scripts/examples.py` — renders the README example blocks from
+  `docs/readme-examples/<stem>.{yaml,tpl}` (`make docs`; `make test`
+  checks them; markers and rendering: its header).
 - `docs/defines.md` — the generated define reference;
   `docs/diagnostics.md` — the generated diagnostics list (level,
   message template, define per call). `make docs` rewrites both,

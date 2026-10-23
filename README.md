@@ -183,6 +183,29 @@ crdkit.tokens.substitute
 
 ## Resolving/substituting tokens directly
 
+Resolve one token for a target other than the render's own:
+
+<!-- example: docs/readme-examples/token-value -->
+```yaml
+# docs/readme-examples/token-value.yaml
+target: prod-01
+ladder: {qa-01: qa, prod-01: prod, qa: NONPROD, prod: ALL, NONPROD: ALL}
+tokens:
+  DB_HOST:
+    NONPROD: db.@ENV@.acme.com
+    prod: db.acme.com
+  ENV: {qa: qa, prod: prod}
+```
+```gotemplate
+{{ include "crdkit.token.value" (list $ctx "DB_HOST" "qa-01") }}
+```
+```yaml
+value: db.qa.acme.com
+```
+<!-- /example -->
+
+`qa-01` walks `qa-01 → qa → NONPROD`; `@ENV@` resolves for the same target.
+
 ```gotemplate
 {{/* resolve one REAL token by name, for a given target */}}
 {{- $resolved := include "crdkit.token.value" (list $ctx "DB_HOST" $target) | fromYaml -}}

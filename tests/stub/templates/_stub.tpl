@@ -124,7 +124,10 @@ Interface:
   - `{path: {keys, path?}, at}` — `crdkit.schema.path`;
   - `{labels: {}, at}` — `crdkit.standardLabels`;
   - `{dependencyVersion: name, at}` — `crdkit.dependencyVersion`;
-  - `{name: {}, at}` — `crdkit.name`.
+  - `{name: {}, at}` — `crdkit.name`;
+  - `{tpl: <snippet>, at}` — the snippet evaluated with `tpl`, `$ctx`
+    bound (a README example, `scripts/examples.py`); a result that
+    parses as YAML is written as data.
 - Returns: "".
 */}}
 {{- define "stub.ops" -}}
@@ -231,6 +234,11 @@ Interface:
     {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (include "crdkit.dependencyVersion" (dict "name" $op.dependencyVersion "context" $ctx.root))) -}}
   {{- else if hasKey $op "name" -}}
     {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (include "crdkit.name" $ctx.root)) -}}
+  {{- else if hasKey $op "tpl" -}}
+    {{- $r := tpl (printf "{{- $ctx := .ctx -}}%s" $op.tpl) (dict "ctx" $ctx "Template" $ctx.root.Template) -}}
+    {{- $parsed := fromYaml $r -}}
+    {{- if and $parsed (not (hasKey $parsed "Error")) -}}{{- $r = $parsed -}}{{- end -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" $r) -}}
   {{- end -}}
 {{- end -}}
 {{- end -}}
