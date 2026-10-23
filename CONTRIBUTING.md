@@ -7,16 +7,16 @@ integration chain, the values schema and its docs. Usage:
 
 ## Read for your task
 
-| Task | Sections |
-| --- | --- |
-| change token resolution | Resolution model, Target escalation, Token model, Testing |
-| change the values schema or its docs | Values schema, Schema documentation, Testing |
-| add or change a public define | Design decisions, Shared conventions, Testing |
-| change the render / chain contract | Render and the integration chain, Design decisions |
-| add a lint or extractor rule | Lint and generators, Testing facts |
-| write tests | Testing, Testing facts |
-| write docs (README examples, doc comments) | Writing, Doc comments, README examples |
-| release | workspace `../CLAUDE.md` "Workspace rules" (bump → `make docs` → commit → tag on `main`) |
+| Task                                       | Sections                                                                                                                         |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| change token resolution                    | [Resolution model](#resolution-model), [Target escalation](#target-escalation), [Token model](#token-model), [Testing](#testing) |
+| change the values schema or its docs       | [Values schema](#values-schema), [Schema documentation](#schema-documentation), [Testing](#testing)                              |
+| add or change a public define              | [Design decisions](#design-decisions), [Shared conventions](#shared-conventions), [Testing](#testing)                            |
+| change the render / chain contract         | [Render and the integration chain](#render-and-the-integration-chain), [Design decisions](#design-decisions)                     |
+| add a lint or extractor rule               | [Lint and generators](#lint-and-generators), [Testing facts](#testing-facts)                                                     |
+| write tests                                | [Testing](#testing), [Testing facts](#testing-facts)                                                                             |
+| write docs (README examples, doc comments) | [Writing](#writing), [Doc comments](#doc-comments), [README examples](#readme-examples)                                          |
+| release                                    | workspace [Workspace rules](../CLAUDE.md#workspace-rules) (bump → `make docs` → commit → tag on `main`)                          |
 
 ## Layout
 
