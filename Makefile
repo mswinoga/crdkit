@@ -4,10 +4,11 @@
 deps:
 	cd tests/stub && helm dependency update
 
-# Regenerates the define reference; `test` fails when the committed copy
-# is stale.
+# Regenerates the define reference and the diagnostics list; `test` fails
+# when a committed copy is stale.
 docs:
 	python3 -I scripts/extract.py reference . docs/defines.md
+	python3 -I scripts/extract.py diagnostics . docs/diagnostics.md
 
 # Framework suites on tests/stub, text and extractor lint, docs freshness.
 test: deps
@@ -16,5 +17,8 @@ test: deps
 		--scopes public,internal --internal-suffix templates
 	@set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
 		python3 -I scripts/extract.py reference . "$$tmp/defines.md"; \
-		diff -u docs/defines.md "$$tmp/defines.md" || { \
-			echo "make test: docs/defines.md does not match the templates — run make docs" >&2; exit 1; }
+		python3 -I scripts/extract.py diagnostics . "$$tmp/diagnostics.md"; \
+		for f in defines.md diagnostics.md; do \
+			diff -u "docs/$$f" "$$tmp/$$f" || { \
+				echo "make test: docs/$$f does not match the templates — run make docs" >&2; exit 1; }; \
+		done

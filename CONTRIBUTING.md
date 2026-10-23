@@ -12,10 +12,13 @@ Libraries built on crdkit (e.g. mdeploy) depend on it via `file://`.
 - `scripts/lint.sh` — template lint (text, boundary and extractor
   rules) for library templates, also run by mdeploy.
 - `scripts/extract.py` — the call-graph extractor: `graph` (the
-  workspace viewers), `lint` (the rules `lint.sh` forwards to) and
-  `reference` (the committed `docs/defines.md`).
-- `docs/defines.md` — the generated define reference; `make docs`
-  rewrites it, `make test` diffs a fresh copy.
+  workspace viewers), `lint` (the rules `lint.sh` forwards to),
+  `reference` (`docs/defines.md`) and `diagnostics`
+  (`docs/diagnostics.md`).
+- `docs/defines.md` — the generated define reference;
+  `docs/diagnostics.md` — the generated diagnostics list (level,
+  message template, define per call). `make docs` rewrites both,
+  `make test` diffs fresh copies.
 
 **Release tags**: `v<chart version>` (e.g. `v0.0.7`). Release order:
 bump `version` in `Chart.yaml` → commit → tag `v<version>`.

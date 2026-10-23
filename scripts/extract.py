@@ -14,6 +14,12 @@ Usage:
   extract.py reference [--peer <templates dir>]... <chart dir> <out.md>
       The generated per-define reference (spec §9): index, ctx slots
       with writers and readers, one section per define.
+  extract.py diagnostics [--peer <templates dir>]... <chart dir> <out.md>
+      The generated diagnostics list: one row per crdkit.diag.error|
+      warning|info call (also `include $var` with `$var` assigned a diag
+      define): level, message template, define. The diag defines come
+      from the chart itself or a --peer (crdkit's templates for a
+      library).
   extract.py -h | --help
       This text.
 
@@ -677,9 +683,120 @@ def reference(argv):
     return 0
 
 
+DIAG_LEVELS = {"crdkit.diag.error": "ERROR", "crdkit.diag.warning": "WARNING", "crdkit.diag.info": "INFO"}
+DIAG_CALL = re.compile(r'\binclude\s+(?:"(crdkit\.diag\.(?:error|warning|info))"|(\$[A-Za-z_]\w*))')
+PRINTF_VERB = re.compile(r'%[-+# 0]*\d*(?:\.\d+)?[a-zA-Z%]')
+
+
+def go_string(literal):
+    """The text of a Go string literal (`"…"` with `\\"`, `\\\\`, `\\n` escapes)."""
+    return re.sub(r'\\(.)', lambda m: {"n": "\n", "t": "\t"}.get(m.group(1), m.group(1)), literal[1:-1])
+
+
+def placeholder(arg):
+    """`$path` -> `<path>`, `.id` / `$x.id` -> `<id>`, anything else -> `<…>`."""
+    m = re.fullmatch(r'(?:\$[A-Za-z_]\w*|)(?:\.([A-Za-z_]\w*))*', arg)
+    if m and arg.startswith("$") and "." not in arg:
+        return f"<{arg[1:]}>"
+    if m and arg:
+        return f"<{arg.rsplit('.', 1)[1]}>"
+    return "<…>"
+
+
+def message_template(arg):
+    """A diag message argument -> its template text, or None when it is computed."""
+    if re.fullmatch(r'"(?:[^"\\]|\\.)*"', arg):
+        return go_string(arg)
+    if not (arg.startswith("(") and arg.endswith(")")):
+        return None
+    parts = items(arg[1:-1].strip())
+    if len(parts) < 2 or parts[0] != "printf" or not re.fullmatch(r'"(?:[^"\\]|\\.)*"', parts[1]):
+        return None
+    fmt, args = go_string(parts[1]), iter(parts[2:])
+    return PRINTF_VERB.sub(lambda v: "%" if v.group(0) == "%%" else placeholder(next(args, "")), fmt)
+
+
+def diag_level(var, body):
+    """Level of `include $var`: from its assignment in the define body, None when it names no diag define."""
+    assigns = [m.group(1) for m in re.finditer(re.escape(var) + r'\s*:?=\s*([^}]*)', body)]
+    named = [n for a in assigns for n in re.findall(r'"(crdkit\.diag\.[A-Za-z]+)"', a)]
+    if not named and not any("crdkit.diag." in a for a in assigns):
+        return None
+    readable = all(re.fullmatch(r'\s*(?:ternary\s+"[^"]+"\s+"[^"]+"\s+.*|"[^"]+")\s*-?', a, re.S) for a in assigns)
+    if not readable or not named or any(n not in DIAG_LEVELS for n in named):
+        return "(computed level)"
+    return " / ".join(dict.fromkeys(DIAG_LEVELS[n] for n in named))
+
+
+def diagnostic_rows(parsed):
+    """(define, level, message) per diag call of parsed template files (see chart_templates)."""
+    rows = []
+    for _, code, ds, _ in parsed:
+        for d in ds:
+            s, e = d["_span"]
+            body = code[s:e]
+            for a in ACTION.finditer(body):
+                text = a.group(1)
+                for m in DIAG_CALL.finditer(text):
+                    level = DIAG_LEVELS[m.group(1)] if m.group(1) else diag_level(m.group(2), body)
+                    if level is None:
+                        continue
+                    args = items(text[m.end():args_end(text, m.end())].strip())
+                    inner = items(args[0][1:-1].strip()) if args and args[0].startswith("(") else []
+                    msg = message_template(inner[2]) if len(inner) == 3 and inner[0] == "list" else None
+                    rows.append((d["name"], level, "(computed message)" if msg is None else msg))
+    return rows
+
+
+def diagnostics(argv):
+    """The generated diagnostics list of one chart (one row per diag call)."""
+    peers, args = [], list(argv)
+    while args and args[0].startswith("-"):
+        flag = args.pop(0)
+        if flag == "--peer":
+            if not args:
+                return usage("--peer needs a templates dir")
+            peers.append(args.pop(0))
+        elif flag in ("-h", "--help"):
+            print(__doc__.strip())
+            return 0
+        else:
+            return usage(f"unknown flag: {flag}")
+    if len(args) != 2:
+        return usage("diagnostics takes <chart dir> <out.md>")
+    chart_dir, out = args
+    chart = Path(chart_dir)
+    meta, parsed = chart_templates(chart)
+    names = {d["name"] for _, _, ds, _ in parsed for d in ds}
+    for peer in peers:
+        names |= {d["name"] for _, _, ds, _ in chart_templates(Path(peer.rstrip("/")).parent)[1] for d in ds}
+    if not set(DIAG_LEVELS) <= names:
+        return usage("no crdkit.diag.error|warning|info defines (pass --peer <crdkit templates dir>)")
+    rows = sorted(diagnostic_rows(parsed), key=lambda r: (r[0], r[2], r[1]))
+    name = meta.get("name") or chart.name
+    lines = [
+        f"# {name} — diagnostics",
+        "",
+        "Generated by `crdkit/scripts/extract.py diagnostics`; do not edit.",
+        "",
+        "One row per diagnostic call. `<x>` = the `printf` argument `$x` / `.x`;",
+        "`<…>` = an expression.",
+        "",
+        "| Level | Message | Define |",
+        "| --- | --- | --- |",
+    ]
+    for define, level, msg in rows:
+        text = msg if msg.startswith("(computed") else f"`{' '.join(msg.split())}`"
+        lines.append(f"| {level} | {md_cell(text)} | `{define}` |")
+    Path(out).write_text("\n".join(lines) + "\n")
+    print(f"{out}: {len(rows)} diagnostics", file=sys.stderr)
+    return 0
+
+
 def usage(reason):
     print(f"extract.py: {reason}", file=sys.stderr)
-    print("usage: extract.py {graph <chart dir> <out.js> | lint [flags] <templates dir>} | extract.py -h",
+    print("usage: extract.py {graph <chart dir> <out.js> | lint [flags] <templates dir>"
+          " | reference|diagnostics [--peer <templates dir>]... <chart dir> <out.md>} | extract.py -h",
           file=sys.stderr)
     return 2
 
@@ -697,6 +814,8 @@ def main(argv):
         return lint(rest)
     if cmd == "reference":
         return reference(rest)
+    if cmd == "diagnostics":
+        return diagnostics(rest)
     return usage(f"unknown subcommand: {cmd}")
 
 
