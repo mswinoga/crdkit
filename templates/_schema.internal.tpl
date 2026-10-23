@@ -576,9 +576,9 @@ Implementation notes:
 - A value that fails the check, or still holds an unresolved marker
   (e.g. one left for a later substitution pass), is returned
   unconverted. `string` / `scalar` nodes are returned as resolved.
-- A per-target node resolves through crdkit.tokenDef.value (field
-  id = the values path); any other value through
-  crdkit.tokens.substitute.
+- A "token" param resolves through crdkit.token.value; a per-target
+  node otherwise through crdkit.tokenDef.value (field id = the values
+  path); any other value through crdkit.tokens.substitute.
 - Checked at most once per `<path>|<target>` (recorded in "seen").
 - Not checked when resolution itself recorded an ERROR (e.g. "no value
   found") or left a marker unresolved — that diagnostic already names
@@ -590,7 +590,9 @@ Implementation notes:
 {{- $target := .target -}}
 {{- $errorsBefore := len $ctx.diag.errors -}}
 {{- $value := "" -}}
-{{- if .tokens -}}
+{{- if .token -}}
+  {{- $value = (include "crdkit.token.value" (list $ctx .token $target) | fromYaml).value -}}
+{{- else if .tokens -}}
   {{- $value = (include "crdkit.tokenDef.value" (list $ctx .path .def $target) | fromYaml).value -}}
 {{- else -}}
   {{- $value = include "crdkit.tokens.substitute" (list $ctx .def $target) -}}

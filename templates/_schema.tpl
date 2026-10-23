@@ -328,14 +328,19 @@ than the render's own.
 
 Interface:
 - Params (dict): { "ctx": <ctx>, "node": <the field's node, see
-  crdkit.schema.node>, "def": <the field's value as written>, "path":
-  <its values path, see crdkit.schema.path>, "target": <optional —
-  defaults to ctx.target>, "seen": <dict shared with
+  crdkit.schema.node>, "def": <the field's value as written>, "token":
+  <optional token name — when present, "def" is ignored>, "path": <its
+  values path, see crdkit.schema.path>, "target": <optional — defaults
+  to ctx.target>, "seen": <dict shared with
   crdkit.schema.validateValues, optional> }
 - Returns YAML: { "value": <resolved value> }
 
 Implementation notes:
-- A per-target node or a string with markers is resolved and
+- A "token" is always resolved through crdkit.token.value for the
+  target, whatever the node's per-target state, then checked like any
+  resolved value; no value → the resolution ERROR, "" and no check
+  ERROR; an unknown token → its ERROR, "".
+- Otherwise a per-target node or a string with markers is resolved and
   checked (once per path and target, see "seen"); any other value is
   returned as written — the structural pass already checked it.
 - A resolved string of an `int` / `number` / `bool` node is returned
@@ -349,10 +354,11 @@ Implementation notes:
 {{- define "crdkit.schema.value" -}}
 {{- $ctx := .ctx -}}
 {{- $node := .node | default dict -}}
-{{- $out := dict "value" .def -}}
+{{- $token := .token | default "" -}}
+{{- $out := dict "value" (ternary .def "" (eq $token "")) -}}
 {{- $tokens := include "crdkit.schema.perTarget.internal" (dict "node" $node "inTokens" false) -}}
-{{- if or $tokens (and (kindIs "string" .def) (regexMatch (include "crdkit.markerPattern" (dict)) .def)) -}}
-  {{- include "crdkit.schema.resolveAndCheck.internal" (dict "ctx" $ctx "node" $node "def" .def "tokens" (ne $tokens "") "path" .path "target" (.target | default $ctx.target) "seen" (ternary .seen (dict) (kindIs "map" .seen)) "out" $out) -}}
+{{- if or .token $tokens (and (kindIs "string" .def) (regexMatch (include "crdkit.markerPattern" (dict)) .def)) -}}
+  {{- include "crdkit.schema.resolveAndCheck.internal" (dict "ctx" $ctx "node" $node "def" .def "token" .token "tokens" (ne $tokens "") "path" .path "target" (.target | default $ctx.target) "seen" (ternary .seen (dict) (kindIs "map" .seen)) "out" $out) -}}
 {{- end -}}
 value: {{ $out.value | toYaml | nindent 2 }}
 {{- end -}}
