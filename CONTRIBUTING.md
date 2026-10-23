@@ -7,8 +7,11 @@ Libraries built on crdkit (e.g. mdeploy) depend on it via `file://`.
 ## Layout
 
 - `templates/` — the engine.
-- `harness/` + `tests/` — local dev/test harness exercising crdkit's
-  internals directly (`make test`).
+- `tests/` — the test framework (`tests/stub`, `tests/suites`,
+  `tests/fixtures`) and the legacy suites (`tests/*_test.yaml`, run on
+  `harness/`). See "Testing".
+- `scripts/lint.sh` — text lint for library templates, also run by
+  mdeploy.
 
 **Release tags**: `v<chart version>` (e.g. `v0.0.7`). Release order:
 bump `version` in `Chart.yaml` → commit → tag `v<version>`.
@@ -482,40 +485,105 @@ title?, htmlLink?, id?, diag}`) is the one entry point: it makes one
 
 ## Testing
 
-`harness/` + `tests/` (`make test`) exercise crdkit's
-helpers directly — no `mdeploy.render`-style wrapper (exception:
-`tests/render_test.yaml` exercises `crdkit.render`'s own top-level
-behavior via a stand-in preamble). A test asserting on a token's
-resolved shape must first make it "used" — via `structure.x: "@NAME@"`,
-or `crossTargets`/`crossTargetNames` (force-resolve for an arbitrary
-target, exposed as `crossResolved`).
+`command make test` runs `deps` (dependency update of `harness` and
+`tests/stub`, not transitive), the legacy suites, the framework suites
+and the lint.
 
-Harness data-driven ops (`tokenOps`, `stringOps`, `tokenDefOps`,
-`modelOps`, `crossTargets`) — see the doc comment of
-`harness/templates/test.yaml`. Also:
-- `tokenAnnotations` (values) is the library annotation list passed to
-  `reservedKeys.internal`; `diagSeed` seeds `crdkit.render`'s `diag`.
-- Cache behavior is tested through `tokenOps` with `resolve` between
-  mutations; assert on `tokens.NAME._value`/`_gen`.
-- `harness/templates/schema_test.yaml` (`schemaOps`, suite
-  `tests/schema_test.yaml`) drives the schema engine — op list in its
-  doc comment. `render_test.yaml` exposes the `state` seed through
-  `renderState` (`model.state`, `model.stateErrors`).
-- helm-unittest's `set:` parses test YAML as YAML 1.2 (`on:` stays a
-  string), Helm's `fromYaml` as YAML 1.1 — a passing harness test does
-  not prove a key survives in a library's literal YAML.
+### Framework
+
+Layout:
+- `tests/stub/` — chart `stub` (dependency crdkit `file://../..`): a
+  minimal library on crdkit's public API, so a contract test is values
+  only.
+  - `templates/_stub.tpl`: `stub.render` passes every `crdkit.render`
+    param from `.Values` (`tokens`, `target`, `system`, `state`,
+    `annotations` → `tokenAnnotations`, `diag` seed when the key is
+    present, `ladder` → `parentTargetTemplate: stub.parentTarget`);
+    `schema` + `input` run `crdkit.schema.validate` first, as a library
+    does; `reportSeed: true` appends `seed: {errors: <n>}` (the caller's
+    seed after the render).
+  - `stub.ops`, the only chain entry, runs `.Values.ops` in order:
+    `{put: [k1..kN], value}`, `{add|underlay: name, value,
+    annotations?, target?}`, `{diag: error|warning|info, msg}`,
+    `{resolve: [keys], at: [k1..kN]}` (`crdkit.schema.resolve`).
+  - `templates/_adapter.tpl`: `test.withDiagnostics` prints the render,
+    then its `# ERROR|WARNING|INFO:` lines as data under
+    `diagnostics: {error, warning, info}` (a level key only when it has
+    lines; no `diagnostics` key on a clean render).
+  - `templates/cr.yaml`: the adapter around `stub.render`.
+- `tests/fixtures/base.yaml` — `target: b-01`, ladder `b-01 → b → ALL`.
+- `tests/suites/*_test.yaml` — `helm unittest tests/stub -f
+  '../suites/*_test.yaml'`; `values: [../fixtures/base.yaml]` + `set:`
+  per test.
+- `tests/requirements.md` — the C- requirement catalogue.
+
+Assert rules:
+- `it:` starts with the C- ids it covers, then F-/TC- ids:
+  `"C-3 F-12: …"`; traceability = `grep -r C-3 tests/`.
+- Diagnostics: level = `diagnostics.<level>`; fragment = a quoted
+  identifier as the message quotes it, via `exists` + jsonpath regex
+  `diagnostics.error[?(@ =~ /'T'/)]`. Never full message text.
+- Counts (`lengthEqual`) only when the count is the requirement.
+- "No diagnostics" = `notExists: {path: diagnostics}`.
+- Structure: the one leaf or item the requirement names; lists via
+  `contains … any: true`, order only when order is the requirement.
+- Never a literal chart version; never a snapshot assert.
+- Open finding: the target-form test with `skip: {reason: "F-n open
+  (<feature>)"}`; the fix deletes the `skip` line.
+- `set:` and `values:` files are YAML 1.2 in helm-unittest (`on:` stays
+  a string); Helm reads values files as YAML 1.1.
+
+Lint `scripts/lint.sh [--fail-define <define>] [--pending <file>]
+<templates dir>` (POSIX sh + awk; `{{/* … */}}` comments skipped; every
+file under the dir):
+- Rules: `accumulator-default-dict` (`.diag`/`.seen`/`.acc`/`.out`/
+  `.memo` piped to `default dict`), `fail-outside-render` (`fail`
+  outside `--fail-define`; crdkit allows none),
+  `unguarded-trailing-index` (a line that is only `{{- index A K -}}`
+  without a preceding `if hasKey A K`), `non-must-regex-user-pattern`
+  (a `regex*` call whose pattern is not a literal, a `$<name>Re` local
+  or `crdkit.markerPattern.internal`).
+- Output: `FAIL <rule> <file>:<line>: <text>`, `PENDING (<reason>) …`,
+  `FIXED? (<reason>) <rule> <file>` (a pending entry without a hit),
+  then `lint.sh: <n> hits, <f> failed, <p> pending`. Exit 0 clean, 1 on
+  FAIL or `FIXED?`, 2 usage. Paths print as given: run from the repo
+  root.
+- `tests/lint.pending`: lines `<rule> <file> <F-id> (<feature>)` (`#`
+  comments); a matching hit is PENDING; a fix deletes its line.
+- A rule must have zero false positives on current code; a rule that
+  cannot is dropped, never given an exception list.
+
+### Legacy suites
+
+Being migrated to the framework; edit only to keep green.
+- `harness/` + `tests/*_test.yaml` (`helm unittest harness -f
+  '../tests/*_test.yaml'`) exercise crdkit's helpers directly;
+  `tests/render_test.yaml` drives `crdkit.render` via a stand-in
+  preamble.
+- Data-driven ops (`tokenOps`, `stringOps`, `tokenDefOps`, `modelOps`,
+  `crossTargets`/`crossTargetNames` → `crossResolved`): doc comment of
+  `harness/templates/test.yaml`; `tokenAnnotations` (values) feeds
+  `reservedKeys.internal`, `diagSeed` seeds `crdkit.render`'s `diag`.
+- Schema: `harness/templates/schema_test.yaml` (`schemaOps`), suite
+  `tests/schema_test.yaml`; `render_test.yaml` exposes the `state` seed
+  as `renderState` (`model.state`, `model.stateErrors`).
+- A token must be "used" before asserting its shape
+  (`structure.x: "@NAME@"` or `crossTargets`); cache behavior through
+  `tokenOps` with `resolve` between mutations, asserting
+  `tokens.NAME._value`/`_gen`.
+- Diagnostics lists with 2+ messages: `lengthEqual` + one `contains`
+  per message, exact text (`tests/diag_test.yaml` asserts append order).
 
 Sharp edges:
-- The harness chart's `name:` in `Chart.yaml` must match its directory
-  name, or helm-unittest produces spurious extra failures.
-- helm-unittest's `set:` dotted-path parser doesn't handle
-  array-bracket indices (`modelOps[0].op: ...`) reliably — set the
-  whole array as one nested YAML value instead.
-- `.helmignore` excluding `harness/`/`tests/` is required, not
-  cosmetic — `.gitignore` doesn't affect `helm package`/`helm
-  dependency update`; without it, downstream dependency updates
-  repackage crdkit's entire tree, including harness's own bundled copy
-  of crdkit.
+- helm-unittest's `set:` cannot index arrays (`modelOps[0].op`) — set
+  the whole array.
+- helm-unittest creates an empty `__snapshot__/` beside every suite
+  (git-ignored).
+- `.helmignore` must exclude `harness/`, `tests/`, `scripts/` and
+  `__snapshot__/` (`.gitignore` does not affect `helm package` /
+  `helm dependency update`; without it a downstream dependency update
+  repackages the whole tree). Helm rejects `**`; a pattern without an
+  inner `/` matches at any depth.
 
 ## Open / deferred
 
