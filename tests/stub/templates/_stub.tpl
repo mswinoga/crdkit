@@ -35,7 +35,7 @@ Implementation notes:
 {{- $state := $v.state | default dict -}}
 {{- $_ := set $state "seen" (dict) -}}
 {{- $args := dict "context" . "tokens" ($v.tokens | default dict) "target" $v.target
-      "system" ($v.system | default dict) "chain" (list "stub.ops")
+      "system" ($v.system | default dict) "defaults" ($v.defaults | default dict) "chain" (list "stub.ops")
       "tokenAnnotations" ($v.annotations | default list) "state" $state -}}
 {{- if $v.ladder -}}{{- $_ := set $args "parentTargetTemplate" "stub.parentTarget" -}}{{- end -}}
 {{- $diag := dict "errors" (list) "warnings" (list) "infos" (list) -}}
@@ -133,7 +133,11 @@ Interface:
 {{- include "crdkit.dictMerge" (list $ctx.model (dict "kind" "Stub")) -}}
 {{- range $op := $v.ops | default (list) -}}
   {{- if hasKey $op "put" -}}
-    {{- include "crdkit.dictMerge" (concat (list $ctx.model) (initial $op.put) (list (dict (last $op.put) $op.value))) -}}
+    {{- if $op.put -}}
+      {{- include "crdkit.dictMerge" (concat (list $ctx.model) (initial $op.put) (list (dict (last $op.put) $op.value))) -}}
+    {{- else -}}
+      {{- include "crdkit.dictMerge" (list $ctx.model $op.value) -}}
+    {{- end -}}
   {{- else if hasKey $op "listExtend" -}}
     {{- include "crdkit.listExtend" (concat (list $ctx.model) $op.listExtend (list $op.value)) -}}
   {{- else if hasKey $op "ensureDictKey" -}}

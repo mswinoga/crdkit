@@ -1,0 +1,204 @@
+suite: crdkit helpers — model, diagnostics, labels, chain hooks
+templates: [cr.yaml]
+values: [../fixtures/base.yaml]
+tests:
+  # --- C-5 crdkit.dictMerge ---
+  - it: "C-5: an empty path merges directly into the model"
+    set:
+      ops: [{put: [], value: {apiVersion: platform.company.io/v1, kind: SomeCR}}]
+    asserts:
+      - equal: {path: apiVersion, value: platform.company.io/v1}
+      - equal: {path: kind, value: SomeCR}
+  - it: "C-5: an empty path preserves other fields and incoming values win"
+    set:
+      ops:
+        - {ensureDictKey: untouched, default: stays}
+        - {put: [], value: {apiVersion: first}}
+        - {put: [], value: {apiVersion: second, kind: SomeCR}}
+    asserts:
+      - equal: {path: untouched, value: stays}
+      - equal: {path: apiVersion, value: second}
+      - equal: {path: kind, value: SomeCR}
+  - it: "C-5: a single-level path adds entries"
+    set:
+      ops:
+        - {put: [labels], value: {a: "1", shared: orig}}
+        - {put: [labels], value: {b: "2", shared: new}}
+    asserts:
+      - equal: {path: labels.a, value: "1"}
+      - equal: {path: labels.b, value: "2"}
+      - equal: {path: labels.shared, value: new}
+  - it: "C-5: a multi-level path creates each missing level"
+    set:
+      ops: [{put: [containers, my-container, resources], value: {requested: 100m}}]
+    asserts:
+      - equal: {path: 'containers["my-container"].resources.requested', value: 100m}
+  - it: "C-5: repeated calls on the same nested path keep siblings"
+    set:
+      ops:
+        - {put: [containers, my-container, resources], value: {requested: 100m}}
+        - {put: [containers, my-container, resources], value: {limit: "1"}}
+        - {put: [containers, other-container, resources], value: {requested: 50m}}
+    asserts:
+      - equal: {path: 'containers["my-container"].resources.requested', value: 100m}
+      - equal: {path: 'containers["my-container"].resources.limit', value: "1"}
+      - equal: {path: 'containers["other-container"].resources.requested', value: 50m}
+      - notExists: {path: 'containers["other-container"].resources.limit'}
+  # --- C-30 crdkit.listExtend / ensureDictKey / model.hasPath ---
+  - it: "C-30: ensureDictKey sets the default when the key is absent"
+    set:
+      ops: [{ensureDictKey: foo, default: [first]}]
+    asserts:
+      - equal: {path: foo, value: [first]}
+  - it: "C-30: ensureDictKey does not overwrite an existing key"
+    set:
+      ops:
+        - {ensureDictKey: foo, default: [first]}
+        - {ensureDictKey: foo, default: [second]}
+    asserts:
+      - equal: {path: foo, value: [first]}
+  - it: "C-30: listExtend creates a list and appends items"
+    set:
+      ops:
+        - {listExtend: [tags], value: [a]}
+        - {listExtend: [tags], value: [b, c]}
+    asserts:
+      - equal: {path: tags, value: [a, b, c]}
+  - it: "C-30: listExtend walks a multi-level path and accumulates"
+    set:
+      ops:
+        - {listExtend: [containers, my-container, env], value: [A=1]}
+        - {listExtend: [containers, my-container, env], value: [B=2]}
+    asserts:
+      - equal: {path: 'containers["my-container"].env', value: [A=1, B=2]}
+  - it: "C-30: dictMerge and listExtend are siblings under one nested parent"
+    set:
+      ops:
+        - {put: [containers, my-container, resources], value: {requested: 100m}}
+        - {listExtend: [containers, my-container, env], value: [A=1]}
+    asserts:
+      - equal: {path: 'containers["my-container"].resources.requested', value: 100m}
+      - equal: {path: 'containers["my-container"].env', value: [A=1]}
+  - it: "C-30: hasPath is true for an existing path"
+    set:
+      ops:
+        - {put: [a, b], value: {c: "1"}}
+        - {hasPath: [a, b, c], at: [found]}
+    asserts:
+      - equal: {path: found, value: "true"}
+  - it: "C-30: hasPath is exactly empty for a missing leaf"
+    set:
+      ops:
+        - {put: [a, b], value: {c: "1"}}
+        - {hasPath: [a, b, missing], at: [found]}
+    asserts:
+      - equal: {path: found, value: ""}
+  - it: "C-30: hasPath is empty for a missing intermediate node"
+    set:
+      ops:
+        - {put: [a], value: {b: "1"}}
+        - {hasPath: [a, nope, c], at: [found]}
+    asserts:
+      - equal: {path: found, value: ""}
+  - it: "C-30: hasPath is empty when an intermediate node is a scalar"
+    set:
+      ops:
+        - {put: [a], value: {b: text}}
+        - {hasPath: [a, b, c], at: [found]}
+    asserts:
+      - equal: {path: found, value: ""}
+  - it: "C-30: hasPath is empty when an intermediate node is a list"
+    set:
+      ops:
+        - {listExtend: [a, items], value: [x]}
+        - {hasPath: [a, items, "0"], at: [by-index]}
+        - {hasPath: [a, items, x], at: [by-value]}
+    asserts:
+      - equal: {path: by-index, value: ""}
+      - equal: {path: by-value, value: ""}
+  - it: "C-30: hasPath with an empty path is true"
+    set:
+      ops: [{hasPath: [], at: [found]}]
+    asserts:
+      - equal: {path: found, value: "true"}
+  - it: "C-30: hasPath treats a dotted key as one key"
+    set:
+      ops:
+        - {put: [files], value: {app.conf: x}}
+        - {hasPath: [files, app.conf], at: [one-key]}
+        - {hasPath: [files, app, conf], at: [two-keys]}
+    asserts:
+      - equal: {path: one-key, value: "true"}
+      - equal: {path: two-keys, value: ""}
+  - it: "C-30: hasPath counts a key holding an empty value as present"
+    set:
+      ops:
+        - {put: [a], value: {empty: ""}}
+        - {hasPath: [a, empty], at: [found]}
+    asserts:
+      - equal: {path: found, value: "true"}
+  - it: "C-30: hasPath does not mutate the model"
+    set:
+      ops:
+        - {put: [a], value: {b: "1"}}
+        - {hasPath: [a, zzz, y], at: [found]}
+    asserts:
+      - equal: {path: a, value: {b: "1"}}
+      - equal: {path: found, value: ""}
+  # --- C-6 crdkit.diag.* ---
+  - it: "C-6: diag.error and diag.warning append in call order"
+    set:
+      ops:
+        - {diag: error, msg: first error}
+        - {diag: warning, msg: first warning}
+        - {diag: error, msg: second error}
+        - {diag: warning, msg: second warning}
+    asserts:
+      - equal: {path: diagnostics.error, value: [first error, second error]}
+      - equal: {path: diagnostics.warning, value: [first warning, second warning]}
+  - it: "C-6: diag.info creates the infos list when missing"
+    set:
+      ops:
+        - {diag: info, msg: first info}
+        - {diag: warning, msg: a warning}
+        - {diag: info, msg: second info}
+    asserts:
+      - equal: {path: diagnostics.info, value: [first info, second info]}
+      - equal: {path: diagnostics.warning, value: [a warning]}
+      - notExists: {path: diagnostics.error}
+  - it: "C-6 Q-6: a seed missing a level's list still receives that level"
+    skip: {reason: "Q-6 open (crdkit-0.2)"}
+    set:
+      diag: {errors: []}
+      ops: [{diag: warning, msg: seeded-warning}]
+    asserts:
+      - exists: {path: "diagnostics.warning[?(@ =~ /seeded-warning/)]"}
+  # --- C-27 labels, dependencyVersion ---
+  - it: "C-27: standardLabels carries the release and chart identity"
+    set:
+      ops: [{labels: {}, at: [labels]}]
+    asserts:
+      - equal: {path: 'labels["app.kubernetes.io/instance"]', value: RELEASE-NAME}
+      - equal: {path: 'labels["app.kubernetes.io/managed-by"]', value: Helm}
+      - matchRegex: {path: 'labels["helm.sh/chart"]', pattern: "^stub-"}
+  - it: "C-27: dependencyVersion reads the declared dependency and never fails"
+    set:
+      ops:
+        - {dependencyVersion: crdkit, at: [declared]}
+        - {dependencyVersion: absent, at: [absent]}
+    asserts:
+      - matchRegex: {path: declared, pattern: "^[0-9]+\\."}
+      - equal: {path: absent, value: unknown}
+  # --- C-32 name, noParentTarget ---
+  - it: "C-32: name maps Release.Name"
+    set:
+      ops: [{name: {}, at: [name]}]
+    asserts:
+      - matchRegex: {path: name, pattern: "^[A-Za-z0-9-]+$"}
+  - it: "C-32: without a ladder the default noParentTarget resolves only exact and default"
+    set:
+      ladder: null
+      tokens: {T: {default: d}}
+      ops: [{put: [v], value: {x: "@T@"}}]
+    asserts:
+      - equal: {path: v.x, value: d}
