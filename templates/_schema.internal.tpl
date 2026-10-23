@@ -399,7 +399,9 @@ Implementation notes:
   map on a static scalar node → ERROR, whatever `required` says (a
   fallback to the default would invert e.g. `enabled: {PROD: false}`);
   a node that fails is dropped (its parent's default then
-  applies), a key failing "keys.pattern" with its value. A per-target
+  applies), a key failing "keys.pattern" with its value, and a YAML 1.1
+  boolean word (y/n/yes/no/on/off/true/false, any case) as a `keys` map
+  key (checked before the pattern). A per-target
   node holding a dict is a token declaration: kept as written, checked
   by the value pass; with target keys in effect (the node's own
   `targetKeys`, else the inherited ones) its keys are checked first
@@ -510,13 +512,22 @@ Implementation notes:
       {{- if not (kindIs "invalid" $child) -}}
         {{- $childNode := dict -}}
         {{- $badKey := false -}}
+        {{- $booleanWord := false -}}
         {{- if hasKey $properties $key -}}
           {{- $childNode = index $properties $key -}}
         {{- else if hasKey $node "values" -}}
           {{- $childNode = $node.values -}}
-          {{- $badKey = and (hasKey $node "keys") (not (mustRegexMatch $node.keys.pattern $key)) -}}
+          {{- if hasKey $node "keys" -}}
+            {{- if and (not $resolved) (regexMatch "(?i)^(y|n|yes|no|on|off|true|false)$" $key) -}}
+              {{- $booleanWord = true -}}
+            {{- else -}}
+              {{- $badKey = not (mustRegexMatch $node.keys.pattern $key) -}}
+            {{- end -}}
+          {{- end -}}
         {{- end -}}
-        {{- if $badKey -}}
+        {{- if $booleanWord -}}
+          {{- include "crdkit.diag.error" (list $diag (printf "key '%s'%s is a YAML 1.1 boolean word (y, n, yes, no, on, off, true, false) — ignored" $childPath $suffix)) -}}
+        {{- else if $badKey -}}
           {{- include "crdkit.diag.error" (list $diag (printf "key '%s'%s must match '%s'%s" $childPath $suffix $node.keys.pattern $tail)) -}}
         {{- else if not $childNode -}}
           {{- include "crdkit.diag.warning" (list $diag (printf "'%s'%s is not a known key%s" $childPath $suffix $tail)) -}}
