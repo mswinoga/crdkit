@@ -529,12 +529,3 @@ Example values.
 | marker in a non-string scalar | checked after substitution | accepted unchecked |
 | `enum` | compared as strings | compared as typed |
 | `pattern` | RE2 | ECMA-262 (same for simple patterns) |
-
-## Testing
-
-`command make test` (needs the helm-unittest plugin:
-`helm plugin install https://github.com/helm-unittest/helm-unittest`);
-layout, rules and tools: `CONTRIBUTING.md` "Testing". Requirement
-catalogue (C- ids the tests cite): `docs/requirements.md`. End to end,
-crdkit also runs under mdeploy's tests (`../mdeploy/README.md`
-"Testing").

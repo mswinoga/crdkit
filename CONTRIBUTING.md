@@ -394,7 +394,11 @@ authors: README "Schema DSL".
 
 `command make test` = `deps` (`tests/stub` dependency update) + the
 suites + the lint + the freshness of `docs/defines.md`,
-`docs/diagnostics.md` and the README examples.
+`docs/diagnostics.md` and the README examples. Needs the helm-unittest
+plugin (`helm plugin install
+https://github.com/helm-unittest/helm-unittest`) and `python3` (lint,
+examples). End to end, crdkit also runs under mdeploy's tests
+(`../mdeploy/CONTRIBUTING.md` "Testing").
 
 ### Framework
 
