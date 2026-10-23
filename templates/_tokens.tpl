@@ -6,8 +6,8 @@ callers pass "system"/"defaults" dicts explicitly
 (crdkit.tokens.merge.internal).
 
 Diagnostics: every helper that can fail takes a "diag" dict
-(`{errors, warnings}`, both lists) and appends to it instead of calling
-`fail` — a single author mistake must never hard-abort a render.
+(`{errors, warnings, infos}`, any subset) and appends to it instead of
+calling `fail` — a single author mistake must never hard-abort a render.
 
 Resolution is lazy, per-target, and memoized:
 - A token resolves (and is diagnosed, if malformed) only when
@@ -36,8 +36,9 @@ Token declaration shape (what a consumer/integration writes/reads on
   IS a target entry.
 - Token annotations are static metadata on a declaration (e.g. an owner or an
   exposure marker). crdkit never interprets their names or values and
-  never resolves them; a library reads them directly off
-  `ctx.tokens[NAME]`.
+  never resolves them. Libraries read and write them only through
+  crdkit.token.annotate / crdkit.token.info / crdkit.token.names, never
+  by reading or writing a declaration dict.
 - Internal keys written into a declaration by a consumer, defaults or
   system are stripped at merge time with a WARNING
   (crdkit.tokens.merge.internal).

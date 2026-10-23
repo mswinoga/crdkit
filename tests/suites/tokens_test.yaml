@@ -4,7 +4,7 @@ templates:
 values:
   - ../fixtures/base.yaml
 tests:
-  - it: 'C-TOK: resolves a simple scalar token'
+  - it: 'C-11: resolves a simple scalar token'
     set:
       target: prod-01
       tokens:
@@ -18,7 +18,7 @@ tests:
       - equal:
           path: structure.message
           value: hello
-  - it: 'C-TOK: ''default'' is a hardcoded crdkit-level fallback, resolving unconditionally for ANY target — no taxonomy needed'
+  - it: 'C-11: ''default'' is a hardcoded crdkit-level fallback, resolving unconditionally for ANY target — no taxonomy needed'
     set:
       target: some-unrecognized-target-with-no-taxonomy-hop-at-all
       tokens:
@@ -37,7 +37,7 @@ tests:
           value: db.internal
       - notExists:
           path: diagnostics.error
-  - it: 'C-TOK: ''default'' is checked AFTER the parentTarget walk, not before — a more specific taxonomy-reached value always wins over it'
+  - it: 'C-12: ''default'' is checked AFTER the parentTarget walk, not before — a more specific taxonomy-reached value always wins over it'
     set:
       target: prod-01
       tokens:
@@ -55,7 +55,7 @@ tests:
       - equal:
           path: structure.region
           value: prod-specific-region
-  - it: 'C-TOK: a token referencing another token (one level) resolves correctly'
+  - it: 'C-11: a token referencing another token (one level) resolves correctly'
     set:
       target: prod-01
       tokens:
@@ -70,7 +70,7 @@ tests:
       - equal:
           path: structure.message
           value: foo-bar
-  - it: 'C-TOK: a token referencing a chain of 3+ tokens resolves via the iterative resolver'
+  - it: 'C-11: a token referencing a chain of 3+ tokens resolves via the iterative resolver'
     set:
       target: prod-01
       tokens:
@@ -86,7 +86,7 @@ tests:
       - equal:
           path: structure.message
           value: one-two-three
-  - it: 'C-TOK: a direct two-token @ref@ cycle records an ERROR mentioning a cycle, and does not hang'
+  - it: 'C-12: a direct two-token @ref@ cycle records an ERROR mentioning a cycle, and does not hang'
     set:
       target: prod-01
       tokens:
@@ -100,7 +100,7 @@ tests:
     asserts:
       - exists:
           path: diagnostics.error[?(@ =~ /cycle/)]
-  - it: 'C-TOK: @AT@ resolves to a literal @ character, applied only on the final substitution pass'
+  - it: 'C-17: @AT@ resolves to a literal @ character, applied only on the final substitution pass'
     set:
       target: prod-01
       ops:
@@ -112,7 +112,7 @@ tests:
       - equal:
           path: structure.email
           value: user@example.com
-  - it: 'C-TOK: @AT@ escapes text the marker pattern would otherwise read as a marker'
+  - it: 'C-17: @AT@ escapes text the marker pattern would otherwise read as a marker'
     set:
       target: prod-01
       ops:
@@ -126,7 +126,7 @@ tests:
           value: '@example.com@'
       - notExists:
           path: diagnostics.warning
-  - it: 'C-TOK: a dotted token name resolves through its ''@A.b@'' marker'
+  - it: 'C-11: a dotted token name resolves through its ''@A.b@'' marker'
     set:
       target: prod-01
       tokens:
@@ -142,7 +142,7 @@ tests:
           value: hello world
       - notExists:
           path: diagnostics.error
-  - it: 'C-TOK: dotted token names chain like any other name, per target'
+  - it: 'C-11: dotted token names chain like any other name, per target'
     set:
       target: prod-01
       tokens:
@@ -160,7 +160,7 @@ tests:
       - equal:
           path: structure.url
           value: http://h1:8080
-  - it: 'C-TOK: a dotted marker naming no token is left untouched'
+  - it: 'C-11: a dotted marker naming no token is left untouched'
     set:
       target: prod-01
       ops:
@@ -172,7 +172,7 @@ tests:
       - equal:
           path: structure.email
           value: '@example.com@'
-  - it: 'C-TOK: a declared-but-never-used token produces no diagnostic at all, even if it would error if resolved'
+  - it: 'C-13: a declared-but-never-used token produces no diagnostic at all, even if it would error if resolved'
     set:
       target: prod-01
       tokens:
@@ -183,7 +183,7 @@ tests:
           path: diagnostics.error
       - notExists:
           path: diagnostics.warning
-  - it: 'C-TOK: an entirely unset target produces NO diagnostic when nothing is ever resolved against it — no proactive check anymore'
+  - it: 'C-13: an entirely unset target produces NO diagnostic when nothing is ever resolved against it — no proactive check anymore'
     set:
       target: ""
       tokens: {}
@@ -191,7 +191,7 @@ tests:
     asserts:
       - notExists:
           path: diagnostics.error
-  - it: 'C-TOK: resolving a name that was never declared at all (e.g. via crossTargets/crdkit.token.value directly) records an ERROR, not a fail()'
+  - it: 'C-16: resolving a name that was never declared at all (e.g. via crossTargets/crdkit.token.value directly) records an ERROR, not a fail()'
     set:
       target: prod-01
       ops:
@@ -207,7 +207,7 @@ tests:
       - equal:
           path: crossResolved.prod-01.NEVER_DECLARED
           value: ""
-  - it: 'C-TOK: a dedicated attribute (literal key equal to the exact target) resolves directly, at any granularity'
+  - it: 'C-33: a dedicated attribute (literal key equal to the exact target) resolves directly, at any granularity'
     set:
       target: prod-01
       tokens:
@@ -223,7 +223,7 @@ tests:
       - equal:
           path: structure.color
           value: red
-  - it: 'C-TOK: a dedicated attribute works for a bare, unsequenced target too — crdkit doesn''t care about shape'
+  - it: 'C-33: a dedicated attribute works for a bare, unsequenced target too — crdkit doesn''t care about shape'
     set:
       target: staging
       tokens:
@@ -238,7 +238,7 @@ tests:
       - equal:
           path: structure.color
           value: teal
-  - it: 'C-TOK: no dedicated attribute, no match, no parentTargetMap configured — an honest ERROR, not a silent wrong answer'
+  - it: 'C-12: no dedicated attribute, no match, no parentTargetMap configured — an honest ERROR, not a silent wrong answer'
     set:
       target: prod-01
       tokens:
@@ -252,7 +252,7 @@ tests:
     asserts:
       - exists:
           path: diagnostics.error[?(@ =~ /no\ value\ found\ for\ 'BROKEN'\ —\ target\ chain\ exhausted\ at\ 'prod\-01'\ starting\ from\ 'prod\-01'/)]
-  - it: 'C-TOK: match: resolves against the full target string — no shape requirement, works for any target'
+  - it: 'C-18: match: resolves against the full target string — no shape requirement, works for any target'
     set:
       target: canary-thing
       tokens:
@@ -268,7 +268,7 @@ tests:
       - equal:
           path: structure.subenv
           value: is-canary
-  - it: 'C-TOK: match: rule values can reference capture groups from the pattern'
+  - it: 'C-18: match: rule values can reference capture groups from the pattern'
     set:
       target: qam1-05
       tokens:
@@ -284,7 +284,7 @@ tests:
       - equal:
           path: structure.prefix
           value: qam1
-  - it: 'C-TOK: match: first matching rule wins even when a later rule would also match'
+  - it: 'C-18: match: first matching rule wins even when a later rule would also match'
     set:
       target: prod-01
       tokens:
@@ -301,7 +301,7 @@ tests:
       - equal:
           path: structure.multi
           value: first-match
-  - it: 'C-TOK: a dedicated attribute wins over a match rule that would also fire — most specific always beats pattern-based'
+  - it: 'C-33: a dedicated attribute wins over a match rule that would also fire — most specific always beats pattern-based'
     set:
       target: prod-01
       tokens:
@@ -318,7 +318,7 @@ tests:
       - equal:
           path: structure.host
           value: dedicated-wins
-  - it: 'C-TOK: walks a single escalation hop when the exact target has no dedicated attribute'
+  - it: 'C-12: walks a single escalation hop when the exact target has no dedicated attribute'
     set:
       target: prod-01
       tokens:
@@ -335,7 +335,7 @@ tests:
       - equal:
           path: structure.region
           value: us-east-1
-  - it: 'C-TOK: walks multiple escalation hops, caching every rung visited along the way, not just the one where the value was found'
+  - it: 'C-12: walks multiple escalation hops, caching every rung visited along the way, not just the one where the value was found'
     set:
       target: qam1-01
       tokens:
@@ -392,7 +392,7 @@ tests:
       - equal:
           path: tv["REGION2"]["NONPROD"]
           value: region-nonprod
-  - it: 'C-TOK: with no parentTargetMap configured, there is NO escalation at all — same as crdkit.noParentTarget'
+  - it: 'C-12: with no parentTargetMap configured, there is NO escalation at all — same as crdkit.noParentTarget'
     set:
       target: prod-01
       tokens:
@@ -406,7 +406,7 @@ tests:
     asserts:
       - exists:
           path: diagnostics.error[?(@ =~ /no\ value\ found\ for\ 'REGION'\ —\ target\ chain\ exhausted\ at\ 'prod\-01'\ starting\ from\ 'prod\-01'/)]
-  - it: 'C-TOK: a malformed client escalation map that cycles back on itself is caught as an ERROR, not a hang'
+  - it: 'C-12: a malformed client escalation map that cycles back on itself is caught as an ERROR, not a hang'
     set:
       target: a
       tokens:
@@ -426,7 +426,7 @@ tests:
       - lengthEqual:
           path: diagnostics.error
           count: 1
-  - it: 'C-TOK: match: is evaluated fresh for the exact target even when a broader rung''s cache is already populated from a DIFFERENT target''s walk'
+  - it: 'C-18: match: is evaluated fresh for the exact target even when a broader rung''s cache is already populated from a DIFFERENT target''s walk'
     set:
       target: prod-01
       tokens:
@@ -469,7 +469,7 @@ tests:
       - equal:
           path: tv["SPECIAL"]["QA"]
           value: generic-nonprod
-  - it: 'C-TOK: the walk supports an arbitrary number of named rungs, not a fixed "family/tier" depth — some branches shorter than others'
+  - it: 'C-12: the walk supports an arbitrary number of named rungs, not a fixed "family/tier" depth — some branches shorter than others'
     set:
       target: prod-01
       tokens:
@@ -487,7 +487,7 @@ tests:
       - equal:
           path: structure.region
           value: us-east-1
-  - it: 'C-TOK: a value found via the walk still gets @ref@-chained normally, same as a dedicated attribute or match result'
+  - it: 'C-12: a value found via the walk still gets @ref@-chained normally, same as a dedicated attribute or match result'
     set:
       target: qa-01
       tokens:
@@ -506,7 +506,7 @@ tests:
       - equal:
           path: structure.dbHost
           value: db1.internal
-  - it: 'C-TOK: a dict-shaped resolved value comes back as a dict, with every string leaf''s @ref@ markers substituted'
+  - it: 'C-17: a dict-shaped resolved value comes back as a dict, with every string leaf''s @ref@ markers substituted'
     set:
       target: prod
       tokens:
@@ -528,7 +528,7 @@ tests:
           value:
             host: db.internal
             port: 5432
-  - it: 'C-TOK: a list-shaped resolved value comes back as a list, with every string element''s @ref@ markers substituted'
+  - it: 'C-17: a list-shaped resolved value comes back as a list, with every string element''s @ref@ markers substituted'
     set:
       target: prod
       tokens:
@@ -550,7 +550,7 @@ tests:
           value:
             - db.internal
             - static-host
-  - it: 'C-TOK: a non-string scalar value (bool/int/float) resolves to its NATIVE type, not a stringified copy'
+  - it: 'C-17: a non-string scalar value (bool/int/float) resolves to its NATIVE type, not a stringified copy'
     set:
       target: prod
       tokens:
@@ -576,7 +576,7 @@ tests:
       - equal:
           path: crossResolved.prod.PORT
           value: 5432
-  - it: 'C-TOK: a structured value can still reference a token added later via crdkit.token.add — same lazy-resolution guarantee as a scalar'
+  - it: 'C-14: a structured value can still reference a token added later via crdkit.token.add — same lazy-resolution guarantee as a scalar'
     set:
       target: prod
       tokens:
@@ -597,7 +597,7 @@ tests:
           path: crossResolved.prod.CONFIG
           value:
             host: computed.internal
-  - it: 'C-TOK: crdkit.token.string stringifies a non-string scalar for text embedding'
+  - it: 'C-31: crdkit.token.string stringifies a non-string scalar for text embedding'
     set:
       target: prod
       tokens:
@@ -612,7 +612,7 @@ tests:
       - equal:
           path: stringResolved["0"]
           value: "true"
-  - it: 'C-TOK: crdkit.token.string on a dict returns its JSON, with no diagnostic'
+  - it: 'C-31: crdkit.token.string on a dict returns its JSON, with no diagnostic'
     set:
       target: prod
       tokens:
@@ -632,7 +632,7 @@ tests:
           value: '{"host":"x","port":80}'
       - notExists:
           path: diagnostics.error
-  - it: 'C-TOK: crdkit.token.string on a list joins its elements with '','''
+  - it: 'C-31: crdkit.token.string on a list joins its elements with '','''
     set:
       target: prod
       tokens:
@@ -651,7 +651,7 @@ tests:
       - equal:
           path: stringResolved["0"]
           value: a,b,3
-  - it: 'C-TOK: a marker to a list token splices its elements joined by '','' (no space)'
+  - it: 'C-17: a marker to a list token splices its elements joined by '','' (no space)'
     set:
       target: prod
       tokens:
@@ -671,7 +671,7 @@ tests:
           value: hosts=a,b,3
       - notExists:
           path: diagnostics.error
-  - it: 'C-TOK: a structured list element is spliced as JSON'
+  - it: 'C-11: a structured list element is spliced as JSON'
     set:
       target: prod
       tokens:
@@ -690,7 +690,7 @@ tests:
       - equal:
           path: structure.x
           value: a,{"k":"v"},[1,2]
-  - it: 'C-TOK: a marker to a dict token splices its JSON'
+  - it: 'C-17: a marker to a dict token splices its JSON'
     set:
       target: prod
       tokens:
@@ -708,7 +708,7 @@ tests:
           value: cfg={"k":"v"}
       - notExists:
           path: diagnostics.error
-  - it: 'C-TOK: an empty list splices as an empty string'
+  - it: 'C-17: an empty list splices as an empty string'
     set:
       target: prod
       tokens:
@@ -723,7 +723,7 @@ tests:
       - equal:
           path: structure.x
           value: '[]'
-  - it: 'C-TOK: a per-target list token is resolved for the target before it is spliced, markers in its elements included'
+  - it: 'C-11: a per-target list token is resolved for the target before it is spliced, markers in its elements included'
     set:
       target: prod
       tokens:
@@ -744,7 +744,7 @@ tests:
       - equal:
           path: structure.x
           value: hosts=h1,b
-  - it: 'C-TOK: crdkit.tokenDef.string on a structure returns it as text'
+  - it: 'C-31: crdkit.tokenDef.string on a structure returns it as text'
     set:
       target: prod
       ops:
@@ -775,7 +775,7 @@ tests:
           value: a,b
       - notExists:
           path: diagnostics.error
-  - it: 'C-TOK: crdkit.tokenDef.value resolves an ad-hoc structure using the same escalation rules as a real token, without registering it'
+  - it: 'C-31: crdkit.tokenDef.value resolves an ad-hoc structure using the same escalation rules as a real token, without registering it'
     set:
       target: prod
       tokens:
@@ -805,7 +805,7 @@ tests:
       - equal:
           path: tokenDefResolved["0"].string
           value: special-db.internal
-  - it: 'C-TOK: crdkit.tokenDef.value falls back to the ad-hoc structure''s own ''default'' entry when the target doesn''t match'
+  - it: 'C-31: crdkit.tokenDef.value falls back to the ad-hoc structure''s own ''default'' entry when the target doesn''t match'
     set:
       target: qa
       ops:
@@ -830,7 +830,7 @@ tests:
       - equal:
           path: tokenDefResolved["0"].value
           value: fallback-value
-  - it: 'C-TOK: crdkit.tokenDef.value returns a structural result unchanged, same recursive substitution as a real token'
+  - it: 'C-31: crdkit.tokenDef.value returns a structural result unchanged, same recursive substitution as a real token'
     set:
       target: prod
       tokens:
@@ -864,7 +864,7 @@ tests:
       - equal:
           path: tokenDefResolved["0"].string
           value: '{"host":"db.internal","port":5432}'
-  - it: 'C-TOK: crdkit.tokenDef.value records a ''no value found'' error using the caller-supplied fieldId, same diagnostic shape as a real token'
+  - it: 'C-31: crdkit.tokenDef.value records a ''no value found'' error using the caller-supplied fieldId, same diagnostic shape as a real token'
     set:
       target: unrecognized
       ops:
@@ -886,7 +886,7 @@ tests:
     asserts:
       - exists:
           path: diagnostics.error[?(@ =~ /no\ value\ found\ for\ 'myField'\ —\ target\ chain\ exhausted\ at\ 'unrecognized'\ starting\ from\ 'unrecognized'/)]
-  - it: 'C-TOK: an annotation is written literally alongside target entries, no "value" wrapper'
+  - it: 'C-10: an annotation is written literally alongside target entries, no "value" wrapper'
     set:
       target: prod-01
       tokens:
@@ -904,7 +904,7 @@ tests:
       - equal:
           path: info["DB_HOST"].annotations["exposure"]
           value: main
-  - it: 'C-TOK: an annotation value is never validated — arbitrary values are allowed'
+  - it: 'C-10: an annotation value is never validated — arbitrary values are allowed'
     set:
       target: prod
       tokens:
@@ -926,7 +926,7 @@ tests:
       - equal:
           path: info["EXPOSED"].annotations["exposure"]
           value: bogus-value
-  - it: 'C-TOK: an annotation on a system (locked) token is preserved after merge'
+  - it: 'C-10: an annotation on a system (locked) token is preserved after merge'
     set:
       target: prod
       system:
@@ -944,7 +944,7 @@ tests:
       - equal:
           path: info["LOCKED_VAR"].annotations["exposure"]
           value: lib-value
-  - it: 'C-TOK: a token declaring ONLY an annotation, no target entries at all, produces the ordinary "no value found" error'
+  - it: 'C-10: a token declaring ONLY an annotation, no target entries at all, produces the ordinary "no value found" error'
     set:
       target: prod
       tokens:
@@ -972,7 +972,7 @@ tests:
       - equal:
           path: info["BROKEN"].annotations["exposure"]
           value: main
-  - it: 'C-TOK: an annotation token can still chain off another token''s value normally'
+  - it: 'C-10: an annotation token can still chain off another token''s value normally'
     set:
       target: prod
       tokens:
@@ -1000,7 +1000,7 @@ tests:
       - equal:
           path: info["DB_HOST"].annotations["exposure"]
           value: main
-  - it: 'C-TOK: a locked (system) token collision discards the user value and records a WARNING'
+  - it: 'C-9: a locked (system) token collision discards the user value and records a WARNING'
     set:
       target: prod-01
       system:
@@ -1018,7 +1018,7 @@ tests:
           value: locked.example.com
       - exists:
           path: diagnostics.warning[?(@ =~ /token\ 'API_GROUP'\ is\ reserved\ by\ the\ library\ and\ was\ overridden\ back\ to\ the\ library\ value/)]
-  - it: 'C-TOK: a system (locked) token can declare a structural value — same recursive substitution as any token, and it still can''t be overridden by the user'
+  - it: 'C-9: a system (locked) token can declare a structural value — same recursive substitution as any token, and it still can''t be overridden by the user'
     set:
       target: prod
       tokens:
@@ -1046,7 +1046,7 @@ tests:
             locked: true
       - exists:
           path: diagnostics.warning[?(@ =~ /token\ 'CONFIG'\ is\ reserved\ by\ the\ library\ and\ was\ overridden\ back\ to\ the\ library\ value/)]
-  - it: 'C-TOK: a default token can be overridden by the user with no diagnostic'
+  - it: 'C-11: a default token can be overridden by the user with no diagnostic'
     set:
       target: prod-01
       defaults:
@@ -1066,7 +1066,7 @@ tests:
           path: diagnostics.warning
       - notExists:
           path: diagnostics.error
-  - it: 'C-TOK: a default token''s structural value can be overridden by the user''s own structural value, with no diagnostic'
+  - it: 'C-11: a default token''s structural value can be overridden by the user''s own structural value, with no diagnostic'
     set:
       target: prod
       defaults:
@@ -1093,7 +1093,7 @@ tests:
           path: diagnostics.warning
       - notExists:
           path: diagnostics.error
-  - it: 'C-TOK: ''AT'' is crdkit''s one reserved built-in name — user-supplied tokens.AT is discarded with a WARNING'
+  - it: 'C-9: ''AT'' is crdkit''s one reserved built-in name — user-supplied tokens.AT is discarded with a WARNING'
     set:
       target: prod-01
       tokens:
@@ -1102,7 +1102,7 @@ tests:
     asserts:
       - exists:
           path: diagnostics.warning[?(@ =~ /token\ 'AT'\ is\ a\ reserved\ built\-in\ and\ cannot\ be\ redefined;\ the\ user\-supplied\ value\ was\ ignored/)]
-  - it: 'C-TOK: token names are not checked by crdkit (naming policy belongs to the library)'
+  - it: 'C-8: token names are not checked by crdkit (naming policy belongs to the library)'
     set:
       target: prod-01
       tokens:
@@ -1120,7 +1120,7 @@ tests:
           value: hello
       - notExists:
           path: diagnostics.warning
-  - it: 'C-TOK: GOTCHA: a differently-cased near-miss of a locked name is NOT blocked as a collision'
+  - it: 'C-9: GOTCHA: a differently-cased near-miss of a locked name is NOT blocked as a collision'
     set:
       target: prod-01
       system:
@@ -1138,7 +1138,7 @@ tests:
           value: not-actually-blocked
       - notExists:
           path: diagnostics.warning
-  - it: 'C-TOK: crdkit.token.add against an existing scalar-normalized token (''default'') MERGES a new dedicated attribute in, preserving ''default'' as the fallback for every other target'
+  - it: 'C-14: crdkit.token.add against an existing scalar-normalized token (''default'') MERGES a new dedicated attribute in, preserving ''default'' as the fallback for every other target'
     set:
       target: prod-01
       tokens:
@@ -1154,7 +1154,7 @@ tests:
       - equal:
           path: tv["EXISTING"]
           value: now-dedicated-for-prod-01
-  - it: 'C-TOK: crdkit.token.add stores ''value'' as a DEDICATED ATTRIBUTE (a literal key equal to the exact target) — not resolved at add-time'
+  - it: 'C-14: crdkit.token.add stores ''value'' as a DEDICATED ATTRIBUTE (a literal key equal to the exact target) — not resolved at add-time'
     set:
       target: prod-01
       tokens:
@@ -1170,7 +1170,7 @@ tests:
       - equal:
           path: tv["DERIVED_VAR"]
           value: prefix-hello
-  - it: 'C-TOK: a token.add-added token resolves lazily via its dedicated attribute, exactly like any hand-declared token, once actually referenced'
+  - it: 'C-14: a token.add-added token resolves lazily via its dedicated attribute, exactly like any hand-declared token, once actually referenced'
     set:
       target: prod-01
       tokens:
@@ -1186,7 +1186,7 @@ tests:
       - equal:
           path: structure.x
           value: prefix-hello
-  - it: 'C-TOK: a token.add-added token has no fallback for a target it was never given a value for, and no parentTargetMap configured'
+  - it: 'C-14: a token.add-added token has no fallback for a target it was never given a value for, and no parentTargetMap configured'
     set:
       target: prod-01
       ops:
@@ -1201,7 +1201,7 @@ tests:
     asserts:
       - exists:
           path: diagnostics.error[?(@ =~ /no\ value\ found\ for\ 'DERIVED_VAR'\ —\ target\ chain\ exhausted\ at\ 'qa'\ starting\ from\ 'qa'/)]
-  - it: 'C-TOK: a second crdkit.token.add call for the SAME name but a DIFFERENT target adds another dedicated attribute, preserving the first'
+  - it: 'C-14: a second crdkit.token.add call for the SAME name but a DIFFERENT target adds another dedicated attribute, preserving the first'
     set:
       target: prod-01
       ops:
@@ -1219,7 +1219,7 @@ tests:
       - equal:
           path: tv["DERIVED_VAR"]
           value: prod-value
-  - it: 'C-TOK: a second crdkit.token.add call for the SAME (name, target) pair overwrites in place'
+  - it: 'C-14: a second crdkit.token.add call for the SAME (name, target) pair overwrites in place'
     set:
       target: prod-01
       ops:
@@ -1237,7 +1237,7 @@ tests:
       - equal:
           path: tv["DERIVED_VAR"]
           value: second-value
-  - it: 'C-TOK: a second crdkit.token.add call with annotations overwrites existing annotation keys and adds new ones'
+  - it: 'C-14: a second crdkit.token.add call with annotations overwrites existing annotation keys and adds new ones'
     set:
       target: prod-01
       annotations:
@@ -1281,7 +1281,7 @@ tests:
       - equal:
           path: tv["DERIVED_VAR"]
           value: prod-value-2
-  - it: 'C-TOK: crdkit.token.add''s value chain-resolves against the FINAL state of ctx.tokens — a value referencing a token added by a LATER token.add call still resolves'
+  - it: 'C-14: crdkit.token.add''s value chain-resolves against the FINAL state of ctx.tokens — a value referencing a token added by a LATER token.add call still resolves'
     set:
       target: prod-01
       ops:
@@ -1297,7 +1297,7 @@ tests:
       - equal:
           path: structure.x
           value: uses-computed-later
-  - it: 'C-TOK: crdkit.token.add can silently overwrite an existing token, including a locked one — no protection, by design'
+  - it: 'C-14: crdkit.token.add can silently overwrite an existing token, including a locked one — no protection, by design'
     set:
       target: prod-01
       system:
@@ -1313,7 +1313,7 @@ tests:
       - equal:
           path: tv["API_GROUP"]
           value: overwritten-by-integration
-  - it: 'C-TOK: crdkit.token.add warns on a non-conforming name and errors if annotations is not a dict'
+  - it: 'C-14: crdkit.token.add warns on a non-conforming name and errors if annotations is not a dict'
     set:
       target: prod-01
       ops:
@@ -1326,7 +1326,7 @@ tests:
       - lengthEqual:
           path: diagnostics.error
           count: 1
-  - it: 'C-TOK: system token replaces consumer token wholesale; collision warning still fires'
+  - it: 'C-9: system token replaces consumer token wholesale; collision warning still fires'
     set:
       target: prod
       system:
@@ -1346,7 +1346,7 @@ tests:
           value: locked
       - exists:
           path: diagnostics.warning[?(@ =~ /token 'X' is reserved by the library/)]
-  - it: 'C-TOK: defaults deep-merge with user tokens; both keys preserved'
+  - it: 'C-9: defaults deep-merge with user tokens; both keys preserved'
     set:
       target: prod
       defaults:
@@ -1364,7 +1364,7 @@ tests:
       - equal:
           path: tv["Y"]
           value: u
-  - it: 'C-TOK: token with only default value renders correctly via fallback'
+  - it: 'C-11: token with only default value renders correctly via fallback'
     set:
       target: prod-01
       tokens:
@@ -1382,7 +1382,7 @@ tests:
       - equal:
           path: structure.value_of_default
           value: default value
-  - it: 'C-TOK: annotation on a defaults token is preserved after merge'
+  - it: 'C-10: annotation on a defaults token is preserved after merge'
     set:
       target: prod
       defaults:
@@ -1400,7 +1400,7 @@ tests:
       - equal:
           path: info["Y"].annotations["exposure"]
           value: x
-  - it: 'C-TOK: tokenOps ''resolve'' records the value resolved at that point in the op sequence'
+  - it: 'C-11: tokenOps ''resolve'' records the value resolved at that point in the op sequence'
     set:
       target: prod-01
       tokens:
@@ -1414,7 +1414,7 @@ tests:
       - equal:
           path: opsResolved["0"]
           value: hello
-  - it: 'C-TOK: a target equal to an annotation name does not hit the annotation key — default resolves'
+  - it: 'C-10: a target equal to an annotation name does not hit the annotation key — default resolves'
     set:
       target: owner
       tokens:
@@ -1434,7 +1434,7 @@ tests:
           value: d
       - notExists:
           path: diagnostics.error
-  - it: 'C-TOK: without the annotation declared, the same target hits the ''owner'' entry'
+  - it: 'C-10: without the annotation declared, the same target hits the ''owner'' entry'
     set:
       target: owner
       tokens:
@@ -1450,7 +1450,7 @@ tests:
       - equal:
           path: structure.v
           value: o
-  - it: 'C-TOK: reserved annotation names are honored on a chained @ref@ resolution (reservedKeys threaded to nested lookups)'
+  - it: 'C-10: reserved annotation names are honored on a chained @ref@ resolution (reservedKeys threaded to nested lookups)'
     set:
       target: owner
       tokens:
@@ -1469,7 +1469,7 @@ tests:
       - equal:
           path: structure.v
           value: pre-d
-  - it: 'C-TOK: reserved annotation names are honored in crdkit.token.value for a cross target and in tokenDef'
+  - it: 'C-31: reserved annotation names are honored in crdkit.token.value for a cross target and in tokenDef'
     set:
       target: prod
       tokens:
@@ -1511,7 +1511,7 @@ tests:
       - equal:
           path: tokenDefResolved["0"].value
           value: dd
-  - it: 'C-TOK: an annotation named ''match'' is rejected with an ERROR and ''match'' rules keep working'
+  - it: 'C-10: an annotation named ''match'' is rejected with an ERROR and ''match'' rules keep working'
     set:
       target: prod-07
       tokens:
@@ -1532,7 +1532,7 @@ tests:
           value: matched
       - exists:
           path: diagnostics.error[?(@ =~ /token\ annotation\ name\ 'match'\ collides\ with\ a\ crdkit\-reserved\ key\ and\ was\ ignored/)]
-  - it: 'C-TOK: an annotation named ''default'' is rejected with an ERROR and ''default'' keeps working as a fallback'
+  - it: 'C-10: an annotation named ''default'' is rejected with an ERROR and ''default'' keeps working as a fallback'
     set:
       target: anything
       tokens:
@@ -1551,7 +1551,7 @@ tests:
           value: d
       - exists:
           path: diagnostics.error[?(@ =~ /token\ annotation\ name\ 'default'\ collides\ with\ a\ crdkit\-reserved\ key\ and\ was\ ignored/)]
-  - it: 'C-TOK: a dependent token is re-resolved after crdkit.token.add changes the token it references'
+  - it: 'C-14: a dependent token is re-resolved after crdkit.token.add changes the token it references'
     set:
       target: prod-01
       tokens:
@@ -1584,7 +1584,7 @@ tests:
       - equal:
           path: tv["A"]["prod-01"]
           value: pre-new
-  - it: 'C-TOK: without a mutation, a second resolve is served from the cache (no repeated diagnostics)'
+  - it: 'C-13: without a mutation, a second resolve is served from the cache (no repeated diagnostics)'
     set:
       target: qa
       tokens:
@@ -1611,7 +1611,7 @@ tests:
           count: 1
       - exists:
           path: tv["X"]["qa"]
-  - it: 'C-TOK: a cache hit requires the exact target key — a cache holding only other targets does not short-circuit'
+  - it: 'C-13: a cache hit requires the exact target key — a cache holding only other targets does not short-circuit'
     set:
       target: prod-01
       tokens:
@@ -1644,7 +1644,7 @@ tests:
           value: two
       - exists:
           path: tv["X"]["prod-02"]
-  - it: 'C-TOK: a tokenDef structure is re-resolved after crdkit.token.add changes a token it references'
+  - it: 'C-14: a tokenDef structure is re-resolved after crdkit.token.add changes a token it references'
     set:
       target: prod-01
       tokens:
@@ -1671,7 +1671,7 @@ tests:
       - equal:
           path: opsResolved["1"]
           value: d-new
-  - it: 'C-TOK: a marker-holding default resolves per target in one render (prod-01, then prodp) — never cached at a rung'
+  - it: 'C-12: a marker-holding default resolves per target in one render (prod-01, then prodp) — never cached at a rung'
     set:
       target: prod-01
       tokens:
@@ -1714,7 +1714,7 @@ tests:
       - equal:
           path: tv["KS"]["prod"]
           value: p
-  - it: 'C-TOK: a marker-holding default resolves per target in one render (prodp, then prod-01)'
+  - it: 'C-11: a marker-holding default resolves per target in one render (prodp, then prod-01)'
     set:
       target: prod-01
       tokens:
@@ -1746,7 +1746,7 @@ tests:
       - equal:
           path: opsResolved["1"]
           value: p/c
-  - it: 'C-TOK: a marker-holding entry found at a shared rung substitutes per target; a map entry is checked as a whole'
+  - it: 'C-12: a marker-holding entry found at a shared rung substitutes per target; a map entry is checked as a whole'
     set:
       target: qa
       tokens:
@@ -1805,7 +1805,7 @@ tests:
           value:
             url: y-c
             port: 8080
-  - it: 'C-TOK: a marker-free entry above the target is cached at every rung walked; a later target reaching that rung gets the same value'
+  - it: 'C-12: a marker-free entry above the target is cached at every rung walked; a later target reaching that rung gets the same value'
     set:
       target: prod-01
       tokens:
@@ -1834,7 +1834,7 @@ tests:
           value:
             host: h
             port: 443
-  - it: 'C-TOK: a user declaration with ''_generated'' loses the key, warns, and still resolves'
+  - it: 'C-8: a user declaration with ''_generated'' loses the key, warns, and still resolves'
     set:
       target: prod-01
       tokens:
@@ -1853,7 +1853,7 @@ tests:
       - equal:
           path: structure.v
           value: d
-  - it: 'C-TOK: a defaults declaration with ''_value'' loses the key, warns, and the poisoned cache is never served'
+  - it: 'C-9: a defaults declaration with ''_value'' loses the key, warns, and the poisoned cache is never served'
     set:
       target: prod-01
       defaults:
@@ -1872,7 +1872,7 @@ tests:
       - equal:
           path: structure.v
           value: d
-  - it: 'C-TOK: a system declaration with ''_gen'' loses the key, warns, and still resolves'
+  - it: 'C-9: a system declaration with ''_gen'' loses the key, warns, and still resolves'
     set:
       target: prod-01
       system:
@@ -1890,7 +1890,7 @@ tests:
       - equal:
           path: structure.v
           value: locked
-  - it: 'C-TOK: every internal key present is reported separately, and the declaration keeps its other keys'
+  - it: 'C-8: every internal key present is reported separately, and the declaration keeps its other keys'
     set:
       target: prod-01
       tokens:
@@ -1914,7 +1914,7 @@ tests:
       - equal:
           path: info["X"].annotations["exposure"]
           value: e
-  - it: 'C-TOK: underlay on a missing token creates it with ''_generated'' for the target plus the annotations, and it resolves'
+  - it: 'C-15: underlay on a missing token creates it with ''_generated'' for the target plus the annotations, and it resolves'
     set:
       target: prod-01
       annotations:
@@ -1941,7 +1941,7 @@ tests:
       - equal:
           path: info["X"].annotations["owner"]
           value: svc
-  - it: 'C-TOK: a consumer ''default'' wins over a generated value'
+  - it: 'C-11: a consumer ''default'' wins over a generated value'
     set:
       target: prod-01
       tokens:
@@ -1958,7 +1958,7 @@ tests:
       - equal:
           path: structure.v
           value: d
-  - it: 'C-TOK: a consumer entry reached through the parent walk wins over a generated value'
+  - it: 'C-12: a consumer entry reached through the parent walk wins over a generated value'
     set:
       target: prod-01
       tokens:
@@ -1977,7 +1977,7 @@ tests:
       - equal:
           path: structure.v
           value: p
-  - it: 'C-TOK: a generated value is used when the consumer declaration has no entry reachable from the target'
+  - it: 'C-8: a generated value is used when the consumer declaration has no entry reachable from the target'
     set:
       target: dev-01
       tokens:
@@ -1996,7 +1996,7 @@ tests:
           value: g
       - notExists:
           path: diagnostics.error
-  - it: 'C-TOK: a generated value for one target is not visible to another target'
+  - it: 'C-11: a generated value for one target is not visible to another target'
     set:
       target: prod-01
       ops:
@@ -2014,7 +2014,7 @@ tests:
           count: 1
       - exists:
           path: diagnostics.error[?(@ =~ /no value found for 'X'/)]
-  - it: 'C-TOK: a value resolved from ''_generated'' is cached under the exact target only, never under walked rungs'
+  - it: 'C-12: a value resolved from ''_generated'' is cached under the exact target only, never under walked rungs'
     set:
       target: prod-01
       ladder:
@@ -2039,7 +2039,7 @@ tests:
           value: g
       - exists:
           path: tv["X"]["prod-01"]
-  - it: 'C-TOK: a generated value does not leak through a shared rung to a sibling target'
+  - it: 'C-12: a generated value does not leak through a shared rung to a sibling target'
     set:
       target: prod-01
       ladder:
@@ -2066,7 +2066,7 @@ tests:
       - lengthEqual:
           path: diagnostics.error
           count: 1
-  - it: 'C-TOK: underlay annotations never overwrite existing ones and fill missing ones'
+  - it: 'C-15: underlay annotations never overwrite existing ones and fill missing ones'
     set:
       target: prod-01
       tokens:
@@ -2097,7 +2097,7 @@ tests:
       - equal:
           path: info["X"].annotations["exposure"]
           value: main
-  - it: 'C-TOK: a second underlay for the same target overwrites the first generated value'
+  - it: 'C-15: a second underlay for the same target overwrites the first generated value'
     set:
       target: prod-01
       ops:
@@ -2113,7 +2113,7 @@ tests:
       - equal:
           path: structure.v
           value: second
-  - it: 'C-TOK: underlay bumps the generation — a dependent token resolved earlier is re-resolved'
+  - it: 'C-15: underlay bumps the generation — a dependent token resolved earlier is re-resolved'
     set:
       target: prod-01
       tokens:
@@ -2138,7 +2138,7 @@ tests:
       - lengthEqual:
           path: diagnostics.error
           count: 1
-  - it: 'C-TOK: underlay accepts any token name without a diagnostic'
+  - it: 'C-15: underlay accepts any token name without a diagnostic'
     set:
       target: prod-01
       ops:
@@ -2147,7 +2147,7 @@ tests:
     asserts:
       - notExists:
           path: diagnostics.warning
-  - it: 'C-TOK: underlay with non-dict annotations records an ERROR and still stores the generated value'
+  - it: 'C-15: underlay with non-dict annotations records an ERROR and still stores the generated value'
     set:
       target: prod-01
       ops:
@@ -2157,7 +2157,7 @@ tests:
     asserts:
       - exists:
           path: diagnostics.error[?(@ =~ /annotations\ must\ be\ a\ dict\ —\ ignored/)]
-  - it: 'C-TOK: crdkit.token.add on a token with generated values keeps ''_generated''; an added entry beats it'
+  - it: 'C-14: crdkit.token.add on a token with generated values keeps ''_generated''; an added entry beats it'
     set:
       target: prod-01
       ops:
@@ -2183,7 +2183,7 @@ tests:
       - equal:
           path: opsResolved["1"]
           value: added
-  - it: 'C-TOK: a generated value may itself reference other tokens'
+  - it: 'C-11: a generated value may itself reference other tokens'
     set:
       target: prod-01
       tokens:
@@ -2199,7 +2199,7 @@ tests:
       - equal:
           path: structure.v
           value: x-bee
-  - it: 'C-TOK: a bare scalar declaration resolves as a default entry'
+  - it: 'C-8: a bare scalar declaration resolves as a default entry'
     set:
       target: prod-01
       tokens:
@@ -2212,7 +2212,7 @@ tests:
       - equal:
           path: tv
           value: hello
-  - it: 'C-TOK: a system declaration replaces the consumer''s wholesale'
+  - it: 'C-9: a system declaration replaces the consumer''s wholesale'
     set:
       target: prod
       system:
@@ -2230,7 +2230,7 @@ tests:
       - equal:
           path: tv
           value: locked
-  - it: 'C-TOK: underlays for different targets accumulate'
+  - it: 'C-15: underlays for different targets accumulate'
     set:
       target: prod-01
       ops:

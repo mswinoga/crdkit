@@ -8,8 +8,7 @@ Libraries built on crdkit (e.g. mdeploy) depend on it via `file://`.
 
 - `templates/` — the engine.
 - `tests/` — the test framework (`tests/stub`, `tests/suites`,
-  `tests/fixtures`) and the legacy suites (`tests/*_test.yaml`, run on
-  `harness/`). See "Testing".
+  `tests/fixtures`). See "Testing".
 - `scripts/lint.sh` — text lint for library templates, also run by
   mdeploy.
 
@@ -134,11 +133,12 @@ from the templates alone.
   - `parentTargetTemplate`: an externally-implemented hook, called with
     a fixed `{target, context}` shape.
 - Internal-only helpers carry a `.internal` suffix:
-  `markerPattern.internal`, `resolveEntry.internal`,
+  `resolveEntry.internal`,
   `substituteText.internal`, `substituteStructure.internal`,
   `tokens.substituteMarkers.internal`, `stringify.internal`,
-  `tokens.merge.internal`, `renderDiagnostics.internal`,
-  `reservedKeys.internal`, and the `crdkit.schema.*.internal` helpers
+  `tokens.merge.internal`, `reservedKeys.internal`,
+  `regexValid.internal`, `tokenPrologue.internal`, `locate.internal`,
+  `checkMemo.internal`, `snapshotCtx.internal`, and the `crdkit.schema.*.internal` helpers
   (`path`, `shape`, `perTarget`, `checkNode`, `scalarReason`, `walk`,
   `resolveAndCheck`, `valuesWalk`, `mdNode`, `mdSkeleton`, `mdRow`, `mdTable`, `mdType`, `mdDoc`, `mdCaseExample`, `generatedExample`, `order`, `orderedKeys`,
   `ref`, `examples`, `sectionProblem`, `sectionMarkdown`, `jsonNode`,
@@ -157,14 +157,17 @@ from the templates alone.
   recorded through `crdkit.diag.error`/`crdkit.diag.warning`.
   The deliberate exception is a specific library's final decision after
   the render: mdeploy's `mdeploy.render`, in deploy mode with errors, fails
-  with the collected diagnostics. A second deliberate exception: an
-  invalid regex in a `match:` rule aborts the render.
-  `crdkit.matchRules` uses `mustRegex*` — a template cannot catch the
-  error, and the non-`must` variants would make the rule silently never
-  match. Apart from these two, crdkit and every helper only collect.
-  `crdkit.render` takes an optional `diag` seed (`{errors, warnings}`,
-  missing lists filled in); crdkit only transports seeded entries and
-  emits them with its own.
+  with the collected diagnostics. A second deliberate exception: a
+  library-owned regex (schema `pattern`/`keys.pattern`) aborts —
+  `crdkit.matchRules` uses `mustRegex*` there because a template cannot
+  catch the error, and the non-`must` variants would make the pattern
+  silently never match. A CONSUMER `match:` rule is validated first
+  (`crdkit.regexValid.internal`) and an invalid one is an ERROR naming
+  the rule, skipped — never a non-`must` match on an unchecked pattern.
+  Apart from these two, crdkit and every helper only collect.
+  `crdkit.render` takes an optional `diag` seed (`{errors, warnings,
+  infos}`, any subset; missing lists are created); crdkit only
+  transports seeded entries and emits them with its own.
 - `crdkit.render` takes an optional `state` dict: its keys are copied
   into `ctx` (a key colliding with a crdkit `ctx` key → ERROR, ignored).
   Library-owned data for integrations; crdkit never reads it.
@@ -172,7 +175,9 @@ from the templates alone.
   (`crdkit.render`'s `tokenAnnotations` param) — metadata on token
   declarations, unrelated to Kubernetes annotations. crdkit stores them as
   reserved declaration keys and never interprets, resolves or validates
-  a name or value; policy (validation, locking, widening) belongs to
+  a name or value. Libraries use `crdkit.token.annotate` /
+  `crdkit.token.info` / `crdkit.token.names`; the declaration storage
+  shape is not contract. Policy (validation, locking, widening) belongs to
   the library.
 - No concept of "env"/"family"/"tier" — `target` is an opaque string. A
   specific library implements its own `@ENV@`-style token or "target
@@ -371,9 +376,14 @@ in the file-level doc comment of `templates/_schema.tpl`.
   `ternary .seen (dict) (kindIs "map" .seen)`, never `.seen | default
   dict`: an empty dict is falsy, so `default` would replace the
   caller's shared dict with a fresh one.
-- `pattern`/`keys.pattern` use `mustRegexMatch` — an invalid regex
-  aborts, like `match:`. A key failing `keys.pattern` → ERROR, dropped
-  with its value.
+- `pattern`/`keys.pattern` use `mustRegexMatch` — an invalid
+  library-owned regex aborts. A key failing `keys.pattern` → ERROR,
+  dropped with its value. A `keys` map key that is a YAML 1.1 boolean
+  word (`y/n/yes/no/on/off/true/false`, any case) → ERROR naming the
+  parsed key, dropped, checked before the pattern.
+- Consumer `match:` rules are validated in the structural pass
+  (`crdkit.regexValid.internal`); an invalid one is an ERROR naming
+  `'<path>.match[<i>]'` and is dropped.
 - `keys.label` (optional string) is a documentation-only placeholder for
   a key matched by `values` (e.g. `<ID>`; default `<key>`); the self-check
   verifies it is a string, validation ignores it.
@@ -462,7 +472,7 @@ title?, htmlLink?, id?, diag}`) is the one entry point: it makes one
   never before — a token can have both a `default` entry and a
   taxonomy-reachable one, and the more specific value must win.
 - Marker syntax: `@[A-Za-z0-9_.]+@`, defined once by
-  `crdkit.markerPattern.internal`; every marker match (substitution,
+  `crdkit.markerPattern`; every marker match (substitution,
   unresolved scan, schema checks, JSON Schema `markers`) uses it. The
   `.` lets a library namespace token names (`<ID>.<field>`) and lets
   its relative form (`@.x@`) count as a marker in the schema passes.
@@ -485,9 +495,8 @@ title?, htmlLink?, id?, diag}`) is the one entry point: it makes one
 
 ## Testing
 
-`command make test` runs `deps` (dependency update of `harness` and
-`tests/stub`, not transitive), the legacy suites, the framework suites
-and the lint.
+`command make test` runs `deps` (dependency update of `tests/stub`,
+not transitive), the framework suites and the lint.
 
 ### Framework
 
@@ -503,9 +512,17 @@ Layout:
     does; `reportSeed: true` appends `seed: {errors: <n>}` (the caller's
     seed after the render).
   - `stub.ops`, the only chain entry, runs `.Values.ops` in order:
-    `{put: [k1..kN], value}`, `{add|underlay: name, value,
-    annotations?, target?}`, `{diag: error|warning|info, msg}`,
-    `{resolve: [keys], at: [k1..kN]}` (`crdkit.schema.resolve`).
+    `put`/`listExtend`/`ensureDictKey`/`hasPath` (model helpers);
+    `add`/`underlay`/`annotate` (token writes); `tokenValue`/`tokenString`
+    (with `target?`); `tokenDef`; `substitute`; `matchRules`;
+    `info`/`names`/`markers`/`markerPattern`; `diag`/`diagLines`/
+    `diagCount`; `state`; and the schema ops `check`, `validate`,
+    `validateValues`, `resolve`, `schemaValue`, `node`, `path`;
+    `labels`/`dependencyVersion`/`name`. `at` writes the result at a
+    model path, so the final substitution applies to it.
+  - `templates/docs.yaml`: `stub.docs` renders
+    `crdkit.schema.document` from `.Values.docs` (gated; no `docs` key →
+    nothing), `text` + decoded `json`, through the adapter.
   - `templates/_adapter.tpl`: `test.withDiagnostics` prints the render,
     then its `# ERROR|WARNING|INFO:` lines as data under
     `diagnostics: {error, warning, info}` (a level key only when it has
@@ -534,15 +551,17 @@ Assert rules:
   a string); Helm reads values files as YAML 1.1.
 
 Lint `scripts/lint.sh [--fail-define <define>] [--pending <file>]
-<templates dir>` (POSIX sh + awk; `{{/* … */}}` comments skipped; every
-file under the dir):
+[--regex-check-define <define>] <templates dir>` (POSIX sh + awk;
+`{{/* … */}}` comments skipped; every file under the dir):
 - Rules: `accumulator-default-dict` (`.diag`/`.seen`/`.acc`/`.out`/
   `.memo` piped to `default dict`), `fail-outside-render` (`fail`
   outside `--fail-define`; crdkit allows none),
   `unguarded-trailing-index` (a line that is only `{{- index A K -}}`
   without a preceding `if hasKey A K`), `non-must-regex-user-pattern`
   (a `regex*` call whose pattern is not a literal, a `$<name>Re` local
-  or `crdkit.markerPattern.internal`).
+  or `crdkit.markerPattern`). `--regex-check-define` allows a variable
+  pattern inside that define — crdkit passes
+  `crdkit.regexValid.internal`, the one validity probe.
 - Output: `FAIL <rule> <file>:<line>: <text>`, `PENDING (<reason>) …`,
   `FIXED? (<reason>) <rule> <file>` (a pending entry without a hit),
   then `lint.sh: <n> hits, <f> failed, <p> pending`. Exit 0 clean, 1 on
@@ -553,33 +572,12 @@ file under the dir):
 - A rule must have zero false positives on current code; a rule that
   cannot is dropped, never given an exception list.
 
-### Legacy suites
-
-Being migrated to the framework; edit only to keep green.
-- `harness/` + `tests/*_test.yaml` (`helm unittest harness -f
-  '../tests/*_test.yaml'`) exercise crdkit's helpers directly;
-  `tests/render_test.yaml` drives `crdkit.render` via a stand-in
-  preamble.
-- Data-driven ops (`tokenOps`, `stringOps`, `tokenDefOps`, `modelOps`,
-  `crossTargets`/`crossTargetNames` → `crossResolved`): doc comment of
-  `harness/templates/test.yaml`; `tokenAnnotations` (values) feeds
-  `reservedKeys.internal`, `diagSeed` seeds `crdkit.render`'s `diag`.
-- Schema: `harness/templates/schema_test.yaml` (`schemaOps`), suite
-  `tests/schema_test.yaml`; `render_test.yaml` exposes the `state` seed
-  as `renderState` (`model.state`, `model.stateErrors`).
-- A token must be "used" before asserting its shape
-  (`structure.x: "@NAME@"` or `crossTargets`); cache behavior through
-  `tokenOps` with `resolve` between mutations, asserting
-  `tokens.NAME._value`/`_gen`.
-- Diagnostics lists with 2+ messages: `lengthEqual` + one `contains`
-  per message, exact text (`tests/diag_test.yaml` asserts append order).
-
 Sharp edges:
 - helm-unittest's `set:` cannot index arrays (`modelOps[0].op`) — set
   the whole array.
 - helm-unittest creates an empty `__snapshot__/` beside every suite
   (git-ignored).
-- `.helmignore` must exclude `harness/`, `tests/`, `scripts/` and
+- `.helmignore` must exclude `tests/`, `scripts/` and
   `__snapshot__/` (`.gitignore` does not affect `helm package` /
   `helm dependency update`; without it a downstream dependency update
   repackages the whole tree). Helm rejects `**`; a pattern without an

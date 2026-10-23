@@ -49,8 +49,8 @@ Interface:
 - Returns: "" (a bare `include` is safe)
 
 Implementation notes:
-- Creates `diag.infos` when missing: callers seed `{errors, warnings}`
-  only.
+- Creates `diag.infos` when missing: a seed may carry any subset of
+  the three lists.
 */}}
 {{- define "crdkit.diag.info" -}}
 {{- $diag := index . 0 -}}

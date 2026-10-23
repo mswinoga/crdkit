@@ -6,7 +6,8 @@ dispatcher for a specific library's "integration" templates.
 
 Interface:
 - Params (dict): { "chain": <list of fully-qualified template names>,
-  "ctx": <root/diag/model/tokens/target dict>, "trace": <optional
+  "ctx": <the ctx crdkit.render builds — see its doc comment>,
+  "trace": <optional
   caller-owned dict> }
 - Returns: nothing (each integration mutates `ctx` in place).
 
@@ -16,9 +17,8 @@ Implementation notes:
   met by splitting the integration into separate chain entries instead.
 - `ctx` is a shared, mutate-in-place accumulator (same discipline as
   `$diag`) — never rebuilt or copied here.
-- Chain entry names are the caller's own naming (e.g.
-  `"mdeploy.integrations.services"`) — crdkit never needs to know another
-  chart's convention.
+- Chain entry names are the caller's own naming — crdkit never needs
+  to know another chart's convention.
 - With `trace`, appends to `trace.stages` (created when missing):
   `{entry: "", ctx}` before the first entry, then `{entry: <template
   name>, ctx}` after each — a snapshot via

@@ -1076,7 +1076,7 @@ tests:
           path: diagnostics.error[?(@ =~ /<scalar>\}/)]
       - exists:
           path: diagnostics.error[?(@ =~ /true'/)]
-  - it: 'C-22: a per-target value valid for the target records nothing'
+  - it: 'C-23 C-22: a per-target value valid for the target records nothing'
     set:
       target: prod
       ops:
@@ -1143,7 +1143,7 @@ tests:
           path: diagnostics.error[?(@ =~ /'id'\ for\ target\ 'prod'\ must\ match\ '\^\[a\-z\]\+\$'\ —\ got\ 'X1'/)]
       - exists:
           path: diagnostics.error[?(@ =~ /'mode'\ for\ target\ 'prod'\ must\ be\ one\ of\ 'a',\ 'b'\ —\ got\ 'c'/)]
-  - it: 'C-22: type checks use "parses as": a numeric string and a marker-built number pass type int, a non-bool string fails bool'
+  - it: 'C-23 C-22: type checks use "parses as": a numeric string and a marker-built number pass type int, a non-bool string fails bool'
     set:
       target: prod
       tokens:
@@ -1266,7 +1266,7 @@ tests:
           count: 1
       - exists:
           path: diagnostics.error[?(@ =~ /no\ value\ found\ for\ 'count'\ —\ target\ chain\ exhausted\ at\ 'prod'\ starting\ from\ 'prod'/)]
-  - it: 'C-22: the value pass follows a switch into the selected case'
+  - it: 'C-23 C-22: the value pass follows a switch into the selected case'
     set:
       target: prod
       ops:
@@ -1572,7 +1572,7 @@ tests:
           count: 1
       - exists:
           path: diagnostics.error[?(@ =~ /'application\.services\.APP\.count'\ for\ target\ 'qap1'\ must\ be\ of\ type\ 'int'\ —\ got\ 'x'/)]
-  - it: 'C-19: crdkit.schema.node follows properties, values, list indices and switches'
+  - it: 'C-26: crdkit.schema.node follows properties, values, list indices and switches'
     set:
       ops:
         - node:
@@ -1768,7 +1768,7 @@ tests:
       - equal:
           path: r4.found
           value: false
-  - it: 'C-19: crdkit.schema.path spells keys dotted, keys with "." in brackets, numbers as indices'
+  - it: 'C-26: crdkit.schema.path spells keys dotted, keys with "." in brackets, numbers as indices'
     set:
       ops:
         - path:
