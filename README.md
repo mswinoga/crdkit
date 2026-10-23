@@ -21,7 +21,7 @@ contract.
 # mdeploy's Chart.yaml
 dependencies:
   - name: crdkit
-    version: "0.2.0"
+    version: "0.2.1"
     repository: "file://../crdkit"
 ```
 
@@ -715,8 +715,13 @@ aid):
 page: no external request, system fonts, light and dark through
 `prefers-color-scheme`, opens from disk.
 - The schema is embedded as `<script type="application/json"
-  id="crdkit-schema">`; the viewer shell is fixed, so a schema or
-  example change changes only the embedded JSON.
+  id="crdkit-schema">` and, beside it, a view model as `<script
+  type="application/json" id="crdkit-view">`: one item per tree row
+  (path, label, type, per-target kind, declaration keys, doc, examples,
+  sections) and one record per switch, built by
+  `crdkit.schema.viewModel.internal`. The viewer shell is fixed, so a
+  schema or example change changes only the two embeds; the JS renders,
+  filters and searches the view model and derives none of it.
 - A tree of keys in schema order (type, required, per-target, default,
   first line of `doc`), switch cases as rows with their own pages,
   search, and a URL fragment per node path.
@@ -760,8 +765,14 @@ Layout and assert rules: `CONTRIBUTING.md` "Testing".
 
 - `tests/suites/` — helm-unittest suites through `tests/stub`, a
   minimal library on crdkit's public API.
-- `scripts/lint.sh` — text lint of `templates/` (mdeploy runs it on its
-  own templates).
+- `scripts/lint.sh` — template lint of `templates/` (text, boundary
+  and extractor rules; mdeploy runs it on its own templates).
+- `make docs` — rewrites `docs/defines.md`, the generated per-define
+  reference (callers, calls, ctx effects, doc comments); `make test`
+  diffs a fresh copy.
+- `scripts/extract.py` — the extractor behind the lint and the
+  reference; `graph` writes the call-graph data the workspace viewers
+  load.
 - `tests/requirements.md` — the requirement catalogue (C- ids) the
   tests cite.
 - `scripts/trace.sh [<file>|-]` — human-readable diff of a `trace`
