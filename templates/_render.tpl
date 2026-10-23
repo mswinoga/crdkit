@@ -53,7 +53,7 @@ Implementation notes:
   finds nothing.
 */}}
 {{- define "crdkit.render" -}}
-{{- $diag := .diag | default dict -}}
+{{- $diag := ternary .diag (dict) (kindIs "map" .diag) -}}
 {{- if not (hasKey $diag "errors") -}}
   {{- $diag = set $diag "errors" (list) -}}
 {{- end -}}

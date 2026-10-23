@@ -13,7 +13,7 @@ Interface:
 */}}
 {{- define "crdkit.diag.error" -}}
 {{- $diag := index . 0 -}}
-{{- $_ := set $diag "errors" (append $diag.errors (index . 1)) -}}
+{{- $_ := set $diag "errors" (append (get $diag "errors" | default list) (index . 1)) -}}
 {{- end -}}
 
 {{/*
@@ -32,7 +32,7 @@ Interface:
 */}}
 {{- define "crdkit.diag.warning" -}}
 {{- $diag := index . 0 -}}
-{{- $_ := set $diag "warnings" (append $diag.warnings (index . 1)) -}}
+{{- $_ := set $diag "warnings" (append (get $diag "warnings" | default list) (index . 1)) -}}
 {{- end -}}
 
 {{/*
