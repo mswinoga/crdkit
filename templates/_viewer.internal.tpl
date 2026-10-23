@@ -4,19 +4,341 @@ comment for the overview and dependency graph.
 */}}
 
 {{/*
+crdkit.schema.viewModel.internal (internal)
+
+Builds the viewer's view model from a JSON Schema: one item per tree row,
+in the viewer's walk order, plus one record per switch.
+
+Interface:
+- Params (dict): { "json": <JSON Schema as a dict>, "out": <dict;
+  "items" and "switches" lists are appended in place> }
+- Returns: nothing (mutating helper).
+
+Implementation notes:
+- Values come from the defines the viewer mirrors no longer:
+  crdkit.schema.jsonType.internal, jsonPerTarget.internal,
+  jsonDeclaration.internal, generatedExample.internal, mdDoc.internal,
+  path.internal.
+- Items are appended in pre-order: a node before its children, a switch
+  case right after its switch; `parent` is the parent item's path (empty
+  at the root).
+- Examples stay values (not YAML text): the page renders them.
+*/}}
+{{- define "crdkit.schema.viewModel.internal" -}}
+{{- $json := .json -}}
+{{- $defs := $json.definitions | default dict -}}
+{{- $pairs := list -}}
+{{- if and (kindIs "slice" $json.examples) (gt (len $json.examples) 0) -}}
+  {{- $pairs = list (dict "keys" (list) "value" (first $json.examples)) -}}
+{{- end -}}
+{{- $root := dict
+      "node" $json "path" "" "label" (index $json "title" | default "Values") "parent" nil
+      "required" false "shared" false "labels" (list) "pairs" $pairs
+      "instances" (index $json "examples" | default list) "defs" $defs -}}
+{{- include "crdkit.schema.viewWalk.internal" (dict "spec" $root "out" .out) -}}
+{{- end -}}
+
+{{/*
+crdkit.schema.viewWalk.internal (internal)
+
+Walks one JSON Schema node into the view model: appends its item, a
+switch's cases or its child specs, in the viewer's order.
+
+Interface:
+- Params (dict): { "spec": <{node, path, label, parent, required, shared,
+  labels, pairs, instances, defs}>, "out": <the view model dict> }
+- Returns: nothing (mutating helper).
+*/}}
+{{- define "crdkit.schema.viewWalk.internal" -}}
+{{- $spec := .spec -}}
+{{- $out := .out -}}
+{{- $node := $spec.node -}}
+{{- $defs := $spec.defs -}}
+{{- $item := dict
+      "path" $spec.path "label" $spec.label "parent" $spec.parent
+      "type" (include "crdkit.schema.jsonType.internal" (dict "node" $node))
+      "perTarget" (include "crdkit.schema.jsonPerTarget.internal" (dict "node" $node))
+      "required" $spec.required "shared" $spec.shared
+      "summary" (first (splitList "\n" (index $node "description" | default "")))
+      "doc" (include "crdkit.schema.mdDoc.internal" (dict "node" $node))
+      "sections" (index $node "x-crdkit-sections" | default list)
+      "keywords" (include "crdkit.schema.viewKeywords.internal" (dict "node" $node) | fromYaml)
+      "examples" $spec.instances
+      "example" (dict "has" false) -}}
+{{- $generated := dict -}}
+{{- include "crdkit.schema.generatedExample.internal" (dict "node" $node "defs" $defs "out" $generated) -}}
+{{- $_ := set $item "example" (dict "has" $generated.has "value" $generated.value "generated" true) -}}
+{{- $decl := dict -}}
+{{- include "crdkit.schema.jsonDeclaration.internal" (dict "node" $node "defs" $defs "out" $decl) -}}
+{{- if hasKey $decl "targetKeys" -}}
+  {{- $_ := set $item "declarationKeys" (concat $decl.targetKeys (list "default" "match") $decl.annotations) -}}
+{{- end -}}
+{{- if hasKey $node "x-crdkit-switch" -}}
+  {{- $switch := index $node "x-crdkit-switch" -}}
+  {{- $record := dict "path" $spec.path "by" $switch.by "values" $switch.cases "title" (join "." (concat $spec.labels (list $switch.by))) -}}
+  {{- if hasKey $switch "unless" -}}
+    {{- $_ := set $record "unless" $switch.unless -}}
+  {{- end -}}
+  {{- $_ := set $out "switches" (append $out.switches $record) -}}
+  {{- $_ := set $out "items" (append $out.items $item) -}}
+  {{- $refs := index $switch "refs" | default dict -}}
+  {{- range $value := $switch.cases -}}
+    {{- $casePath := printf "%s[%s=%s]" $spec.path $switch.by $value -}}
+    {{- $caseNode := index $defs $casePath | default dict -}}
+    {{- if not $caseNode -}}
+      {{- $ref := index $refs (toString $value) | default "" -}}
+      {{- $caseNode = index $defs (last (splitList "/" $ref)) | default dict -}}
+    {{- end -}}
+    {{- $example := dict -}}
+    {{- include "crdkit.schema.viewCaseExample.internal" (dict "node" $caseNode "switch" $switch "value" $value "pairs" $spec.pairs "labels" $spec.labels "defs" $defs "out" $example) -}}
+    {{- $caseItem := dict
+          "path" $casePath "label" (toString $value) "parent" $spec.path
+          "type" (include "crdkit.schema.jsonType.internal" (dict "node" $caseNode))
+          "perTarget" (include "crdkit.schema.jsonPerTarget.internal" (dict "node" $caseNode))
+          "required" false "shared" false
+          "summary" (first (splitList "\n" (index $caseNode "description" | default "")))
+          "doc" (include "crdkit.schema.mdDoc.internal" (dict "node" $caseNode))
+          "sections" (index $caseNode "x-crdkit-sections" | default list)
+          "keywords" (include "crdkit.schema.viewKeywords.internal" (dict "node" $caseNode) | fromYaml)
+          "case" (dict "by" $switch.by "value" $value)
+          "example" $example -}}
+    {{- $caseDecl := dict -}}
+    {{- include "crdkit.schema.jsonDeclaration.internal" (dict "node" $caseNode "defs" $defs "out" $caseDecl) -}}
+    {{- if hasKey $caseDecl "targetKeys" -}}
+      {{- $_ := set $caseItem "declarationKeys" (concat $caseDecl.targetKeys (list "default" "match") $caseDecl.annotations) -}}
+    {{- end -}}
+    {{- $_ := set $out "items" (append $out.items $caseItem) -}}
+    {{- $instances := list -}}
+    {{- range $instance := $spec.instances -}}
+      {{- if and (kindIs "map" $instance) (hasKey $instance $switch.by) (eq (toString (index $instance $switch.by)) (toString $value)) -}}
+        {{- $instances = append $instances $instance -}}
+      {{- end -}}
+    {{- end -}}
+    {{- include "crdkit.schema.viewChildren.internal" (dict
+          "node" $caseNode "path" $casePath "labels" $spec.labels
+          "pairs" (list) "instances" $instances "defs" $defs "out" $out) -}}
+  {{- end -}}
+{{- else -}}
+  {{- $_ := set $out "items" (append $out.items $item) -}}
+  {{- include "crdkit.schema.viewChildren.internal" (dict
+        "node" $node "path" $spec.path "labels" $spec.labels
+        "pairs" $spec.pairs "instances" $spec.instances "defs" $defs "out" $out) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+crdkit.schema.viewChildren.internal (internal)
+
+Walks a node's children into the view model: its properties, then the
+`values` entries of the node's map value, then its list items.
+
+Interface:
+- Params (dict): { "node": <JSON Schema node>, "path": <its path>,
+  "labels": <key labels from the root to the node>, "pairs": <example
+  values at the node, each {keys, value}>, "instances": <example values
+  at the node>, "defs": <JSON Schema definitions>, "out": <the view
+  model dict> }
+- Returns: nothing (mutating helper).
+*/}}
+{{- define "crdkit.schema.viewChildren.internal" -}}
+{{- $node := .node -}}
+{{- $path := .path -}}
+{{- $defs := .defs -}}
+{{- $out := .out -}}
+{{- $type := include "crdkit.schema.jsonType.internal" (dict "node" $node) -}}
+{{- $core := $node -}}
+{{- if hasKey $node "anyOf" -}}
+  {{- $core = first $node.anyOf -}}
+{{- end -}}
+{{- $props := index $node "properties" | default dict -}}
+{{- $required := index $node "required" | default list -}}
+{{- $order := list -}}
+{{- range $k := (index $node "x-crdkit-order" | default list) -}}
+  {{- if hasKey $props $k -}}
+    {{- $order = append $order $k -}}
+  {{- end -}}
+{{- end -}}
+{{- range $k := keys $props | sortAlpha -}}
+  {{- if not (has $k $order) -}}
+    {{- $order = append $order $k -}}
+  {{- end -}}
+{{- end -}}
+{{- range $k := $order -}}
+  {{- $child := index $props $k -}}
+  {{- $pairs := list -}}
+  {{- if eq $type "map" -}}
+    {{- range $pair := $.pairs -}}
+      {{- if and (kindIs "map" $pair.value) (hasKey $pair.value $k) (not (kindIs "invalid" (index $pair.value $k))) -}}
+        {{- $pairs = append $pairs (dict "keys" (concat $pair.keys (list $k)) "value" (index $pair.value $k)) -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+  {{- $instances := list -}}
+  {{- range $instance := $.instances -}}
+    {{- if and (kindIs "map" $instance) (hasKey $instance $k) (not (kindIs "invalid" (index $instance $k))) -}}
+      {{- $instances = append $instances (index $instance $k) -}}
+    {{- end -}}
+  {{- end -}}
+  {{- include "crdkit.schema.viewWalk.internal" (dict "spec" (dict
+        "node" $child "path" (include "crdkit.schema.path.internal" (dict "path" $path "key" $k))
+        "label" $k "parent" $path "required" (has $k $required)
+        "shared" (eq (index $child "x-crdkit-shared") true)
+        "labels" (concat $.labels (list $k)) "pairs" $pairs
+        "instances" $instances "defs" $defs) "out" $out) -}}
+{{- end -}}
+{{- if kindIs "map" (index $core "additionalProperties") -}}
+  {{- $valuesNode := index $core "additionalProperties" -}}
+  {{- $pairs := list -}}
+  {{- if eq $type "map" -}}
+    {{- range $pair := $.pairs -}}
+      {{- if kindIs "map" $pair.value -}}
+        {{- range $entryKey := keys $pair.value | sortAlpha -}}
+          {{- if and (not (hasKey $props $entryKey)) (not (kindIs "invalid" (index $pair.value $entryKey))) -}}
+            {{- $pairs = append $pairs (dict "keys" (concat $pair.keys (list $entryKey)) "value" (index $pair.value $entryKey)) -}}
+          {{- end -}}
+        {{- end -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+  {{- $instances := list -}}
+  {{- range $instance := $.instances -}}
+    {{- if kindIs "map" $instance -}}
+      {{- range $entryKey := keys $instance | sortAlpha -}}
+        {{- if and (not (hasKey $props $entryKey)) (not (kindIs "invalid" (index $instance $entryKey))) -}}
+          {{- $instances = append $instances (index $instance $entryKey) -}}
+        {{- end -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+  {{- $label := index $node "x-crdkit-keyLabel" | default "<key>" -}}
+  {{- include "crdkit.schema.viewWalk.internal" (dict "spec" (dict
+        "node" $valuesNode "path" (include "crdkit.schema.path.internal" (dict "path" $path "key" "*"))
+        "label" $label
+        "parent" $path "required" false "shared" false
+        "labels" (concat $.labels (list $label)) "pairs" $pairs "instances" $instances "defs" $defs) "out" $out) -}}
+{{- end -}}
+{{- if kindIs "map" (index $core "items") -}}
+  {{- $instances := list -}}
+  {{- range $instance := $.instances -}}
+    {{- if kindIs "slice" $instance -}}
+      {{- range $element := $instance -}}
+        {{- if not (kindIs "invalid" $element) -}}
+          {{- $instances = append $instances $element -}}
+        {{- end -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+  {{- include "crdkit.schema.viewWalk.internal" (dict "spec" (dict
+        "node" (index $core "items") "path" (printf "%s[]" $path) "label" "[]"
+        "parent" $path "required" false "shared" false
+        "labels" $.labels "pairs" (list) "instances" $instances "defs" $defs) "out" $out) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+crdkit.schema.viewKeywords.internal (internal)
+
+Collects the structural keywords the viewer shows in an item's row and
+detail page.
+
+Interface:
+- Params (dict): { "node": <JSON Schema node> }
+- Returns: a YAML dict of the keywords present: `default`, `pattern`,
+  `enum`, `keysPattern` (the `propertyNames.pattern`).
+*/}}
+{{- define "crdkit.schema.viewKeywords.internal" -}}
+{{- $node := .node -}}
+{{- $core := $node -}}
+{{- if hasKey $node "anyOf" -}}
+  {{- $core = first $node.anyOf -}}
+{{- end -}}
+{{- $keywords := dict -}}
+{{- if hasKey $node "default" -}}
+  {{- $_ := set $keywords "default" $node.default -}}
+{{- end -}}
+{{- if hasKey $core "pattern" -}}
+  {{- $_ := set $keywords "pattern" $core.pattern -}}
+{{- end -}}
+{{- if hasKey $core "enum" -}}
+  {{- $_ := set $keywords "enum" $core.enum -}}
+{{- end -}}
+{{- $propertyNames := index $core "propertyNames" | default dict -}}
+{{- if hasKey $propertyNames "pattern" -}}
+  {{- $_ := set $keywords "keysPattern" $propertyNames.pattern -}}
+{{- end -}}
+{{- toYaml $keywords -}}
+{{- end -}}
+
+{{/*
+crdkit.schema.viewCaseExample.internal (internal)
+
+Builds a switch case's example: the matching example entries wrapped in
+their ancestor keys, else the case's generated example with its `by` set,
+wrapped in the key labels.
+
+Interface:
+- Params (dict): { "node": <case definition>, "switch": <the
+  `x-crdkit-switch` dict>, "value": <case value>, "pairs": <example
+  values at the switch node, each {keys, value}>, "labels": <key labels
+  from the root to the switch node>, "defs": <JSON Schema definitions>,
+  "out": <dict; "has", "value" and "generated" are set in place> }
+- Returns: nothing (mutating helper).
+*/}}
+{{- define "crdkit.schema.viewCaseExample.internal" -}}
+{{- $switch := .switch -}}
+{{- $value := .value -}}
+{{- $out := .out -}}
+{{- $merged := dict -}}
+{{- $generated := true -}}
+{{- range $pair := .pairs -}}
+  {{- if and (kindIs "map" $pair.value) (hasKey $pair.value $switch.by) (eq (toString (index $pair.value $switch.by)) (toString $value)) -}}
+    {{- $generated = false -}}
+    {{- $wrapped := deepCopy $pair.value -}}
+    {{- range $key := reverse $pair.keys -}}
+      {{- $wrapped = dict $key $wrapped -}}
+    {{- end -}}
+    {{- $_ := mergeOverwrite $merged $wrapped -}}
+  {{- end -}}
+{{- end -}}
+{{- if $generated -}}
+  {{- $body := dict -}}
+  {{- include "crdkit.schema.generatedExample.internal" (dict "node" .node "defs" .defs "out" $body) -}}
+  {{- $wrapped := dict -}}
+  {{- if kindIs "map" $body.value -}}
+    {{- $wrapped = deepCopy $body.value -}}
+  {{- end -}}
+  {{- $_ := set $wrapped $switch.by $value -}}
+  {{- range $label := reverse .labels -}}
+    {{- $wrapped = dict $label $wrapped -}}
+  {{- end -}}
+  {{- $merged = $wrapped -}}
+{{- end -}}
+{{- $_ := set $out "has" true -}}
+{{- $_ := set $out "value" $merged -}}
+{{- $_ := set $out "generated" $generated -}}
+{{- end -}}
+
+{{/*
 crdkit.schema.viewer.internal (internal)
 
-The viewer document: shell markup, CSS, the embedded schema and the JS.
+The viewer document: shell markup, CSS, the embedded schema, the view
+model and the JS.
 
 Interface:
 - Params (dict): { "title": <page title>, "json": <JSON Schema text> }
 - Returns: the HTML document as plain text.
 
 Implementation notes:
+- The view model of crdkit.schema.viewModel.internal is embedded beside
+  the schema, so the page's item order, types, declarations and examples
+  are decided here, not in the JS.
 - The JS must never contain `{{` (the template delimiter).
 - The page holds no `http://` or `https://` outside the embedded JSON.
+- `</` is escaped as `<\/` in both embeds.
 */}}
 {{- define "crdkit.schema.viewer.internal" -}}
+{{- $view := dict "items" (list) "switches" (list) -}}
+{{- include "crdkit.schema.viewModel.internal" (dict "json" (.json | fromJson) "out" $view) -}}
 <!doctype html>
 <html lang="en">
 <head>
@@ -157,50 +479,19 @@ tr:last-child td { border-bottom: 0; }
   </div>
 </div>
 <script type="application/json" id="crdkit-schema">{{ .json | trim | replace "</" "<\\/" }}</script>
+<script type="application/json" id="crdkit-view">{{ $view | toJson | replace "</" "<\\/" }}</script>
 <script>
 (function () {
 "use strict";
 var SCHEMA = {};
 try { SCHEMA = JSON.parse(document.getElementById("crdkit-schema").textContent) || {}; } catch (e) { SCHEMA = {}; }
-var DEFS = SCHEMA.definitions || {};
+var VIEW = {};
+try { VIEW = JSON.parse(document.getElementById("crdkit-view").textContent) || {}; } catch (e) { VIEW = {}; }
 
 // ---------- helpers ----------
 var has = function (o, k) { return o !== null && typeof o === "object" && Object.prototype.hasOwnProperty.call(o, k); };
 var isMap = function (v) { return v !== null && typeof v === "object" && !Array.isArray(v); };
-var core = function (n) { return (n && Array.isArray(n.anyOf) ? n.anyOf[0] : n) || {}; };
-// Type and per-target kind from standard keywords (mirror crdkit.schema.jsonType.internal / jsonPerTarget.internal).
-var JSON_TYPES = { string: "string", integer: "int", number: "number", boolean: "bool", object: "map", array: "list" };
-var typeOf = function (n) {
-  var t = core(n).type;
-  return has(n, "x-crdkit-switch") ? "map" : Array.isArray(t) ? "scalar" : JSON_TYPES[t] || "any";
-};
-var ptOf = function (n) {
-  if (has(n, "x-crdkit-perTarget")) { return String(n["x-crdkit-perTarget"]); }
-  if ((Array.isArray(n.anyOf) ? n.anyOf : []).some(function (b) { return b && typeof b["$ref"] === "string" && b["$ref"] !== "#/definitions/markers"; })) { return "yes"; }
-  return ["string", "int", "number", "bool", "scalar"].indexOf(typeOf(n)) >= 0 ? "markers" : "";
-};
 var esc = function (s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
-var clone = function (v) { return JSON.parse(JSON.stringify(v)); };
-var keyPath = function (path, key) { return key.indexOf(".") >= 0 ? path + "[" + JSON.stringify(key) + "]" : (path ? path + "." + key : key); };
-var firstLine = function (s) { return String(s || "").split("\n")[0]; };
-// Closed declaration keys of a per-target node, read from the shared definition it references: propertyNames.enum = <targetKeys>, default, match, <annotations>.
-function declOf(n) {
-  var out = null;
-  (Array.isArray(n.anyOf) ? n.anyOf : []).forEach(function (b) {
-    var ref = b && typeof b["$ref"] === "string" ? b["$ref"] : "", d = DEFS[ref.replace("#/definitions/", "")];
-    var e = d && d.propertyNames && Array.isArray(d.propertyNames["enum"]) ? d.propertyNames["enum"] : [];
-    var i = e.indexOf("default"), j = e.indexOf("match");
-    if (!out && ref && i >= 0 && j > i) { out = { targetKeys: e.slice(0, i), annotations: e.slice(j + 1) }; }
-  });
-  return out;
-}
-
-function deepMerge(into, from) {
-  Object.keys(from).forEach(function (k) {
-    if (isMap(from[k]) && isMap(into[k])) { deepMerge(into[k], from[k]); } else { into[k] = from[k]; }
-  });
-  return into;
-}
 
 // ---------- Markdown (inline code, bold, paragraphs, lists, fences) ----------
 function inline(s) {
@@ -262,151 +553,22 @@ function yLines(v, ind) {
 }
 function toYaml(v) { return nonEmpty(v) ? yLines(v, "").join("\n") : yInline(v); }
 
-// ---------- generated example (spec section 5; mirrors crdkit.schema.generatedExample.internal) ----------
-function gen(node) {
-  var c = core(node), type = typeOf(node), hasValue = true, value = "";
-  if (has(node, "default")) { value = node["default"]; }
-  else if (Array.isArray(c["enum"]) && c["enum"].length) { value = c["enum"][0]; }
-  else if ((type === "string" || type === "scalar") && has(c, "pattern")) { hasValue = false; }
-  else if (type === "string" || type === "scalar") { value = "text"; }
-  else if (type === "int") { value = 1; }
-  else if (type === "number") { value = 1.5; }
-  else if (type === "bool") { value = true; }
-  else if (type === "list") {
-    var item = c.items && typeof c.items === "object" ? gen(c.items) : { has: false };
-    value = item.has ? [item.value] : [];
-  } else if (type === "map") {
-    value = {};
-    (node["x-crdkit-order"] || []).forEach(function (name) {
-      var child = gen((node.properties || {})[name] || {});
-      if (child.has) { value[name] = child.value; }
-    });
-  } else { value = {}; }
-  if (hasValue && ptOf(node) === "yes") {
-    var decl = declOf(node), closed = decl && decl.targetKeys, tk = Array.isArray(closed) && closed.length && closed.indexOf("prod") < 0 ? closed[0] : "prod", wrapped = { "default": value };
-    wrapped[tk] = value; value = wrapped;
-  }
-  return { has: hasValue, value: value };
-}
-
-// ---------- model ----------
-var ITEMS = [], ALL = {}, SWITCHES = [];
-
-function childSpecs(n, path) {
-  var c = core(n), out = [];
-  if (has(n, "x-crdkit-switch")) { return out; }
-  var props = n.properties || {}, req = n.required || [];
-  var order = (n["x-crdkit-order"] || []).filter(function (k) { return has(props, k); });
-  Object.keys(props).sort().forEach(function (k) { if (order.indexOf(k) < 0) { order.push(k); } });
-  order.forEach(function (k) {
-    out.push({ label: k, name: k, node: props[k], path: keyPath(path, k), required: req.indexOf(k) >= 0, shared: props[k]["x-crdkit-shared"] === true });
-  });
-  if (isMap(c.additionalProperties)) {
-    out.push({ label: n["x-crdkit-keyLabel"] || "<key>", values: true, node: c.additionalProperties, path: keyPath(path, "*") });
-  }
-  if (isMap(c.items)) { out.push({ label: "[]", items: true, node: c.items, path: path + "[]" }); }
-  return out;
-}
-function add(it) {
-  ITEMS.push(it); ALL[it.path] = it;
-  if (it.parent) { it.parent.kids.push(it); }
-  return it;
-}
-function refDef(ref) {
-  if (typeof ref !== "string") { return null; }
-  try { return DEFS[decodeURIComponent(ref.replace("#/definitions/", ""))] || null; } catch (e) { return null; }
-}
-// Example values reaching a child (mirror crdkit.schema.examples.internal): property, values entry outside the properties, list item; a case filters by its switch value.
-function exFor(n, s, ex) {
-  var out = [], props = n.properties || {}, keep = function (v) { if (v !== null && v !== undefined) { out.push(v); } };
-  ex.forEach(function (v) {
-    if (s.items) { if (Array.isArray(v)) { v.forEach(keep); } }
-    else if (!isMap(v)) { return; }
-    else if (s.values) { Object.keys(v).sort().forEach(function (k) { if (!has(props, k)) { keep(v[k]); } }); }
-    else if (has(v, s.name)) { keep(v[s.name]); }
-  });
-  return out;
-}
-function walk(spec, parent, pairs, labels, ex) {
-  var n = spec.node, c = core(n);
-  var it = add({
-    kind: "key", node: n, core: c, path: spec.path, label: spec.label, parent: parent, kids: [],
-    depth: parent ? parent.depth + 1 : 0, isRoot: !parent, required: !!spec.required, shared: !!spec.shared,
-    inShared: !!spec.shared || !!(parent && parent.kind === "key" && parent.inShared),
-    caseOf: parent ? (parent.kind === "case" ? parent : parent.caseOf) : null,
-    pairs: pairs, labels: labels, ex: ex
-  });
-  if (has(n, "x-crdkit-switch")) {
-    var sw = n["x-crdkit-switch"];
-    var rec = { path: spec.path, by: sw.by, values: (sw.cases || []).slice(), title: labels.concat(sw.by).join(".") };
-    SWITCHES.push(rec);
-    rec.values.forEach(function (v) {
-      var ck = spec.path + "[" + sw.by + "=" + v + "]";
-      var def = DEFS[ck] || refDef((sw.refs || {})[v]) || {};
-      var ci = add({
-        kind: "case", node: def, core: def, path: ck, label: v, caseValue: v, by: sw.by, sw: rec, owner: it,
-        parent: it, kids: [], depth: it.depth + 1, pairs: pairs, labels: labels, caseOf: null
-      });
-      var caseEx = ex.filter(function (x) { return isMap(x) && has(x, sw.by) && String(x[sw.by]) === v; });
-      childSpecs(def, ck).forEach(function (s) { walk(s, ci, [], labels.concat(s.items ? [] : [s.label]), exFor(def, s, caseEx)); });
-    });
-    return it;
-  }
-  var props = n.properties || {};
-  childSpecs(n, spec.path).forEach(function (s) {
-    var next = [];
-    if (!s.items && type_isMap(n)) {
-      pairs.forEach(function (p) {
-        if (!isMap(p.value)) { return; }
-        if (s.values) {
-          Object.keys(p.value).forEach(function (k) {
-            if (!has(props, k) && p.value[k] !== null) { next.push({ keys: p.keys.concat(k), value: p.value[k] }); }
-          });
-        } else if (has(p.value, s.name) && p.value[s.name] !== null) {
-          next.push({ keys: p.keys.concat(s.name), value: p.value[s.name] });
-        }
-      });
-    }
-    walk(s, it, next, labels.concat(s.items ? [] : [s.label]), exFor(n, s, ex));
-  });
-  return it;
-}
-function type_isMap(n) { return typeOf(n) === "map"; }
-
-var rootPairs = Array.isArray(SCHEMA.examples) && SCHEMA.examples.length ? [{ keys: [], value: SCHEMA.examples[0] }] : [];
-walk({ node: SCHEMA, path: "", label: SCHEMA.title || "Values" }, null, rootPairs, [], Array.isArray(SCHEMA.examples) ? SCHEMA.examples : []);
-
-// A case's example: the matching example entries wrapped in their ancestor keys, else generated.
-function caseExample(ci) {
-  var merged = {}, generated = true;
-  ci.pairs.forEach(function (p) {
-    if (isMap(p.value) && has(p.value, ci.by) && String(p.value[ci.by]) === ci.caseValue) {
-      generated = false;
-      var w = clone(p.value);
-      for (var i = p.keys.length - 1; i >= 0; i--) { var o = {}; o[p.keys[i]] = w; w = o; }
-      deepMerge(merged, w);
-    }
-  });
-  if (generated) {
-    var body = gen(ci.node), w2 = isMap(body.value) ? Object.assign({}, body.value) : {};
-    w2[ci.by] = ci.caseValue;
-    for (var j = ci.labels.length - 1; j >= 0; j--) { var o2 = {}; o2[ci.labels[j]] = w2; w2 = o2; }
-    merged = w2;
-  }
-  return { text: toYaml(merged), generated: generated };
-}
-
-function docOf(n) {
-  var text = typeof n.markdownDescription === "string" ? n.markdownDescription : String(n.description || "");
-  var secs = n["x-crdkit-sections"];
-  if (Array.isArray(secs) && secs.length) {
-    var i = text.indexOf("**" + secs[0].title + "**");
-    if (i >= 0) { text = text.slice(0, i); }
-  }
-  return text.trim();
-}
-function sectionRows(n) {
-  return (n["x-crdkit-sections"] || []).reduce(function (a, s) { return a + (Array.isArray(s.rows) ? s.rows.length : 0); }, 0);
+// ---------- model (built in Go by crdkit.schema.viewModel.internal) ----------
+var ITEMS = VIEW.items || [], SWITCHES = VIEW.switches || [], ALL = {}, SW = {};
+SWITCHES.forEach(function (sw) { SW[sw.path] = sw; });
+ITEMS.forEach(function (it) { it.kids = []; ALL[it.path] = it; });
+ITEMS.forEach(function (it) { it.parentItem = it.parent === null ? null : ALL[it.parent]; if (it.parentItem) { it.parentItem.kids.push(it); } });
+ITEMS.forEach(function (it) {
+  it.parent = it.parentItem; delete it.parentItem;
+  it.kind = it.case ? "case" : "key";
+  it.depth = it.parent ? it.parent.depth + 1 : 0;
+  it.isRoot = !it.parent;
+  it.inShared = !!(it.shared || (it.parent && it.parent.inShared));
+  it.caseOf = it.case ? null : (it.parent && (it.parent.kind === "case" ? it.parent : it.parent.caseOf));
+  if (it.case) { it.by = it.case.by; it.caseValue = it.case.value; it.sw = it.parent ? SW[it.parent.path] : null; it.owner = it.parent; }
+});
+function sectionRows(it) {
+  return (it.sections || []).reduce(function (a, s) { return a + (Array.isArray(s.rows) ? s.rows.length : 0); }, 0);
 }
 
 // ---------- state ----------
@@ -439,7 +601,7 @@ function classify() {
   var hits = 0;
   ITEMS.forEach(function (it) {
     if (it.off || it.isRoot) { return; }
-    var pt = it.kind === "key" && ptOf(it.node) === "yes";
+    var pt = it.kind === "key" && it.perTarget === "yes";
     it.match = (!q || nameHit(it.kind === "case", it.by || "", it.label)) && (!state.onlyPt || pt);
     if (it.match) { hits++; }
   });
@@ -489,7 +651,7 @@ function render() {
   renderDetail();
 }
 function drawRow(it, searching) {
-  var n = it.node, hasKids = it.kids.length > 0, open = searching || !state.collapsed[it.path];
+  var hasKids = it.kids.length > 0, open = searching || !state.collapsed[it.path];
   var el = document.createElement("div");
   el.className = "row" + (it.kind === "case" ? " case" : "") + (it.isRoot ? " root" : "") + (state.sel === it.path ? " sel" : "") +
     (it.vis === "hit" ? " hit" : "") + (it.vis === "ctx" ? " ctx" : "");
@@ -499,20 +661,20 @@ function drawRow(it, searching) {
   if (hasKids) { el.setAttribute("aria-expanded", open ? "true" : "false"); }
   var html = '<span class="tw">' + (hasKids ? (open ? "▾" : "▸") : "") + "</span>";
   if (it.kind === "case") {
-    var rows = sectionRows(n);
+    var rows = sectionRows(it);
     html += '<span class="k"><span class="by">' + esc(it.by) + ":</span>" + esc(it.label) + "</span>" +
       '<span class="badge ty-case">case</span>' + (rows ? '<span class="gen">generates ' + rows + "</span>" : "");
   } else {
     var ph = !it.isRoot && it.label.charAt(0) === "<";
-    var t = typeOf(n), pt = ptOf(n);
+    var t = it.type, pt = it.perTarget;
     html += '<span class="k' + (ph ? " ph" : "") + '">' + esc(it.label) + (it.required ? '<span class="req">*</span>' : "") + "</span>" +
       (it.isRoot ? "" : '<span class="colon">:</span>') + '<span class="badge ty-' + esc(t) + '">' + esc(t) + "</span>" +
       (pt === "yes" ? '<span class="pt pt-yes">per-target</span>' : pt === "markers" ? '<span class="pt pt-markers">markers</span>' : "") +
       (it.shared ? '<span class="pt pt-shared">shared</span>' : "") +
-      (has(n, "default") ? '<span class="def">= ' + esc(JSON.stringify(n["default"])) + "</span>" : "") +
-      (it.core.propertyNames && it.core.propertyNames.pattern ? '<span class="def">keys ' + esc(it.core.propertyNames.pattern) + "</span>" : "");
+      (has(it.keywords, "default") ? '<span class="def">= ' + esc(JSON.stringify(it.keywords["default"])) + "</span>" : "") +
+      (it.keywords.keysPattern ? '<span class="def">keys ' + esc(it.keywords.keysPattern) + "</span>" : "");
   }
-  html += '<span class="doc">' + esc(firstLine(n.description)) + "</span>";
+  html += '<span class="doc">' + esc(it.summary) + "</span>";
   el.innerHTML = html;
   tree.appendChild(el);
 }
@@ -615,7 +777,7 @@ var PT_TEXT = {
   no: "Static: no markers, no per-target values."
 };
 function go(path, label) { return '<button type="button" class="link" data-go="' + esc(path) + '">' + esc(label) + "</button>"; }
-function badge(n) { var t = typeOf(n); return '<span class="badge ty-' + esc(t) + '">' + esc(t) + "</span>"; }
+function badge(it) { return '<span class="badge ty-' + esc(it.type) + '">' + esc(it.type) + "</span>"; }
 function sectionsHtml(list) {
   return (list || []).map(function (s) {
     var head = Array.isArray(s.columns) ? "<thead><tr>" + s.columns.map(function (c) { return "<th>" + esc(c) + "</th>"; }).join("") + "</tr></thead>" : "";
@@ -628,49 +790,47 @@ function sectionsHtml(list) {
 }
 function block(title, inner) { return inner ? '<div class="block"><div class="eyebrow">' + title + "</div>" + inner + "</div>" : ""; }
 function keyExamples(it) {
-  var n = it.node, seen = {}, ex = (it.ex || []).filter(function (v) { var id = JSON.stringify(v); return has(seen, id) ? false : (seen[id] = true); });
+  var seen = {}, ex = (it.examples || []).filter(function (v) { var id = JSON.stringify(v); return has(seen, id) ? false : (seen[id] = true); });
   if (ex.length) {
     return block("Examples", ex.map(function (v) { return "<pre>" + esc(toYaml(v)) + "</pre>"; }).join(""));
   }
-  if (has(n, "x-crdkit-switch")) { return ""; }
-  var g = gen(n);
-  return g.has ? block("Example (generated)", "<pre>" + esc(toYaml(g.value)) + "</pre>") : "";
+  if (SW[it.path]) { return ""; }
+  return it.example && it.example.has ? block("Example (generated)", "<pre>" + esc(toYaml(it.example.value)) + "</pre>") : "";
 }
 function renderDetail() {
-  var it = ALL[state.sel] || ALL[""], n = it.node, html = "";
+  var it = ALL[state.sel] || ALL[""], html = "";
   if (it.kind === "case") {
-    var ex = caseExample(it);
+    var ex = { text: toYaml(it.example.value), generated: it.example.generated };
     var rows = it.kids.map(function (k) {
-      var pt = ptOf(k.node);
-      return "<tr><td>" + go(k.path, k.label) + (k.required ? '<span class="req">*</span>' : "") + "</td><td>" + badge(k.node) +
+      var pt = k.perTarget;
+      return "<tr><td>" + go(k.path, k.label) + (k.required ? '<span class="req">*</span>' : "") + "</td><td>" + badge(k) +
         (k.shared ? ' <span class="pt pt-shared">shared</span>' : "") +
         (pt === "yes" ? ' <span class="pt pt-yes">per-target</span>' : pt === "markers" ? ' <span class="pt pt-markers">markers</span>' : "") +
-        "</td><td>" + esc(firstLine(k.node.description)) + "</td></tr>";
+        "</td><td>" + esc(k.summary) + "</td></tr>";
     }).join("");
     var others = it.sw.values.filter(function (v) { return v !== it.caseValue; }).map(function (v) { return go(it.sw.path + "[" + it.by + "=" + v + "]", v); }).join(", ");
     html = '<div class="path">' + esc(it.sw.path || "(root)") + " · " + esc(it.by) + ": " + esc(it.caseValue) + "</div>" +
       "<h3>" + esc(it.by) + ": " + esc(it.caseValue) + "</h3>" +
-      (docOf(n) ? '<div class="prose">' + md(docOf(n)) + "</div>" : "") +
+      (it.doc ? '<div class="prose">' + md(it.doc) + "</div>" : "") +
       block("Keys", rows ? '<div class="dtable"><table><tbody>' + rows + "</tbody></table></div>" : "") +
       block("Example" + (ex.generated ? " (generated)" : ""), "<pre>" + esc(ex.text) + "</pre>") +
-      sectionsHtml(n["x-crdkit-sections"]) +
+      sectionsHtml(it.sections) +
       (others ? '<p class="empty-note">Other ' + esc(it.by) + "s: " + others + "</p>" : "");
   } else {
-    var facts = [["Type", badge(n)]], pt2 = ptOf(n);
+    var facts = [["Type", badge(it)]], pt2 = it.perTarget;
     if (PT_TEXT[pt2]) { facts.push(["Per target", esc(PT_TEXT[pt2])]); }
-    var decl = declOf(n);
-    if (decl) {
-      facts.push(["Declaration keys", decl.targetKeys.concat(["default", "match"], decl.annotations).map(function (k) { return "<code>" + esc(k) + "</code>"; }).join(", ") +
+    if (it.declarationKeys) {
+      facts.push(["Declaration keys", it.declarationKeys.map(function (k) { return "<code>" + esc(k) + "</code>"; }).join(", ") +
         " — an exact target goes in <code>match</code>"]);
     }
     if (it.required) { facts.push(["Required", "yes"]); }
-    if (has(n, "default")) { facts.push(["Default", "<code>" + esc(JSON.stringify(n["default"])) + "</code>"]); }
-    if (it.core.propertyNames && it.core.propertyNames.pattern) { facts.push(["Keys", "match <code>" + esc(it.core.propertyNames.pattern) + "</code>"]); }
-    if (it.core.pattern) { facts.push(["Pattern", "<code>" + esc(it.core.pattern) + "</code>"]); }
-    if (Array.isArray(it.core["enum"])) { facts.push(["Values", it.core["enum"].map(function (v) { return "<code>" + esc(JSON.stringify(v)) + "</code>"; }).join(", ")]); }
-    if (has(n, "x-crdkit-switch")) {
-      var sw = n["x-crdkit-switch"];
-      facts.push(["Switch", "by <code>" + esc(sw.by) + "</code>: " + (sw.cases || []).map(function (v) { return go(it.path + "[" + sw.by + "=" + v + "]", v); }).join(", ")]);
+    if (has(it.keywords, "default")) { facts.push(["Default", "<code>" + esc(JSON.stringify(it.keywords["default"])) + "</code>"]); }
+    if (it.keywords.keysPattern) { facts.push(["Keys", "match <code>" + esc(it.keywords.keysPattern) + "</code>"]); }
+    if (it.keywords.pattern) { facts.push(["Pattern", "<code>" + esc(it.keywords.pattern) + "</code>"]); }
+    if (Array.isArray(it.keywords["enum"])) { facts.push(["Values", it.keywords["enum"].map(function (v) { return "<code>" + esc(JSON.stringify(v)) + "</code>"; }).join(", ")]); }
+    var sw = SW[it.path];
+    if (sw) {
+      facts.push(["Switch", "by <code>" + esc(sw.by) + "</code>: " + sw.values.map(function (v) { return go(it.path + "[" + sw.by + "=" + v + "]", v); }).join(", ")]);
       if (isMap(sw.unless)) { facts.push(["Unless", "<code>" + esc(sw.unless.key + ": " + JSON.stringify(sw.unless.value)) + "</code>: only <code>" + esc(sw.by) + "</code> and <code>" + esc(sw.unless.key) + "</code> are checked"]); }
     }
     if (it.caseOf) {
@@ -686,10 +846,10 @@ function renderDetail() {
     }
     html = '<div class="path">' + esc(it.isRoot ? "(root)" : it.path) + "</div>" +
       "<h3>" + esc(it.label) + "</h3>" +
-      (docOf(n) ? '<div class="prose">' + md(docOf(n)) + "</div>" : "") +
+      (it.doc ? '<div class="prose">' + md(it.doc) + "</div>" : "") +
       '<dl class="facts">' + facts.map(function (f) { return "<dt>" + f[0] + "</dt><dd>" + f[1] + "</dd>"; }).join("") + "</dl>" +
       (it.isRoot && typeof SCHEMA.$id === "string" && SCHEMA.$id ? block("Editor support", "<pre>" + esc("# yaml-language-server: $schema=" + SCHEMA.$id) + "</pre>") : "") +
-      keyExamples(it) + sectionsHtml(n["x-crdkit-sections"]);
+      keyExamples(it) + sectionsHtml(it.sections);
   }
   detail.innerHTML = html;
 }

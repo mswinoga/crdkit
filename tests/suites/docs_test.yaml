@@ -1460,3 +1460,45 @@ tests:
           pattern: 'unless `enabled: false`'
       - notExists:
           path: diagnostics.error
+  - it: 'C-28: the viewer embeds the view model'
+    set:
+      docs:
+        format: html
+        title: Example values
+        schemaText: |
+          type: map
+          targetKeys: [dev, prod]
+          properties:
+            name: {type: string, doc: "Service name."}
+            services:
+              type: map
+              keys: {pattern: "^[A-Z]+$", label: "<ID>"}
+              values:
+                switch:
+                  by: type
+                  cases:
+                    greeter:
+                      type: map
+                      doc: "Writes a greeting."
+                      properties:
+                        type: {type: string, static: true, required: true}
+                        greeting: {type: string, doc: "File\ncontent."}
+    asserts:
+      - matchRegex:
+          path: text
+          pattern: 'id="crdkit-view">'
+      - matchRegex:
+          path: text
+          pattern: '"declarationKeys":\["dev","prod","default","match"\],"doc":"Service name\."'
+      - matchRegex:
+          path: text
+          pattern: '"label":"name","parent":"","path":"name","perTarget":"yes","required":false'
+      - matchRegex:
+          path: text
+          pattern: '"summary":"Service name\.","type":"string"'
+      - matchRegex:
+          path: text
+          pattern: '"example":\{"generated":true,"has":true,"value":\{"default":"text","prod":"text"\}\}'
+      - matchRegex:
+          path: text
+          pattern: '"switches":\[\{"by":"type","path":"services\.\*","title":"services\.[^"]*","values":\["greeter"\]\}\]'
