@@ -570,7 +570,7 @@ def md_headings(text):
 LINE_SUFFIX = re.compile(r':\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*$')
 
 
-def reference_hits(text, src, root, peers, md_cache):
+def reference_hits(text, src, root, peers, md_cache, comment=False):
     """dead-reference hits of one text (a Markdown file or a template comment): [(line index, message)]."""
     hits = []
     top = {p.name for p in root.iterdir() if not p.name.startswith(".")}
@@ -623,7 +623,7 @@ def reference_hits(text, src, root, peers, md_cache):
             check_path(m.group(1), src.parent, i, True)
         for m in re.finditer(r'`([^`]+)`', re.sub(r'\[[^\]]*\]\([^)]*\)', "", line)):
             check_path(m.group(1), src.parent, i, False)
-        for m in re.finditer(r'See (crdkit )?CONTRIBUTING "([^"]+)"', line):
+        for m in re.finditer(r'See (crdkit )?CONTRIBUTING "([^"<]+)"', line) if comment else ():
             contributing = (peer_roots.get("../crdkit") if m.group(1) else root)
             if contributing is None:
                 hits.append((i, f"'crdkit CONTRIBUTING' needs --peer ../crdkit/templates"))
@@ -863,7 +863,7 @@ def lint(argv):
         raw = p.read_text()
         for c in COMMENT.finditer(raw):
             base = raw.count("\n", 0, c.start()) + 1
-            for i, msg in reference_hits(c.group(0), p, root, peer_roots, md_cache):
+            for i, msg in reference_hits(c.group(0), p, root, peer_roots, md_cache, comment=True):
                 hit_at("dead-reference", f"{opts['dir']}/{p.relative_to(root / 'templates')}", base + i, msg)
 
     if opts["readme"]:
