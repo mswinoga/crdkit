@@ -176,19 +176,31 @@ Interface:
       {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (index $ctx $op.state)) -}}
     {{- end -}}
   {{- else if hasKey $op "check" -}}
-    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (include "crdkit.schema.check" (dict "schema" $ctx.schema "diag" $ctx.diag))) -}}
+    {{- $schema := $ctx.schema -}}{{- if hasKey $op "schema" -}}{{- $schema = $op.schema -}}{{- end -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (include "crdkit.schema.check" (dict "schema" $schema "diag" $ctx.diag))) -}}
+  {{- else if hasKey $op "validate" -}}
+    {{- $schema := $ctx.schema -}}{{- if hasKey $op "schema" -}}{{- $schema = $op.schema -}}{{- end -}}
+    {{- $values := $ctx.input -}}{{- if hasKey $op "values" -}}{{- $values = $op.values -}}{{- end -}}
+    {{- $r := include "crdkit.schema.validate" (dict "schema" $schema "values" $values "path" ($op.path | default "") "diag" $ctx.diag) | fromYaml -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" $r.value) -}}
   {{- else if hasKey $op "validateValues" -}}
     {{- $a := $op.validateValues -}}
-    {{- include "crdkit.schema.validateValues" (dict "ctx" $ctx "schema" $ctx.schema "values" $ctx.input "path" ($a.path | default "") "target" ($a.target | default "") "seen" $ctx.seen) -}}
+    {{- $schema := $ctx.schema -}}{{- if hasKey $op "schema" -}}{{- $schema = $op.schema -}}{{- end -}}
+    {{- $values := $ctx.input -}}{{- if hasKey $op "values" -}}{{- $values = $op.values -}}{{- end -}}
+    {{- include "crdkit.schema.validateValues" (dict "ctx" $ctx "schema" $schema "values" $values "path" ($a.path | default "") "target" ($a.target | default "") "seen" $ctx.seen) -}}
   {{- else if hasKey $op "resolve" -}}
-    {{- $r := (include "crdkit.schema.resolve" (dict "ctx" $ctx "schema" $ctx.schema "values" $ctx.input "keys" $op.resolve "target" ($op.target | default "") "seen" $ctx.seen) | fromYaml).value -}}
-    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" $r) -}}
+    {{- $schema := $ctx.schema -}}{{- if hasKey $op "schema" -}}{{- $schema = $op.schema -}}{{- end -}}
+    {{- $values := $ctx.input -}}{{- if hasKey $op "values" -}}{{- $values = $op.values -}}{{- end -}}
+    {{- $r := include "crdkit.schema.resolve" (dict "ctx" $ctx "schema" $schema "values" $values "keys" $op.resolve "target" ($op.target | default "") "seen" $ctx.seen) | fromYaml -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (dict "found" (hasKey $r "value") "value" $r.value)) -}}
   {{- else if hasKey $op "schemaValue" -}}
     {{- $a := $op.schemaValue -}}
     {{- $r := (include "crdkit.schema.value" (dict "ctx" $ctx "node" $a.node "def" ($a.def | default dict) "token" ($a.token | default "") "path" $a.path "target" ($a.target | default "") "seen" $ctx.seen) | fromYaml).value -}}
     {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" $r) -}}
   {{- else if hasKey $op "node" -}}
-    {{- $r := include "crdkit.schema.node" (dict "schema" $ctx.schema "values" $ctx.input "keys" $op.node) | fromYaml -}}
+    {{- $schema := $ctx.schema -}}{{- if hasKey $op "schema" -}}{{- $schema = $op.schema -}}{{- end -}}
+    {{- $values := $ctx.input -}}{{- if hasKey $op "values" -}}{{- $values = $op.values -}}{{- end -}}
+    {{- $r := include "crdkit.schema.node" (dict "schema" $schema "values" $values "keys" $op.node) | fromYaml -}}
     {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (dict "found" (hasKey $r "value") "value" $r.value)) -}}
   {{- else if hasKey $op "path" -}}
     {{- $a := $op.path -}}

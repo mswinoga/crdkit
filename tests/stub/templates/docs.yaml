@@ -18,7 +18,7 @@ Implementation notes:
 {{- $d := .Values.docs | default dict -}}
 {{- if $d -}}
 {{- $diag := dict "errors" (list) "warnings" (list) "infos" (list) -}}
-{{- $text := include "crdkit.schema.document" (dict "format" $d.format "schemaText" $d.schemaText "example" $d.example "sections" $d.sections "title" ($d.title | default "") "htmlLink" ($d.htmlLink | default "") "id" $d.id "diag" $diag) -}}
+{{- $text := include "crdkit.schema.document" (dict "format" $d.format "schemaText" ($d.schemaText | default ($d.schema | toYaml)) "example" $d.example "sections" $d.sections "title" ($d.title | default "") "htmlLink" ($d.htmlLink | default "") "id" $d.id "diag" $diag) -}}
 text: |
 {{ $text | indent 2 }}
 {{- if eq $d.format "json" }}

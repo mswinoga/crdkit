@@ -1,0 +1,2892 @@
+suite: crdkit values schema
+templates:
+  - cr.yaml
+values:
+  - ../fixtures/base.yaml
+tests:
+  - it: 'C-19: a valid schema passes the self-check'
+    set:
+      ops:
+        - check: {}
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              name:
+                type: string
+                required: true
+                doc: Name.
+              tags:
+                type: list
+                items:
+                  type: scalar
+              extra:
+                type: map
+                values:
+                  type: any
+                keys:
+                  pattern: ^[a-z]+$
+              host:
+                type: scalar
+    asserts:
+      - equal:
+          path: r0
+          value: "true"
+      - notExists:
+          path: diagnostics.error
+  - it: 'C-19: every self-check rule records its own ERROR and the check fails'
+    set:
+      ops:
+        - check: {}
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              a:
+                type: thing
+              b:
+                type: map
+                enum:
+                  - a
+              c:
+                type: date
+              d:
+                type: map
+                static: true
+              e:
+                type: list
+                static: true
+                items:
+                  type: scalar
+              f:
+                type: scalar
+                markers: false
+              q:
+                type: scalar
+                tokens: true
+              g:
+                type: scalar
+                default: x
+                required: true
+              h:
+                type: scalar
+                requried: true
+              i:
+                type: scalar
+                enum: a
+              j:
+                type: map
+                keys: {}
+              o:
+                type: map
+                values:
+                  type: any
+                keys:
+                  pattern: ^[A-Z]+$
+                  label: 5
+              p:
+                type: map
+                values:
+                  type: any
+                keys:
+                  pattern: ^[A-Z]+$
+                  label: <ID>
+              k: not-a-node
+              l:
+                type: scalar
+                required: yes
+              m:
+                kind: scalar
+              n:
+                type: int
+                items:
+                  type: any
+    asserts:
+      - equal:
+          path: r0
+          value: ""
+      - lengthEqual:
+          path: diagnostics.error
+          count: 17
+      - exists:
+          path: diagnostics.error[?(@ =~ /unknown\ type\ 'thing'/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'enum'\ does\ not\ apply\ to\ type\ 'map'/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /unknown\ type\ 'date'/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'static'\ does\ not\ apply\ to\ type\ 'map'/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'static'\ does\ not\ apply\ to\ type\ 'list'/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /unknown\ schema\ key\ 'markers'/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /true'\ exclude\ each\ other/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /unknown\ schema\ key\ 'requried'/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'enum'\ must\ be\ a\ list/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /<regex>\}/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /node\ must\ be\ a\ map/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'required'\ must\ be\ a\ bool/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /unknown\ schema\ key\ 'kind'/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /unknown\ type\ ''/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'items'\ does\ not\ apply\ to\ type\ 'int'/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'keys\.label'\ must\ be\ a\ string/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /unknown\ schema\ key\ 'tokens'/)]
+  - it: 'C-19: a switch case must declare the switch key as a static scalar'
+    set:
+      ops:
+        - check: {}
+          at:
+            - r0
+          schema:
+            type: map
+            values:
+              switch:
+                by: type
+                cases:
+                  good:
+                    type: map
+                    properties:
+                      type:
+                        type: scalar
+                        static: true
+                  bad:
+                    type: map
+                    properties:
+                      type:
+                        type: scalar
+                  missing:
+                    type: map
+    asserts:
+      - lengthEqual:
+          path: diagnostics.error
+          count: 2
+      - exists:
+          path: diagnostics.error[?(@ =~ /true'/)]
+  - it: 'C-19: a schema that failed to parse is reported once, however often it is checked'
+    set:
+      ops:
+        - check: {}
+          at:
+            - r0
+          schema:
+            Error: 'error converting YAML to JSON: yaml: line 2'
+        - check: {}
+          at:
+            - r1
+          schema:
+            Error: 'error converting YAML to JSON: yaml: line 2'
+    asserts:
+      - lengthEqual:
+          path: diagnostics.error
+          count: 1
+      - exists:
+          path: diagnostics.error[?(@ =~ /line\ 2/)]
+  - it: 'C-19: an invalid schema skips validation and returns the values unchanged'
+    set:
+      ops:
+        - validate: {}
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              a:
+                type: bogus
+            values:
+              type: scalar
+          values:
+            a: 1
+            b:
+              - x
+    asserts:
+      - equal:
+          path: r0
+          value:
+            a: 1
+            b:
+              - x
+      - notExists:
+          path: diagnostics.warning
+  - it: 'C-22: values matching every type pass through unchanged, with no diagnostics'
+    set:
+      ops:
+        - validate: {}
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              name:
+                type: string
+              count:
+                type: int
+              ratio:
+                type: number
+              flag:
+                type: bool
+              tags:
+                type: list
+                items:
+                  type: string
+              labels:
+                type: map
+                values:
+                  type: any
+              blob:
+                type: any
+          values:
+            name: app
+            count: 3
+            ratio: 0.5
+            flag: true
+            tags:
+              - a
+              - b
+            labels:
+              x:
+                y:
+                  - 1
+            blob:
+              - 1
+              - z: 2
+    asserts:
+      - equal:
+          path: r0
+          value:
+            name: app
+            count: 3
+            ratio: 0.5
+            flag: true
+            tags:
+              - a
+              - b
+            labels:
+              x:
+                y:
+                  - 1
+            blob:
+              - 1
+              - z: 2
+      - notExists:
+          path: diagnostics.error
+      - notExists:
+          path: diagnostics.warning
+  - it: 'C-22: type scalar accepts a string, an int and a bool'
+    set:
+      ops:
+        - validate: {}
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              s:
+                type: scalar
+              i:
+                type: scalar
+              b:
+                type: scalar
+          values:
+            s: text
+            i: 3
+            b: false
+    asserts:
+      - equal:
+          path: r0
+          value:
+            s: text
+            i: 3
+            b: false
+      - notExists:
+          path: diagnostics.error
+      - notExists:
+          path: diagnostics.warning
+  - it: 'C-22: a shape mismatch is a WARNING and the node is dropped'
+    set:
+      ops:
+        - validate: {}
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              m:
+                type: map
+              l:
+                type: list
+              s:
+                type: scalar
+              keep:
+                type: scalar
+          values:
+            m: x
+            l: x
+            s:
+              - 1
+            keep: ok
+    asserts:
+      - equal:
+          path: r0
+          value:
+            keep: ok
+      - lengthEqual:
+          path: diagnostics.warning
+          count: 3
+      - exists:
+          path: diagnostics.warning[?(@ =~ /'l'\ must\ be\ a\ list\ —\ ignored/)]
+      - exists:
+          path: diagnostics.warning[?(@ =~ /'m'\ must\ be\ a\ map\ —\ ignored/)]
+      - exists:
+          path: diagnostics.warning[?(@ =~ /'s'\ must\ be\ a\ scalar\ —\ ignored/)]
+      - notExists:
+          path: diagnostics.error
+  - it: 'C-22: a shape mismatch or unmatched switch on a required node is an ERROR; optional ones stay WARNINGs'
+    set:
+      ops:
+        - validate: {}
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              m:
+                type: map
+                required: true
+              l:
+                type: list
+                required: true
+              s:
+                type: scalar
+                required: true
+              opt:
+                type: map
+              sw:
+                required: true
+                switch:
+                  by: kind
+                  cases:
+                    a:
+                      type: map
+                      properties:
+                        kind:
+                          type: string
+                          static: true
+          values:
+            m: x
+            l: x
+            s:
+              - 1
+            opt: x
+            sw:
+              kind: b
+    asserts:
+      - equal:
+          path: r0
+          value: {}
+      - lengthEqual:
+          path: diagnostics.error
+          count: 4
+      - exists:
+          path: diagnostics.error[?(@ =~ /'l'\ must\ be\ a\ list\ —\ ignored/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'m'\ must\ be\ a\ map\ —\ ignored/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'s'\ must\ be\ a\ scalar\ —\ ignored/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'sw\.kind'\ has\ unknown\ value\ 'b'\ —\ ignored/)]
+      - lengthEqual:
+          path: diagnostics.warning
+          count: 1
+      - exists:
+          path: diagnostics.warning[?(@ =~ /'opt'\ must\ be\ a\ map\ —\ ignored/)]
+  - it: 'C-22: a map on a static scalar is an ERROR, dropped; a required one is not reported again'
+    set:
+      ops:
+        - validate: {}
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              enabled:
+                type: bool
+                static: true
+                default: true
+              kind:
+                type: string
+                static: true
+                required: true
+          values:
+            enabled:
+              PROD: false
+            kind:
+              default: a
+    asserts:
+      - equal:
+          path: r0
+          value:
+            enabled: true
+      - lengthEqual:
+          path: diagnostics.error
+          count: 2
+      - exists:
+          path: diagnostics.error[?(@ =~ /'enabled'\ is\ static\ —\ a\ token\ declaration\ is\ not\ allowed\ —\ ignored/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'kind'\ is\ static\ —\ a\ token\ declaration\ is\ not\ allowed\ —\ ignored/)]
+      - notExists:
+          path: diagnostics.warning
+  - it: 'C-22: a root value of the wrong shape comes back as an empty map'
+    set:
+      ops:
+        - validate: {}
+          at:
+            - r0
+          schema:
+            type: map
+          values: not-a-map
+          path: application
+    asserts:
+      - equal:
+          path: r0
+          value: {}
+      - lengthEqual:
+          path: diagnostics.warning
+          count: 1
+      - exists:
+          path: diagnostics.warning[?(@ =~ /'application'\ must\ be\ a\ map\ —\ ignored/)]
+  - it: 'C-22: an unknown key is a WARNING with its full path and is dropped; a map with "values" accepts every other key'
+    set:
+      ops:
+        - validate: {}
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              application:
+                type: map
+                properties:
+                  services:
+                    type: map
+                    values:
+                      type: map
+                      properties:
+                        greeting:
+                          type: scalar
+            values:
+              type: any
+          values:
+            global:
+              x: 1
+            application:
+              services:
+                APP:
+                  greting: hi
+                  greeting: hello
+                a.b:
+                  other: 1
+              extra: true
+    asserts:
+      - equal:
+          path: r0
+          value:
+            global:
+              x: 1
+            application:
+              services:
+                APP:
+                  greeting: hello
+                a.b: {}
+      - lengthEqual:
+          path: diagnostics.warning
+          count: 3
+      - exists:
+          path: diagnostics.warning[?(@ =~ /'application\.extra'\ is\ not\ a\ known\ key\ —\ ignored/)]
+      - exists:
+          path: diagnostics.warning[?(@ =~ /'application\.services\.APP\.greting'\ is\ not\ a\ known\ key\ —\ ignored/)]
+      - exists:
+          path: diagnostics.warning[?(@ =~ /'application\.services\["a\.b"\]\.other'\ is\ not\ a\ known\ key\ —\ ignored/)]
+  - it: 'C-22: a key failing "keys.pattern" is an ERROR and is dropped with its value'
+    set:
+      ops:
+        - validate: {}
+          at:
+            - r0
+          schema:
+            type: map
+            keys:
+              pattern: ^[A-Z][A-Z0-9_]*$
+            values:
+              type: scalar
+          values:
+            GOOD: 1
+            bad: 2
+          path: environment
+    asserts:
+      - equal:
+          path: r0
+          value:
+            GOOD: 1
+      - lengthEqual:
+          path: diagnostics.error
+          count: 1
+      - exists:
+          path: diagnostics.error[?(@ =~ /key\ 'environment\.bad'\ must\ match\ '\^\[A\-Z\]\[A\-Z0\-9_\]\*\$'\ —\ ignored/)]
+      - notExists:
+          path: diagnostics.warning
+  - it: 'C-22: list elements are validated with indexed paths; a failing element is dropped'
+    set:
+      ops:
+        - validate: {}
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              ports:
+                type: list
+                items:
+                  type: int
+          values:
+            ports:
+              - 80
+              - http
+              - 443
+    asserts:
+      - equal:
+          path: r0
+          value:
+            ports:
+              - 80
+              - 443
+      - lengthEqual:
+          path: diagnostics.error
+          count: 1
+      - exists:
+          path: diagnostics.error[?(@ =~ /'ports\[1\]'\ must\ be\ of\ type\ 'int'\ —\ ignored/)]
+  - it: 'C-22: type, enum, pattern and markers violations are ERRORs and the value is dropped'
+    set:
+      ops:
+        - validate: {}
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              enabled:
+                type: bool
+              count:
+                type: int
+              ratio:
+                type: number
+              name:
+                type: string
+              mode:
+                type: scalar
+                enum:
+                  - validate
+                  - deploy
+              id:
+                type: scalar
+                pattern: ^[a-z]+$
+              type:
+                type: scalar
+                static: true
+          values:
+            enabled: "false"
+            count: 1.5
+            ratio: "0.5"
+            name: 5
+            mode: deploi
+            id: ABC
+            type: '@KIND@'
+    asserts:
+      - equal:
+          path: r0
+          value: {}
+      - lengthEqual:
+          path: diagnostics.error
+          count: 7
+      - exists:
+          path: diagnostics.error[?(@ =~ /'count'\ must\ be\ of\ type\ 'int'\ —\ ignored/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'enabled'\ must\ be\ of\ type\ 'bool'\ —\ ignored/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'id'\ must\ match\ '\^\[a\-z\]\+\$'\ —\ ignored/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'mode'\ must\ be\ one\ of\ 'validate',\ 'deploy'\ —\ ignored/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'name'\ must\ be\ of\ type\ 'string'\ —\ ignored/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'ratio'\ must\ be\ of\ type\ 'number'\ —\ ignored/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'type'\ must\ not\ contain\ '@NAME@'\ markers\ —\ ignored/)]
+  - it: 'C-22: a string holding markers skips type/enum/pattern (the value pass checks it)'
+    set:
+      ops:
+        - validate: {}
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              count:
+                type: int
+                enum:
+                  - 1
+                  - 2
+          values:
+            count: '@COUNT@'
+    asserts:
+      - equal:
+          path: r0
+          value:
+            count: '@COUNT@'
+      - notExists:
+          path: diagnostics.error
+  - it: 'C-22: dotted and relative markers count as markers: rejected in a static field, type check skipped elsewhere'
+    set:
+      ops:
+        - validate: {}
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              type:
+                type: scalar
+                static: true
+              port:
+                type: int
+              host:
+                type: string
+                static: true
+          values:
+            type: '@.kind@'
+            port: '@SVC.port@'
+            host: me@example.com
+    asserts:
+      - equal:
+          path: r0
+          value:
+            port: '@SVC.port@'
+            host: me@example.com
+      - lengthEqual:
+          path: diagnostics.error
+          count: 1
+      - exists:
+          path: diagnostics.error[?(@ =~ /'type'\ must\ not\ contain\ '@NAME@'\ markers\ —\ ignored/)]
+  - it: 'C-20: a token declaration in a per-target field is kept as written; a plain value is checked as usual'
+    set:
+      ops:
+        - validate: {}
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              greeting:
+                type: string
+              hosts:
+                type: list
+                items:
+                  type: scalar
+              plain:
+                type: int
+          values:
+            greeting:
+              default: hi
+              prod: hello
+            hosts:
+              default:
+                - a
+              prod:
+                - a
+                - b
+            plain: x
+    asserts:
+      - equal:
+          path: r0
+          value:
+            greeting:
+              default: hi
+              prod: hello
+            hosts:
+              default:
+                - a
+              prod:
+                - a
+                - b
+      - lengthEqual:
+          path: diagnostics.error
+          count: 1
+      - exists:
+          path: diagnostics.error[?(@ =~ /'plain'\ must\ be\ of\ type\ 'int'\ —\ ignored/)]
+  - it: 'C-22: a missing required key is an ERROR; a present but dropped one is not reported twice'
+    set:
+      ops:
+        - validate: {}
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              target:
+                type: scalar
+                required: true
+              name:
+                type: string
+                required: true
+          values:
+            name: 5
+    asserts:
+      - lengthEqual:
+          path: diagnostics.error
+          count: 2
+      - exists:
+          path: diagnostics.error[?(@ =~ /'name'\ must\ be\ of\ type\ 'string'\ —\ ignored/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'target'\ is\ required/)]
+  - it: 'C-22: a default is applied when the key is absent, never over a present key, and also after a dropped value'
+    set:
+      ops:
+        - validate: {}
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              enabled:
+                type: bool
+                default: true
+              mode:
+                type: scalar
+                default: deploy
+              level:
+                type: int
+                default: 1
+              greeting:
+                type: scalar
+                default:
+                  default: hi
+                  prod: hello
+          values:
+            mode: validate
+            enabled: no
+    asserts:
+      - equal:
+          path: r0
+          value:
+            enabled: true
+            mode: validate
+            level: 1
+            greeting:
+              default: hi
+              prod: hello
+      - lengthEqual:
+          path: diagnostics.error
+          count: 1
+      - exists:
+          path: diagnostics.error[?(@ =~ /'enabled'\ must\ be\ of\ type\ 'bool'\ —\ ignored/)]
+  - it: 'C-22: a null value counts as absent'
+    set:
+      ops:
+        - validate: {}
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              mode:
+                type: scalar
+                default: deploy
+              target:
+                type: scalar
+                required: true
+          values:
+            mode: null
+            target: null
+    asserts:
+      - equal:
+          path: r0
+          value:
+            mode: deploy
+      - lengthEqual:
+          path: diagnostics.error
+          count: 1
+      - exists:
+          path: diagnostics.error[?(@ =~ /'target'\ is\ required/)]
+  - it: 'C-22: a switch validates a map against the case its key selects; unknown or missing values are WARNINGs and the node is dropped'
+    set:
+      ops:
+        - validate: {}
+          at:
+            - r0
+          schema:
+            type: map
+            values:
+              switch:
+                by: type
+                cases:
+                  greeter:
+                    type: map
+                    properties:
+                      type:
+                        type: scalar
+                        static: true
+                        required: true
+                      greeting:
+                        type: scalar
+                  leader:
+                    type: map
+                    properties:
+                      type:
+                        type: scalar
+                        static: true
+                        required: true
+                      greeter:
+                        type: scalar
+          values:
+            A:
+              type: greeter
+              greeting: hi
+              greeter: B
+            B:
+              type: leader
+              greeter: A
+            C:
+              type: other
+            D:
+              greeting: hi
+            E: x
+          path: services
+    asserts:
+      - equal:
+          path: r0
+          value:
+            A:
+              type: greeter
+              greeting: hi
+            B:
+              type: leader
+              greeter: A
+      - lengthEqual:
+          path: diagnostics.warning
+          count: 4
+      - exists:
+          path: diagnostics.warning[?(@ =~ /'services\.A\.greeter'\ is\ not\ a\ known\ key\ —\ ignored/)]
+      - exists:
+          path: diagnostics.warning[?(@ =~ /'services\.C\.type'\ has\ unknown\ value\ 'other'\ —\ ignored/)]
+      - exists:
+          path: diagnostics.warning[?(@ =~ /'services\.D'\ has\ no\ 'type'\ —\ ignored/)]
+      - exists:
+          path: diagnostics.warning[?(@ =~ /'services\.E'\ must\ be\ a\ map\ —\ ignored/)]
+  - it: 'C-21: a switch unless hit checks only by and unless.key; other keys are dropped silently'
+    set:
+      ops:
+        - validate: {}
+          at:
+            - r0
+          schema:
+            type: map
+            values:
+              switch:
+                by: type
+                unless:
+                  key: enabled
+                  value: false
+                cases:
+                  greeter:
+                    type: map
+                    properties:
+                      type:
+                        type: scalar
+                        static: true
+                        required: true
+                      enabled:
+                        type: bool
+                        static: true
+                        default: true
+                      greeting:
+                        type: string
+                        required: true
+          values:
+            A:
+              type: greeter
+              enabled: false
+              extra: 1
+            B:
+              type: greeter
+              enabled: "false"
+            C:
+              type: greeter
+              greeting: hi
+            D:
+              type: other
+              enabled: false
+          path: services
+    asserts:
+      - equal:
+          path: r0
+          value:
+            A:
+              type: greeter
+              enabled: false
+            B:
+              type: greeter
+              enabled: true
+            C:
+              type: greeter
+              enabled: true
+              greeting: hi
+      - lengthEqual:
+          path: diagnostics.error
+          count: 2
+      - exists:
+          path: diagnostics.error[?(@ =~ /'services\.B\.enabled'\ must\ be\ of\ type\ 'bool'\ —\ ignored/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'services\.B\.greeting'\ is\ required/)]
+      - lengthEqual:
+          path: diagnostics.warning
+          count: 1
+      - exists:
+          path: diagnostics.warning[?(@ =~ /'services\.D\.type'\ has\ unknown\ value\ 'other'\ —\ ignored/)]
+  - it: 'C-21: the value pass skips every other key of a switch unless hit'
+    set:
+      target: prod
+      ops:
+        - validateValues:
+            path: services
+          schema:
+            type: map
+            values:
+              switch:
+                by: type
+                unless:
+                  key: enabled
+                  value: false
+                cases:
+                  greeter:
+                    type: map
+                    properties:
+                      type:
+                        type: scalar
+                        static: true
+                      enabled:
+                        type: bool
+                        static: true
+                      count:
+                        type: int
+          values:
+            A:
+              type: greeter
+              enabled: false
+              count:
+                prod: x
+            B:
+              type: greeter
+              count:
+                prod: y
+    asserts:
+      - lengthEqual:
+          path: diagnostics.error
+          count: 1
+      - exists:
+          path: diagnostics.error[?(@ =~ /'services\.B\.count'\ for\ target\ 'prod'\ must\ be\ of\ type\ 'int'\ —\ got\ 'y'/)]
+  - it: 'C-19: a malformed switch unless is a self-check ERROR'
+    set:
+      ops:
+        - check: {}
+          at:
+            - r0
+          schema:
+            type: map
+            values:
+              switch:
+                by: type
+                unless:
+                  key: type
+                  value: false
+                cases:
+                  a:
+                    type: map
+                    properties:
+                      type:
+                        type: scalar
+                        static: true
+        - check: {}
+          at:
+            - r1
+          schema:
+            type: map
+            values:
+              switch:
+                by: type
+                unless:
+                  key: enabled
+                  value:
+                    - false
+                cases:
+                  a:
+                    type: map
+                    properties:
+                      type:
+                        type: scalar
+                        static: true
+        - check: {}
+          at:
+            - r2
+          schema:
+            type: map
+            values:
+              switch:
+                by: type
+                unless:
+                  key: enabled
+                  value: false
+                cases:
+                  a:
+                    type: map
+                    properties:
+                      type:
+                        type: scalar
+                        static: true
+                      enabled:
+                        type: bool
+    asserts:
+      - lengthEqual:
+          path: diagnostics.error
+          count: 3
+      - exists:
+          path: diagnostics.error[?(@ =~ /'switch\.unless\.key'\ must\ differ\ from\ 'by'\ \('type'\)/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /<scalar>\}/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /true'/)]
+  - it: 'C-22: a per-target value valid for the target records nothing'
+    set:
+      target: prod
+      ops:
+        - validateValues: {}
+          schema:
+            type: map
+            properties:
+              greeting:
+                type: string
+              count:
+                type: int
+          values:
+            greeting:
+              default: hi
+              prod: hello
+            count:
+              default: 1
+              prod: 2
+        - state: seen
+          at:
+            - seen
+    asserts:
+      - notExists:
+          path: diagnostics.error
+      - equal:
+          path: seen
+          value:
+            count|prod: true
+            greeting|prod: true
+  - it: 'C-22: a per-target value of the wrong type or outside the enum is an ERROR naming the target'
+    set:
+      target: prod
+      ops:
+        - validateValues: {}
+          schema:
+            type: map
+            properties:
+              count:
+                type: int
+              mode:
+                type: scalar
+                enum:
+                  - a
+                  - b
+              id:
+                type: scalar
+                pattern: ^[a-z]+$
+          values:
+            count:
+              default: 1
+              prod: many
+            mode:
+              default: a
+              prod: c
+            id:
+              prod: X1
+    asserts:
+      - lengthEqual:
+          path: diagnostics.error
+          count: 3
+      - exists:
+          path: diagnostics.error[?(@ =~ /'count'\ for\ target\ 'prod'\ must\ be\ of\ type\ 'int'\ —\ got\ 'many'/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'id'\ for\ target\ 'prod'\ must\ match\ '\^\[a\-z\]\+\$'\ —\ got\ 'X1'/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'mode'\ for\ target\ 'prod'\ must\ be\ one\ of\ 'a',\ 'b'\ —\ got\ 'c'/)]
+  - it: 'C-22: type checks use "parses as": a numeric string and a marker-built number pass type int, a non-bool string fails bool'
+    set:
+      target: prod
+      tokens:
+        BASE: "4"
+      ops:
+        - validateValues: {}
+          schema:
+            type: map
+            properties:
+              a:
+                type: int
+              b:
+                type: int
+              c:
+                type: bool
+              d:
+                type: bool
+              e:
+                type: number
+          values:
+            a:
+              default: "5"
+            b:
+              default: '@BASE@0'
+            c:
+              default: "true"
+            d:
+              default: yes
+            e:
+              default: "1.5e3"
+    asserts:
+      - lengthEqual:
+          path: diagnostics.error
+          count: 1
+      - exists:
+          path: diagnostics.error[?(@ =~ /'d'\ for\ target\ 'prod'\ must\ be\ of\ type\ 'bool'\ —\ got\ 'yes'/)]
+  - it: 'C-22: a plain string with markers is substituted for the target and checked'
+    set:
+      target: prod
+      tokens:
+        GOOD: "3"
+        BAD: x
+      ops:
+        - validateValues: {}
+          schema:
+            type: map
+            properties:
+              good:
+                type: int
+              bad:
+                type: int
+              ports:
+                type: list
+                items:
+                  type: int
+          values:
+            good: '@GOOD@'
+            bad: '@BAD@'
+            ports:
+              - 80
+              - '@BAD@'
+    asserts:
+      - lengthEqual:
+          path: diagnostics.error
+          count: 2
+      - exists:
+          path: diagnostics.error[?(@ =~ /'bad'\ for\ target\ 'prod'\ must\ be\ of\ type\ 'int'\ —\ got\ 'x'/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'ports\[1\]'\ for\ target\ 'prod'\ must\ be\ of\ type\ 'int'\ —\ got\ 'x'/)]
+  - it: 'C-22: a per-target list is checked as a list, element by element'
+    set:
+      target: prod
+      ops:
+        - validateValues: {}
+          schema:
+            type: map
+            properties:
+              hosts:
+                type: list
+                items:
+                  type: int
+              other:
+                type: list
+          values:
+            hosts:
+              default:
+                - 1
+              prod:
+                - 1
+                - b
+            other:
+              prod: x
+    asserts:
+      - lengthEqual:
+          path: diagnostics.error
+          count: 2
+      - exists:
+          path: diagnostics.error[?(@ =~ /'hosts\[1\]'\ for\ target\ 'prod'\ must\ be\ of\ type\ 'int'\ —\ got\ 'b'/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'other'\ for\ target\ 'prod'\ must\ be\ a\ list/)]
+  - it: 'C-19: a failed resolution reports only its own ERROR, no schema ERROR on top'
+    set:
+      target: prod
+      ops:
+        - validateValues: {}
+          schema:
+            type: map
+            properties:
+              count:
+                type: int
+              typo:
+                type: int
+          values:
+            count:
+              qa: 1
+            typo: '@MISSING@'
+    asserts:
+      - lengthEqual:
+          path: diagnostics.error
+          count: 1
+      - exists:
+          path: diagnostics.error[?(@ =~ /no\ value\ found\ for\ 'count'\ —\ target\ chain\ exhausted\ at\ 'prod'\ starting\ from\ 'prod'/)]
+  - it: 'C-22: the value pass follows a switch into the selected case'
+    set:
+      target: prod
+      ops:
+        - validateValues:
+            path: services
+          schema:
+            type: map
+            values:
+              switch:
+                by: type
+                cases:
+                  greeter:
+                    type: map
+                    properties:
+                      type:
+                        type: scalar
+                        static: true
+                      greeting:
+                        type: int
+          values:
+            A:
+              type: greeter
+              greeting:
+                prod: hi
+            B:
+              type: unknown
+              greeting:
+                prod: hi
+    asserts:
+      - lengthEqual:
+          path: diagnostics.error
+          count: 1
+      - exists:
+          path: diagnostics.error[?(@ =~ /'services\.A\.greeting'\ for\ target\ 'prod'\ must\ be\ of\ type\ 'int'\ —\ got\ 'hi'/)]
+  - it: 'C-24: the same path and target is checked once across value-pass and single-field calls'
+    set:
+      target: prod
+      ops:
+        - validateValues: {}
+          schema:
+            type: map
+            properties:
+              count:
+                type: int
+          values:
+            count:
+              prod: x
+        - validateValues: {}
+          schema:
+            type: map
+            properties:
+              count:
+                type: int
+          values:
+            count:
+              prod: x
+        - schemaValue:
+            node:
+              type: int
+            path: count
+            def:
+              prod: x
+          at:
+            - r2
+    asserts:
+      - lengthEqual:
+          path: diagnostics.error
+          count: 1
+      - exists:
+          path: diagnostics.error[?(@ =~ /'count'\ for\ target\ 'prod'\ must\ be\ of\ type\ 'int'\ —\ got\ 'x'/)]
+      - equal:
+          path: r2
+          value: x
+  - it: 'C-24: a resolved string of an int / number / bool node is returned converted; a string node keeps the string'
+    set:
+      target: prod
+      tokens:
+        P: "123"
+        R: "1.5"
+        B: "true"
+      ops:
+        - schemaValue:
+            node:
+              type: int
+              perTarget: false
+            path: port
+            def: '@P@'
+          at:
+            - r0
+        - schemaValue:
+            node:
+              type: number
+              perTarget: false
+            path: ratio
+            def: '@R@'
+          at:
+            - r1
+        - schemaValue:
+            node:
+              type: bool
+              perTarget: false
+            path: enabled
+            def: '@B@'
+          at:
+            - r2
+        - schemaValue:
+            node:
+              type: string
+              perTarget: false
+            path: name
+            def: '@P@'
+          at:
+            - r3
+        - schemaValue:
+            node:
+              type: scalar
+              perTarget: false
+            path: any
+            def: '@P@'
+          at:
+            - r4
+    asserts:
+      - equal:
+          path: r0
+          value: 123
+      - equal:
+          path: r1
+          value: 1.5
+      - equal:
+          path: r2
+          value: true
+      - equal:
+          path: r3
+          value: "123"
+      - equal:
+          path: r4
+          value: "123"
+      - notExists:
+          path: diagnostics.error
+  - it: 'C-20: a per-target declaration with string values is converted for each target'
+    set:
+      target: prod
+      ladder:
+        prod-01: prod
+      ops:
+        - schemaValue:
+            node:
+              type: int
+            path: port
+            def:
+              default: "80"
+              prod: "8080"
+          at:
+            - r0
+        - schemaValue:
+            node:
+              type: int
+            path: port
+            def:
+              default: "80"
+              prod: "8080"
+            target: qa
+          at:
+            - r1
+    asserts:
+      - equal:
+          path: r0
+          value: 8080
+      - equal:
+          path: r1
+          value: 80
+  - it: 'C-24: a value failing the check is returned unconverted, with its ERROR; an unresolved marker stays a string'
+    set:
+      target: prod
+      tokens:
+        P: 12x
+        E: "3"
+      ops:
+        - schemaValue:
+            node:
+              type: int
+              perTarget: false
+            path: port
+            def: '@P@'
+          at:
+            - r0
+        - schemaValue:
+            node:
+              type: int
+              perTarget: false
+            path: later
+            def: '@LATER@'
+          at:
+            - r1
+        - schemaValue:
+            node:
+              type: int
+              enum:
+                - 1
+                - 2
+              perTarget: false
+            path: level
+            def: '@E@'
+          at:
+            - r2
+    asserts:
+      - equal:
+          path: r0
+          value: 12x
+      - equal:
+          path: r1
+          value: '@LATER@'
+      - equal:
+          path: r2
+          value: "3"
+      - lengthEqual:
+          path: diagnostics.error
+          count: 2
+      - exists:
+          path: diagnostics.error[?(@ =~ /'port'\ for\ target\ 'prod'\ must\ be\ of\ type\ 'int'\ —\ got\ '12x'/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'level'\ for\ target\ 'prod'\ must\ be\ one\ of\ '1',\ '2'\ —\ got\ '3'/)]
+  - it: 'C-24: a repeated call for the same path and target (check skipped) still converts'
+    set:
+      target: prod
+      tokens:
+        P: "123"
+      ops:
+        - schemaValue:
+            node:
+              type: int
+              perTarget: false
+            path: port
+            def: '@P@'
+          at:
+            - r0
+        - schemaValue:
+            node:
+              type: int
+              perTarget: false
+            path: port
+            def: '@P@'
+          at:
+            - r1
+        - state: seen
+          at:
+            - seen
+    asserts:
+      - equal:
+          path: r0
+          value: 123
+      - equal:
+          path: r1
+          value: 123
+      - equal:
+          path: seen
+          value:
+            port|prod: true
+  - it: 'C-24: a single field resolves and is checked for an explicit target other than the render target'
+    set:
+      target: qa
+      ladder:
+        qap1: qa
+      ops:
+        - schemaValue:
+            node:
+              type: int
+            path: application.services.APP.count
+            def:
+              qa: 1
+              qap1: x
+            target: qap1
+          at:
+            - r0
+        - schemaValue:
+            node:
+              type: int
+            path: application.services.APP.count
+            def:
+              qa: 1
+              qap1: x
+          at:
+            - r1
+        - schemaValue:
+            node:
+              type: int
+            path: application.services.APP.static
+            def: 7
+          at:
+            - r2
+    asserts:
+      - equal:
+          path: r0
+          value: x
+      - equal:
+          path: r1
+          value: 1
+      - equal:
+          path: r2
+          value: 7
+      - lengthEqual:
+          path: diagnostics.error
+          count: 1
+      - exists:
+          path: diagnostics.error[?(@ =~ /'application\.services\.APP\.count'\ for\ target\ 'qap1'\ must\ be\ of\ type\ 'int'\ —\ got\ 'x'/)]
+  - it: 'C-19: crdkit.schema.node follows properties, values, list indices and switches'
+    set:
+      ops:
+        - node:
+            - services
+            - A
+            - greeting
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              services:
+                type: map
+                values:
+                  switch:
+                    by: type
+                    cases:
+                      greeter:
+                        type: map
+                        properties:
+                          type:
+                            type: scalar
+                            static: true
+                          greeting:
+                            type: scalar
+                          ports:
+                            type: list
+                            items:
+                              type: int
+          values:
+            services:
+              A:
+                type: greeter
+              B:
+                type: other
+        - node:
+            - services
+            - A
+            - ports
+            - 0
+          at:
+            - r1
+          schema:
+            type: map
+            properties:
+              services:
+                type: map
+                values:
+                  switch:
+                    by: type
+                    cases:
+                      greeter:
+                        type: map
+                        properties:
+                          type:
+                            type: scalar
+                            static: true
+                          greeting:
+                            type: scalar
+                          ports:
+                            type: list
+                            items:
+                              type: int
+          values:
+            services:
+              A:
+                type: greeter
+              B:
+                type: other
+        - node:
+            - services
+            - A
+          at:
+            - r2
+          schema:
+            type: map
+            properties:
+              services:
+                type: map
+                values:
+                  switch:
+                    by: type
+                    cases:
+                      greeter:
+                        type: map
+                        properties:
+                          type:
+                            type: scalar
+                            static: true
+                          greeting:
+                            type: scalar
+                          ports:
+                            type: list
+                            items:
+                              type: int
+          values:
+            services:
+              A:
+                type: greeter
+              B:
+                type: other
+        - node:
+            - services
+            - B
+            - greeting
+          at:
+            - r3
+          schema:
+            type: map
+            properties:
+              services:
+                type: map
+                values:
+                  switch:
+                    by: type
+                    cases:
+                      greeter:
+                        type: map
+                        properties:
+                          type:
+                            type: scalar
+                            static: true
+                          greeting:
+                            type: scalar
+                          ports:
+                            type: list
+                            items:
+                              type: int
+          values:
+            services:
+              A:
+                type: greeter
+              B:
+                type: other
+        - node:
+            - services
+            - A
+            - unknown
+          at:
+            - r4
+          schema:
+            type: map
+            properties:
+              services:
+                type: map
+                values:
+                  switch:
+                    by: type
+                    cases:
+                      greeter:
+                        type: map
+                        properties:
+                          type:
+                            type: scalar
+                            static: true
+                          greeting:
+                            type: scalar
+                          ports:
+                            type: list
+                            items:
+                              type: int
+          values:
+            services:
+              A:
+                type: greeter
+              B:
+                type: other
+    asserts:
+      - equal:
+          path: r0.found
+          value: true
+      - equal:
+          path: r0.value
+          value:
+            type: scalar
+            perTarget: true
+      - equal:
+          path: r1.found
+          value: true
+      - equal:
+          path: r1.value
+          value:
+            type: int
+            perTarget: false
+      - equal:
+          path: r2.value.properties.type
+          value:
+            type: scalar
+            static: true
+      - equal:
+          path: r3.found
+          value: false
+      - equal:
+          path: r4.found
+          value: false
+  - it: 'C-19: crdkit.schema.path spells keys dotted, keys with "." in brackets, numbers as indices'
+    set:
+      ops:
+        - path:
+            keys:
+              - application
+              - services
+              - APP
+              - greeting
+          at:
+            - r0
+        - path:
+            keys:
+              - a.b
+              - c
+          at:
+            - r1
+        - path:
+            keys:
+              - hosts
+              - 0
+              - "1"
+            path: services.APP
+          at:
+            - r2
+        - path:
+            keys: []
+          at:
+            - r3
+    asserts:
+      - equal:
+          path: r0
+          value: application.services.APP.greeting
+      - equal:
+          path: r1
+          value: '["a.b"].c'
+      - equal:
+          path: r2
+          value: services.APP.hosts[0].1
+      - equal:
+          path: r3
+          value: ""
+  - it: 'C-22: omitted static = per-target on scalars and lists; static scalars are not'
+    set:
+      target: prod
+      ops:
+        - validate: {}
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              greeting:
+                type: string
+              hosts:
+                type: list
+                items:
+                  type: int
+              type:
+                type: scalar
+                static: true
+              pinned:
+                type: scalar
+                static: true
+          values:
+            greeting:
+              default: hi
+              prod: hello
+            hosts:
+              default:
+                - 1
+              prod:
+                - 2
+                - x
+            type:
+              prod: a
+            pinned:
+              prod: a
+        - validateValues: {}
+          schema:
+            type: map
+            properties:
+              greeting:
+                type: string
+              hosts:
+                type: list
+                items:
+                  type: int
+              type:
+                type: scalar
+                static: true
+              pinned:
+                type: scalar
+                static: true
+          values:
+            greeting:
+              default: hi
+              prod: hello
+            hosts:
+              default:
+                - 1
+              prod:
+                - 2
+                - x
+            type:
+              prod: a
+            pinned:
+              prod: a
+    asserts:
+      - equal:
+          path: r0
+          value:
+            greeting:
+              default: hi
+              prod: hello
+            hosts:
+              default:
+                - 1
+              prod:
+                - 2
+                - x
+      - notExists:
+          path: diagnostics.warning
+      - lengthEqual:
+          path: diagnostics.error
+          count: 3
+      - exists:
+          path: diagnostics.error[?(@ =~ /'pinned'\ is\ static\ —\ a\ token\ declaration\ is\ not\ allowed\ —\ ignored/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'type'\ is\ static\ —\ a\ token\ declaration\ is\ not\ allowed\ —\ ignored/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'hosts\[1\]'\ for\ target\ 'prod'\ must\ be\ of\ type\ 'int'\ —\ got\ 'x'/)]
+  - it: 'C-19: static below a per-target node is a self-check ERROR'
+    set:
+      ops:
+        - check: {}
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              hosts:
+                type: list
+                items:
+                  type: scalar
+                  static: true
+              nested:
+                type: list
+                items:
+                  type: map
+                  properties:
+                    port:
+                      type: int
+                      static: true
+    asserts:
+      - equal:
+          path: r0
+          value: ""
+      - lengthEqual:
+          path: diagnostics.error
+          count: 2
+      - exists:
+          path: diagnostics.error[?(@ =~ /'static'\ does\ not\ apply\ below\ a\ per\-target\ node/)]
+  - it: 'C-19: a static switch key below a per-target list is a valid schema'
+    set:
+      ops:
+        - check: {}
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              routes:
+                type: list
+                items:
+                  switch:
+                    by: kind
+                    cases:
+                      plain:
+                        type: map
+                        properties:
+                          kind:
+                            type: string
+                            static: true
+                          host:
+                            type: string
+    asserts:
+      - equal:
+          path: r0
+          value: "true"
+      - notExists:
+          path: diagnostics.error
+  - it: 'C-19: type omitted is a self-check ERROR except on a switch node; a closed map warns'
+    set:
+      ops:
+        - check: {}
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              a:
+                doc: no type
+        - validate: {}
+          at:
+            - r1
+          schema:
+            type: map
+            properties:
+              any:
+                type: scalar
+          values:
+            any: 5
+            other: 1
+    asserts:
+      - equal:
+          path: r1
+          value:
+            any: 5
+      - lengthEqual:
+          path: diagnostics.error
+          count: 1
+      - exists:
+          path: diagnostics.error[?(@ =~ /unknown\ type\ ''/)]
+      - lengthEqual:
+          path: diagnostics.warning
+          count: 1
+      - exists:
+          path: diagnostics.warning[?(@ =~ /'other'\ is\ not\ a\ known\ key\ —\ ignored/)]
+  - it: 'C-25: resolve: the root and a nested subtree; taxonomy, default and markers'
+    set:
+      target: prod-01
+      ladder:
+        prod-01: prod
+      tokens:
+        START: "600"
+        FLAG: "true"
+      ops:
+        - resolve: []
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              name:
+                type: string
+              infra:
+                type: map
+                properties:
+                  maxInstances:
+                    type: int
+                  startTimeout:
+                    type: int
+                  retries:
+                    type: int
+                  enabled:
+                    type: bool
+                  tags:
+                    type: list
+                    items:
+                      type: string
+                  hosts:
+                    type: list
+                    items:
+                      type: string
+                  rules:
+                    type: list
+                    items:
+                      type: map
+                      properties:
+                        limit:
+                          type: int
+                  raw:
+                    type: any
+          values:
+            name: plain
+            infra:
+              maxInstances:
+                default: 2
+                prod: 6
+              startTimeout: '@START@'
+              retries:
+                default: 3
+              enabled: '@FLAG@'
+              tags:
+                - a
+                - '@START@'
+              hosts:
+                default:
+                  - x
+                prod:
+                  - p
+                  - q
+              rules:
+                - limit: '@START@'
+                - limit: 4
+              raw:
+                maxInstances:
+                  prod: 6
+        - resolve:
+            - infra
+          at:
+            - r1
+          schema:
+            type: map
+            properties:
+              name:
+                type: string
+              infra:
+                type: map
+                properties:
+                  maxInstances:
+                    type: int
+                  startTimeout:
+                    type: int
+                  retries:
+                    type: int
+                  enabled:
+                    type: bool
+                  tags:
+                    type: list
+                    items:
+                      type: string
+                  hosts:
+                    type: list
+                    items:
+                      type: string
+                  rules:
+                    type: list
+                    items:
+                      type: map
+                      properties:
+                        limit:
+                          type: int
+                  raw:
+                    type: any
+          values:
+            name: plain
+            infra:
+              maxInstances:
+                default: 2
+                prod: 6
+              startTimeout: '@START@'
+              retries:
+                default: 3
+              enabled: '@FLAG@'
+              tags:
+                - a
+                - '@START@'
+              hosts:
+                default:
+                  - x
+                prod:
+                  - p
+                  - q
+              rules:
+                - limit: '@START@'
+                - limit: 4
+              raw:
+                maxInstances:
+                  prod: 6
+        - resolve:
+            - infra
+            - rules
+            - 0
+          at:
+            - r2
+          schema:
+            type: map
+            properties:
+              name:
+                type: string
+              infra:
+                type: map
+                properties:
+                  maxInstances:
+                    type: int
+                  startTimeout:
+                    type: int
+                  retries:
+                    type: int
+                  enabled:
+                    type: bool
+                  tags:
+                    type: list
+                    items:
+                      type: string
+                  hosts:
+                    type: list
+                    items:
+                      type: string
+                  rules:
+                    type: list
+                    items:
+                      type: map
+                      properties:
+                        limit:
+                          type: int
+                  raw:
+                    type: any
+          values:
+            name: plain
+            infra:
+              maxInstances:
+                default: 2
+                prod: 6
+              startTimeout: '@START@'
+              retries:
+                default: 3
+              enabled: '@FLAG@'
+              tags:
+                - a
+                - '@START@'
+              hosts:
+                default:
+                  - x
+                prod:
+                  - p
+                  - q
+              rules:
+                - limit: '@START@'
+                - limit: 4
+              raw:
+                maxInstances:
+                  prod: 6
+    asserts:
+      - equal:
+          path: r0.value
+          value:
+            name: plain
+            infra:
+              maxInstances: 6
+              startTimeout: 600
+              retries: 3
+              enabled: true
+              tags:
+                - a
+                - "600"
+              hosts:
+                - p
+                - q
+              rules:
+                - limit: "600"
+                - limit: 4
+              raw:
+                maxInstances:
+                  prod: 6
+      - equal:
+          path: r1.value.maxInstances
+          value: 6
+      - equal:
+          path: r2.value
+          value:
+            limit: 600
+      - notExists:
+          path: diagnostics.error
+  - it: 'C-25: resolve: a switch subtree walks the selected case'
+    set:
+      target: prod
+      ops:
+        - resolve:
+            - services
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              services:
+                type: map
+                values:
+                  switch:
+                    by: type
+                    cases:
+                      greeter:
+                        type: map
+                        properties:
+                          type:
+                            type: scalar
+                            static: true
+                          count:
+                            type: int
+          values:
+            services:
+              A:
+                type: greeter
+                count:
+                  default: 1
+                  prod: 5
+              B:
+                type: unknown
+                count: 1
+    asserts:
+      - equal:
+          path: r0.value
+          value:
+            A:
+              type: greeter
+              count: 5
+  - it: 'C-25: resolve: no value for the target omits the key and records an ERROR'
+    set:
+      target: prod
+      ops:
+        - resolve: []
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              count:
+                type: int
+              keep:
+                type: string
+          values:
+            count:
+              qa: 1
+            keep: x
+    asserts:
+      - equal:
+          path: r0.value
+          value:
+            keep: x
+      - lengthEqual:
+          path: diagnostics.error
+          count: 1
+      - exists:
+          path: diagnostics.error[?(@ =~ /no\ value\ found\ for\ 'count'\ —\ target\ chain\ exhausted\ at\ 'prod'\ starting\ from\ 'prod'/)]
+  - it: 'C-25: resolve: a value failing its check is kept as resolved, unconverted'
+    set:
+      target: prod
+      ops:
+        - resolve: []
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              count:
+                type: int
+          values:
+            count:
+              prod: many
+    asserts:
+      - equal:
+          path: r0.value
+          value:
+            count: many
+      - lengthEqual:
+          path: diagnostics.error
+          count: 1
+      - exists:
+          path: diagnostics.error[?(@ =~ /'count'\ for\ target\ 'prod'\ must\ be\ of\ type\ 'int'\ —\ got\ 'many'/)]
+  - it: 'C-25: resolve: the same path and target is reported once across resolve and validateValues'
+    set:
+      target: prod
+      ops:
+        - resolve: []
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              count:
+                type: int
+          values:
+            count:
+              prod: x
+        - validateValues: {}
+          schema:
+            type: map
+            properties:
+              count:
+                type: int
+          values:
+            count:
+              prod: x
+    asserts:
+      - lengthEqual:
+          path: diagnostics.error
+          count: 1
+  - it: 'C-25: resolve: a marker to an undeclared token stays as text without an ERROR'
+    set:
+      target: prod
+      ops:
+        - resolve: []
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              a:
+                type: string
+          values:
+            a: x-@LATER@
+    asserts:
+      - equal:
+          path: r0.value
+          value:
+            a: x-@LATER@
+      - notExists:
+          path: diagnostics.error
+  - it: 'C-25: resolve: keys addressing nothing give an empty result'
+    set:
+      target: prod
+      ops:
+        - resolve:
+            - missing
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              a:
+                type: string
+          values:
+            a: x
+        - resolve:
+            - a
+            - deeper
+          at:
+            - r1
+          schema:
+            type: map
+            properties:
+              a:
+                type: string
+          values:
+            a: x
+    asserts:
+      - equal:
+          path: r0.found
+          value: false
+      - equal:
+          path: r1.found
+          value: false
+  - it: 'C-19: resolve: an invalid schema gives an empty result and the self-check ERROR'
+    set:
+      target: prod
+      ops:
+        - resolve: []
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              a:
+                type: bogus
+          values:
+            a: x
+    asserts:
+      - equal:
+          path: r0.found
+          value: false
+      - exists:
+          path: diagnostics.error[?(@ =~ /^schema invalid/)]
+  - it: 'C-20: declaration keys: without targetKeys a declaration is open, kept as written'
+    set:
+      ops:
+        - validate: {}
+          at:
+            - r0
+          schema:
+            type: map
+            properties:
+              a:
+                type: scalar
+          values:
+            a:
+              prod: x
+              anything: y
+              match:
+                not: a-list
+    asserts:
+      - equal:
+          path: r0
+          value:
+            a:
+              prod: x
+              anything: y
+              match:
+                not: a-list
+      - notExists:
+          path: diagnostics.error
+      - notExists:
+          path: diagnostics.warning
+      - notExists:
+          path: diagnostics.info
+  - it: 'C-20: declaration keys: root targetKeys reach every per-target node; an unknown key is an ERROR and dropped'
+    set:
+      ops:
+        - validate: {}
+          at:
+            - r0
+          schema:
+            type: map
+            targetKeys:
+              - ALL
+              - prod
+            properties:
+              a:
+                type: scalar
+              b:
+                type: map
+                properties:
+                  c:
+                    type: list
+          values:
+            a:
+              ALL: x
+              default: d
+              match:
+                - prod-.*: m
+              prdo: y
+              value: z
+            b:
+              c:
+                prod:
+                  - p
+                prod-01:
+                  - q
+    asserts:
+      - equal:
+          path: r0
+          value:
+            a:
+              ALL: x
+              default: d
+              match:
+                - prod-.*: m
+            b:
+              c:
+                prod:
+                  - p
+      - lengthEqual:
+          path: diagnostics.error
+          count: 3
+      - exists:
+          path: diagnostics.error[?(@ =~ /ALL,\ prod,\ default,\ match;\ an\ exact\ target\ goes\ in\ 'match'/)]
+      - notExists:
+          path: diagnostics.warning
+  - it: 'C-20: declaration keys: node annotations are allowed only on that node'
+    set:
+      ops:
+        - validate: {}
+          at:
+            - r0
+          schema:
+            type: map
+            targetKeys:
+              - ALL
+            properties:
+              a:
+                type: scalar
+                annotations:
+                  - targetContainer
+              b:
+                type: scalar
+          values:
+            a:
+              ALL: x
+              targetContainer: main
+            b:
+              ALL: y
+              targetContainer: main
+    asserts:
+      - equal:
+          path: r0
+          value:
+            a:
+              ALL: x
+              targetContainer: main
+            b:
+              ALL: y
+      - lengthEqual:
+          path: diagnostics.error
+          count: 1
+      - exists:
+          path: diagnostics.error[?(@ =~ /ALL,\ default,\ match;\ an\ exact\ target\ goes\ in\ 'match'/)]
+  - it: 'C-20: declaration keys: a descendant targetKeys replaces the inherited one, through a values map'
+    set:
+      ops:
+        - validate: {}
+          at:
+            - r0
+          schema:
+            type: map
+            targetKeys:
+              - ALL
+            properties:
+              outer:
+                type: map
+                targetKeys:
+                  - dev
+                values:
+                  type: map
+                  properties:
+                    x:
+                      type: scalar
+              plain:
+                type: scalar
+          values:
+            outer:
+              k:
+                x:
+                  dev: 1
+                  ALL: 2
+            plain:
+              ALL: 3
+              dev: 4
+    asserts:
+      - equal:
+          path: r0
+          value:
+            outer:
+              k:
+                x:
+                  dev: 1
+            plain:
+              ALL: 3
+      - lengthEqual:
+          path: diagnostics.error
+          count: 2
+      - exists:
+          path: diagnostics.error[?(@ =~ /dev,\ default,\ match;\ an\ exact\ target\ goes\ in\ 'match'/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /ALL,\ default,\ match;\ an\ exact\ target\ goes\ in\ 'match'/)]
+  - it: 'C-20: declaration keys: a match that is not a list of single-key maps is an ERROR and dropped'
+    set:
+      ops:
+        - validate: {}
+          at:
+            - r0
+          schema:
+            type: map
+            targetKeys:
+              - ALL
+            properties:
+              a:
+                type: scalar
+              b:
+                type: scalar
+              c:
+                type: scalar
+          values:
+            a:
+              ALL: x
+              match:
+                prod: y
+            b:
+              ALL: x
+              match:
+                - p: 1
+                  q: 2
+            c:
+              ALL: x
+              match:
+                - p
+    asserts:
+      - equal:
+          path: r0
+          value:
+            a:
+              ALL: x
+            b:
+              ALL: x
+            c:
+              ALL: x
+      - lengthEqual:
+          path: diagnostics.error
+          count: 3
+      - exists:
+          path: diagnostics.error[?(@ =~ /<value>\}\ —\ ignored/)]
+  - it: 'C-20: declaration keys: a plain value and markers are not declarations, nothing is checked'
+    set:
+      ops:
+        - validate: {}
+          at:
+            - r0
+          schema:
+            type: map
+            targetKeys:
+              - ALL
+            properties:
+              a:
+                type: scalar
+              b:
+                type: scalar
+          values:
+            a: plain
+            b: '@X@'
+    asserts:
+      - equal:
+          path: r0
+          value:
+            a: plain
+            b: '@X@'
+      - notExists:
+          path: diagnostics.error
+  - it: 'C-19: self-check: targetKeys and annotations must be lists of strings without default/match; annotations only on a scalar or list'
+    set:
+      ops:
+        - check: {}
+          at:
+            - r0
+          schema:
+            type: map
+            targetKeys: ALL
+            properties:
+              a:
+                type: scalar
+                annotations:
+                  - 1
+              b:
+                type: map
+                annotations:
+                  - x
+              c:
+                type: list
+                targetKeys:
+                  - dev
+                annotations:
+                  - x
+              d:
+                type: string
+                targetKeys:
+                  - ALL
+                  - default
+                annotations:
+                  - match
+    asserts:
+      - equal:
+          path: r0
+          value: ""
+      - lengthEqual:
+          path: diagnostics.error
+          count: 5
+      - exists:
+          path: diagnostics.error[?(@ =~ /'annotations'\ must\ be\ a\ list\ of\ strings/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'annotations'\ does\ not\ apply\ to\ type\ 'map'/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'targetKeys'\ must\ not\ list\ 'default'\ \(always\ allowed\)/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'annotations'\ must\ not\ list\ 'match'\ \(always\ allowed\)/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'targetKeys'\ must\ be\ a\ list\ of\ strings/)]
+  - it: 'C-24 F-1: a token-backed field resolves per target and converts on every call'
+    skip:
+      reason: C-24 token open (crdkit-0.2)
+    set:
+      target: b-01
+      tokens:
+        P.port:
+          b: "8080"
+          default: x
+      ops:
+        - schemaValue:
+            node:
+              type: int
+            token: P.port
+            path: svc.port
+            target: b-01
+          at:
+            - int
+        - schemaValue:
+            node:
+              type: int
+            token: P.port
+            path: svc.port
+            target: c-01
+          at:
+            - bad
+        - schemaValue:
+            node:
+              type: int
+            token: P.port
+            path: svc.port
+            target: c-01
+          at:
+            - again
+    asserts:
+      - equal:
+          path: int
+          value: 8080
+      - equal:
+          path: bad
+          value: x
+      - equal:
+          path: again
+          value: x
+      - lengthEqual:
+          path: diagnostics.error
+          count: 1
+      - exists:
+          path: diagnostics.error[?(@ =~ /'svc.port'.*'c-01'/)]
+  - it: 'C-24 F-2: an any node takes the token''s shape, leaves substituted for the target'
+    skip:
+      reason: C-24 token open (crdkit-0.2)
+    set:
+      target: b-01
+      tokens:
+        P.leaf:
+          b-01: one
+          c-01: two
+      ops:
+        - schemaValue:
+            node:
+              type: any
+            token: P.leaf
+            path: svc.leaf
+            target: c-01
+          at:
+            - leaf
+    asserts:
+      - equal:
+          path: leaf
+          value: two
+  - it: 'C-24 F-3: no value for the target is the resolution ERROR; no check ERROR on top'
+    skip:
+      reason: C-24 token open (crdkit-0.2)
+    set:
+      target: b-01
+      tokens:
+        P.port:
+          c: "1"
+      ops:
+        - schemaValue:
+            node:
+              type: int
+            token: P.port
+            path: svc.port
+            target: c-01
+          at:
+            - v
+    asserts:
+      - equal:
+          path: v
+          value: ""
+      - lengthEqual:
+          path: diagnostics.error
+          count: 1
+      - exists:
+          path: diagnostics.error[?(@ =~ /no value found for 'P.port'/)]
+  - it: 'C-24 F-4: an unknown token is the resolution ERROR'
+    skip:
+      reason: C-24 token open (crdkit-0.2)
+    set:
+      ops:
+        - schemaValue:
+            node:
+              type: int
+            token: NOPE
+            path: svc.port
+          at:
+            - v
+    asserts:
+      - exists:
+          path: diagnostics.error[?(@ =~ /unknown token 'NOPE'/)]
+  - it: 'C-22 Q-5: a declaration match rule with an invalid regex is an ERROR naming the path'
+    skip:
+      reason: Q-5 open (crdkit-0.2)
+    set:
+      ops:
+        - validate: {}
+          schema:
+            type: map
+            properties:
+              APP_X:
+                type: scalar
+          values:
+            APP_X:
+              match:
+                - qa[: v
+              default: d
+          at:
+            - r
+    asserts:
+      - equal:
+          path: r.APP_X
+          value: d
+      - exists:
+          path: diagnostics.error[?(@ =~ /'APP_X\.match\[0\]'/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'qa\['.*not a valid regex/)]
+  - it: 'C-22 F-4: a boolean-word key in a keys map is an ERROR and dropped; a normal key is kept'
+    skip:
+      reason: F-4 open (crdkit-0.2)
+    set:
+      ops:
+        - validate: {}
+          schema:
+            type: map
+            properties:
+              m:
+                type: map
+                values:
+                  type: any
+                keys:
+                  pattern: ^.+$
+          values:
+            m:
+              "true": 1
+              on: 2
+              Y: 3
+              ok: 4
+          at:
+            - r
+    asserts:
+      - equal:
+          path: r.m.ok
+          value: 4
+      - notExists:
+          path: r.m.on
+      - notExists:
+          path: r.m.true
+      - notExists:
+          path: r.m.Y
+      - exists:
+          path: diagnostics.error[?(@ =~ /'m\.true'.*boolean word/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'m\.on'.*boolean word/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'m\.Y'.*boolean word/)]

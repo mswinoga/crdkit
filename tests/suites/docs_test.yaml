@@ -1,0 +1,1462 @@
+suite: crdkit schema docs
+templates:
+  - docs.yaml
+values:
+  - ../fixtures/base.yaml
+tests:
+  - it: 'C-28: docs: skeleton in schema order, then a table per map node and a section per case'
+    set:
+      docs:
+        format: md
+        schemaText: |
+          type: map
+          values: {type: any, doc: "The consumer chart's own keys."}
+          properties:
+            target: {type: string, static: true, required: true, doc: "Render target."}
+            renderMode: {type: string, static: true, enum: [validate, deploy], default: deploy, doc: "Mode | see README."}
+            services:
+              type: map
+              doc: "Services by ID."
+              keys: {pattern: "^[A-Z]+$", label: "<ID>"}
+              values:
+                switch:
+                  by: type
+                  cases:
+                    greeter:
+                      type: map
+                      doc: "Writes a greeting."
+                      properties:
+                        type: {type: string, static: true, required: true}
+                        greeting: {type: string, doc: "File\ncontent."}
+                        ports: {type: list, items: {type: int}}
+                    environment:
+                      type: map
+                      properties:
+                        type: {type: string, static: true, required: true}
+                        environment: {type: map, keys: {pattern: "^[A-Z]+$"}, values: {type: scalar}}
+        title: Example values
+        htmlLink: VALUES.html
+    asserts:
+      - matchRegex:
+          path: text
+          pattern: '\| `renderMode` \| string, one of: validate, deploy \| no \| `"deploy"` \|  \| Mode \\\| see README\. \|'
+      - matchRegex:
+          path: text
+          pattern: '## `services.\*\[type=greeter\]`'
+      - matchRegex:
+          path: text
+          pattern: \| `greeting` \| string \| yes \|  \| File content\. \|
+      - matchRegex:
+          path: text
+          pattern: '^# Example values\n\n\[HTML reference\]\(VALUES.html\)\n\n```yaml\ntarget:  # string, required\nrenderMode:  # string\nservices:  # map\n  <ID>:  # map, by type\n    # type: greeter\n    # type:  # string, required\n    # greeting:  # string, per target\n    # ports:  # list of int, per target\n    #   - # int\n'
+  - it: 'C-28: docs: a column with no content is omitted'
+    set:
+      docs:
+        format: md
+        schema:
+          type: map
+          properties:
+            a:
+              type: string
+              static: true
+            b:
+              type: int
+              static: true
+              default: 3
+    asserts:
+      - matchRegex:
+          path: text
+          pattern: \| Key \| Type \| Per target \| Default \|\n\| --- \| --- \| --- \| --- \|\n\| `a` \| string \| no \|  \|\n\| `b` \| int \| no \| `3` \|\n
+      - notMatchRegex:
+          path: text
+          pattern: Required|Description
+  - it: 'C-28: docs: a case section has the shared marker, the matching example entries and the sections'
+    set:
+      docs:
+        format: md
+        schemaText: |
+          type: map
+          properties:
+            services:
+              type: map
+              values:
+                switch:
+                  by: type
+                  cases:
+                    greeter:
+                      type: map
+                      doc: "Writes a greeting."
+                      properties:
+                        type: {type: string, static: true, required: true}
+                        greeting: {type: string}
+                    environment:
+                      type: map
+                      properties:
+                        type: {type: string, static: true, required: true}
+        example:
+          services:
+            APP:
+              type: greeter
+              greeting: hello
+            OTHER:
+              type: greeter
+              greeting: bye
+            SHARED:
+              type: environment
+        sections:
+          services.*[type=greeter]:
+            - title: Generated variables
+              columns:
+                - Pattern
+                - Value
+              rows:
+                - - <ID>_GREETER
+                  - <ID>
+            - title: Example output
+              code: |
+                type: greeter
+    asserts:
+      - notExists:
+          path: diagnostics.error
+      - matchRegex:
+          path: text
+          pattern: '## `services.\*\[type=greeter\]`\n\nWrites a greeting\.\n\n\| Key \| Type \| Per target \| Required \|\n\| --- \| --- \| --- \| --- \|\n\| `type` \(shared\) \| string \| no \| yes \|\n\| `greeting` \| string \| yes \|  \|\n\n\*\*Example\*\*\n\n```yaml\nservices:\n  APP:\n    greeting: hello\n    type: greeter\n  OTHER:\n    greeting: bye\n    type: greeter\n```\n\n\*\*Generated variables\*\*\n\n\| Pattern \| Value \|\n\| --- \| --- \|\n\| <ID>_GREETER \| <ID> \|\n\n\*\*Example output\*\*\n\n```yaml\ntype: greeter\n```'
+      - matchRegex:
+          path: text
+          pattern: '## `services.\*\[type=environment\]`\n\n\| Key \| Type \| Per target \| Required \|\n\| --- \| --- \| --- \| --- \|\n\| `type` \(shared\) \| string \| no \| yes \|\n\n\*\*Example\*\*\n\n```yaml\nservices:\n  SHARED:'
+      - notMatchRegex:
+          path: text
+          pattern: \(generated\)
+  - it: 'C-28: docs: an unreached case gets a generated example, marked, wrapped in the key labels'
+    set:
+      docs:
+        format: md
+        schemaText: |
+          type: map
+          properties:
+            services:
+              type: map
+              keys: {pattern: "^[A-Z]+$", label: "<ID>"}
+              values:
+                switch:
+                  by: type
+                  cases:
+                    greeter:
+                      type: map
+                      properties:
+                        type: {type: string, static: true, required: true}
+                        greeting: {type: string}
+                        mode: {type: string, static: true, enum: [fast, slow]}
+                        port: {type: int, default: 80}
+                        name: {type: string, static: true, pattern: "^[a-z]+$"}
+                        hosts: {type: list, items: {type: scalar}}
+                        flag: {type: bool, static: true}
+    asserts:
+      - matchRegex:
+          path: text
+          pattern: '\*\*Example\*\* \(generated\)\n\n```yaml\nservices:\n  <ID>:\n    flag: true\n    greeting:\n      default: text\n      prod: text\n    hosts:\n      default:\n      - text\n      prod:\n      - text\n    mode: fast\n    port:\n      default: 80\n      prod: 80\n    type: greeter\n```'
+  - it: 'C-28: docs: a schema with only a switch at the root renders the case sections'
+    set:
+      docs:
+        format: md
+        schemaText: |
+          switch:
+            by: flavor
+            cases:
+              a:
+                type: map
+                properties:
+                  flavor: {type: scalar, static: true}
+    asserts:
+      - equal:
+          path: text
+          value: |
+            # Values
+
+            ```yaml
+            # flavor: a
+            # flavor:  # scalar
+            ```
+
+            ## `[flavor=a]`
+
+            | Key | Type | Per target |
+            | --- | --- | --- |
+            | `flavor` | scalar | no |
+
+            **Example** (generated)
+
+            ```yaml
+            flavor: a
+            ```
+  - it: 'C-28: docs: a section on a non-map node gets a section of its own'
+    set:
+      docs:
+        format: md
+        schemaText: |
+          type: map
+          properties:
+            name: {type: string, doc: "The name."}
+        sections:
+          name:
+            - title: Notes
+              doc: Plain.
+    asserts:
+      - matchRegex:
+          path: text
+          pattern: '## `name`\n\nThe name\.\n\n\*\*Notes\*\*\n\nPlain\.\n$'
+  - it: 'C-28: order records nested block keys in text order'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: map
+          properties:
+            zeta:
+              type: string
+            alpha:
+              type: map
+              properties:
+                inner: {type: string}
+                first:
+                  type: int
+          values:
+            type: any
+    asserts:
+      - equal:
+          path: json["x-crdkit-order"]
+          value:
+            - zeta
+            - alpha
+      - equal:
+          path: json.properties.alpha["x-crdkit-order"]
+          value:
+            - inner
+            - first
+  - it: 'C-28: order has no entry for keys inside a flow map, also across lines'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: map
+          properties:
+            a: {type: string, doc: x}
+            b: {type: map, properties: {c: {type: string},
+                d: {type: int}}}
+            e:
+              type: string
+    asserts:
+      - equal:
+          path: json["x-crdkit-order"]
+          value:
+            - a
+            - b
+            - e
+      - notExists:
+          path: json.properties.b.properties["x-crdkit-order"]
+  - it: 'C-28: order ignores key-looking lines in block scalars and list items'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: map
+          properties:
+            a:
+              doc: |
+                fake: 1
+                properties:
+                  nested: x
+
+                more: 2
+              type: string
+            b:
+              doc: >-
+                other: 3
+              default:
+              - k: 1
+                j: 2
+              - k: 3
+              type: list
+    asserts:
+      - equal:
+          path: json["x-crdkit-order"]
+          value:
+            - a
+            - b
+  - it: 'C-28: order keeps a switch cases in text order'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          switch:
+            by: kind
+            cases:
+              zeta:
+                type: map
+                properties:
+                  kind: {type: scalar, static: true}
+              alpha:
+                type: map
+                properties:
+                  kind: {type: scalar, static: true}
+                  "a.b": {type: string}
+    asserts:
+      - equal:
+          path: json.allOf[0].then["$ref"]
+          value: '#/definitions/[kind=zeta]'
+      - equal:
+          path: json.allOf[1].then["$ref"]
+          value: '#/definitions/[kind=alpha]'
+      - equal:
+          path: json.definitions["[kind=alpha]"]["x-crdkit-order"]
+          value:
+            - kind
+            - a.b
+  - it: 'C-28: jsonSchema emits the draft-07 root and the shared definitions'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: map
+          properties:
+            name: {type: string}
+        title: Example values
+    asserts:
+      - equal:
+          path: json["$schema"]
+          value: http://json-schema.org/draft-07/schema#
+      - equal:
+          path: json.title
+          value: Example values
+      - equal:
+          path: json.definitions
+          value:
+            tokenDeclaration:
+              type: object
+              minProperties: 1
+            markers:
+              type: string
+              pattern: '@[A-Za-z0-9_.]+@'
+      - notExists:
+          path: json["x-crdkit-type"]
+      - notExists:
+          path: diagnostics.error
+  - it: 'C-28: jsonSchema title defaults to Values and the text is pretty JSON'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: map
+    asserts:
+      - equal:
+          path: json.title
+          value: Values
+      - matchRegex:
+          path: text
+          pattern: '^\{\n  "\$schema": '
+  - it: 'C-28: jsonSchema maps each scalar type, enum, pattern and default (static: true)'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: map
+          properties:
+            s: {type: string, static: true, pattern: "^a", enum: [ab, ac], default: ab}
+            i: {type: int, static: true}
+            num: {type: number, static: true}
+            flag: {type: bool, static: true}
+            c: {type: scalar, static: true}
+    asserts:
+      - equal:
+          path: json.properties.s
+          value:
+            type: string
+            pattern: ^a
+            enum:
+              - ab
+              - ac
+            default: ab
+            not:
+              $ref: '#/definitions/markers'
+            x-crdkit-perTarget: no
+      - equal:
+          path: json.properties.i
+          value:
+            type: integer
+            x-crdkit-perTarget: no
+      - equal:
+          path: json.properties.num
+          value:
+            type: number
+            x-crdkit-perTarget: no
+      - equal:
+          path: json.properties.flag
+          value:
+            type: boolean
+            x-crdkit-perTarget: no
+      - equal:
+          path: json.properties.c
+          value:
+            type:
+              - string
+              - number
+              - boolean
+            not:
+              $ref: '#/definitions/markers'
+            x-crdkit-perTarget: no
+  - it: 'C-28: jsonSchema: markers allowed below a per-target node on an int/number/bool wrap it in anyOf with the markers definition'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: map
+          properties:
+            l:
+              type: list
+              items:
+                type: map
+                properties:
+                  i: {type: int}
+                  num: {type: number}
+                  flag: {type: bool}
+                  s: {type: string}
+    asserts:
+      - equal:
+          path: json.properties.l.anyOf[0].items.properties.i
+          value:
+            anyOf:
+              - type: integer
+              - $ref: '#/definitions/markers'
+      - equal:
+          path: json.properties.l.anyOf[0].items.properties.num.anyOf[0]
+          value:
+            type: number
+      - equal:
+          path: json.properties.l.anyOf[0].items.properties.flag.anyOf[0]
+          value:
+            type: boolean
+      - equal:
+          path: json.properties.l.anyOf[0].items.properties.s
+          value:
+            type: string
+  - it: 'C-28: jsonSchema: a marker-accepting string or scalar with enum or pattern is wrapped in anyOf, a plain one is not'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: map
+          properties:
+            l:
+              type: list
+              items:
+                type: map
+                properties:
+                  se: {type: string, enum: [a, b]}
+                  sp: {type: string, pattern: "^a"}
+                  ce: {type: scalar, enum: [a, 1]}
+                  plain: {type: string}
+            locked: {type: string, static: true, pattern: "^a"}
+    asserts:
+      - equal:
+          path: json.properties.l.anyOf[0].items.properties.se
+          value:
+            anyOf:
+              - type: string
+                enum:
+                  - a
+                  - b
+              - $ref: '#/definitions/markers'
+      - equal:
+          path: json.properties.l.anyOf[0].items.properties.sp.anyOf
+          value:
+            - type: string
+              pattern: ^a
+            - $ref: '#/definitions/markers'
+      - equal:
+          path: json.properties.l.anyOf[0].items.properties.ce.anyOf
+          value:
+            - type:
+                - string
+                - number
+                - boolean
+              enum:
+                - a
+                - 1
+            - $ref: '#/definitions/markers'
+      - equal:
+          path: json.properties.l.anyOf[0].items.properties.plain
+          value:
+            type: string
+      - equal:
+          path: json.properties.locked
+          value:
+            type: string
+            pattern: ^a
+            not:
+              $ref: '#/definitions/markers'
+            x-crdkit-perTarget: no
+  - it: 'C-28: jsonSchema: a per-target string, scalar or list is anyOf [type, declaration]; an int or constrained string adds markers'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: map
+          properties:
+            host: {type: string}
+            any: {type: scalar}
+            ports: {type: list, items: {type: int}}
+            port: {type: int}
+            mode: {type: string, enum: [a, b]}
+    asserts:
+      - equal:
+          path: json.properties.host
+          value:
+            anyOf:
+              - type: string
+              - $ref: '#/definitions/tokenDeclaration'
+      - equal:
+          path: json.properties.any.anyOf
+          value:
+            - type:
+                - string
+                - number
+                - boolean
+            - $ref: '#/definitions/tokenDeclaration'
+      - lengthEqual:
+          path: json.properties.ports.anyOf
+          count: 2
+      - equal:
+          path: json.properties.port.anyOf
+          value:
+            - type: integer
+            - $ref: '#/definitions/tokenDeclaration'
+            - $ref: '#/definitions/markers'
+      - equal:
+          path: json.properties.mode.anyOf
+          value:
+            - type: string
+              enum:
+                - a
+                - b
+            - $ref: '#/definitions/tokenDeclaration'
+            - $ref: '#/definitions/markers'
+      - equal:
+          path: json.properties.ports.anyOf[0]
+          value:
+            type: array
+            items:
+              anyOf:
+                - type: integer
+                - $ref: '#/definitions/markers'
+      - equal:
+          path: json.properties.ports.anyOf[1]
+          value:
+            $ref: '#/definitions/tokenDeclaration'
+      - notExists:
+          path: json.properties.ports["x-crdkit-perTarget"]
+  - it: 'C-28: jsonSchema: a list below a per-target list is a plain array, items default to any'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: map
+          properties:
+            plain: {type: list, items: {type: list}}
+            free: {type: any}
+    asserts:
+      - equal:
+          path: json.properties.plain.anyOf[0].items
+          value:
+            type: array
+            items: {}
+            x-crdkit-perTarget: no
+      - equal:
+          path: json.properties.free
+          value: {}
+  - it: 'C-28: jsonSchema: closed map, open map, required, keys pattern and label, order'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: map
+          properties:
+            closed:
+              type: map
+              properties:
+                zeta: {type: string, static: true, required: true}
+                alpha: {type: string, static: true}
+            open:
+              type: map
+              keys: {pattern: "^[A-Z]+$", label: "<ID>"}
+              values: {type: any}
+            bare:
+              type: map
+              values: {type: any}
+    asserts:
+      - equal:
+          path: json.properties.closed.additionalProperties
+          value: false
+      - equal:
+          path: json.properties.closed.required
+          value:
+            - zeta
+      - equal:
+          path: json.properties.closed["x-crdkit-order"]
+          value:
+            - zeta
+            - alpha
+      - equal:
+          path: json.properties.open.additionalProperties
+          value: {}
+      - equal:
+          path: json.properties.open.propertyNames
+          value:
+            pattern: ^[A-Z]+$
+      - equal:
+          path: json.properties.open["x-crdkit-keyLabel"]
+          value: <ID>
+      - equal:
+          path: json.properties.bare["x-crdkit-keyLabel"]
+          value: <key>
+      - notExists:
+          path: json.properties.closed["x-crdkit-keyLabel"]
+      - notExists:
+          path: json.properties.bare.propertyNames
+      - equal:
+          path: json["x-crdkit-order"]
+          value:
+            - closed
+            - open
+            - bare
+  - it: 'C-28: jsonSchema: flow-map properties are ordered after the positioned ones, alphabetically'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: map
+          properties: {zz: {type: string}, aa: {type: string}}
+          values: {type: any}
+    asserts:
+      - equal:
+          path: json["x-crdkit-order"]
+          value:
+            - aa
+            - zz
+  - it: 'C-28: jsonSchema: doc becomes a plain description and a Markdown description'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: map
+          properties:
+            a: {type: string, static: true, doc: "Use `x`, see [the docs](http://e.x/d)."}
+            b: {type: string, static: true}
+    asserts:
+      - equal:
+          path: json.properties.a.description
+          value: Use x, see the docs.
+      - equal:
+          path: json.properties.a.markdownDescription
+          value: Use `x`, see [the docs](http://e.x/d).
+      - notExists:
+          path: json.properties.b.description
+      - notExists:
+          path: json.properties.b.markdownDescription
+  - it: 'C-28: jsonSchema: switch cases are complete definitions with allOf, enum and refs'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: map
+          values:
+            switch:
+              by: type
+              cases:
+                zeta:
+                  type: map
+                  properties:
+                    type: {type: string, static: true, required: true}
+                    z: {type: string, static: true}
+                alpha:
+                  type: map
+                  properties:
+                    type: {type: string, static: true, required: true}
+                    a: {type: int, static: true}
+    asserts:
+      - equal:
+          path: json.additionalProperties.type
+          value: object
+      - equal:
+          path: json.additionalProperties.required
+          value:
+            - type
+      - equal:
+          path: json.additionalProperties.properties
+          value:
+            type:
+              enum:
+                - zeta
+                - alpha
+      - equal:
+          path: json.additionalProperties.allOf
+          value:
+            - if:
+                properties:
+                  type:
+                    const: zeta
+                required:
+                  - type
+              then:
+                $ref: '#/definitions/*[type=zeta]'
+            - if:
+                properties:
+                  type:
+                    const: alpha
+                required:
+                  - type
+              then:
+                $ref: '#/definitions/*[type=alpha]'
+      - equal:
+          path: json.additionalProperties["x-crdkit-switch"]
+          value:
+            by: type
+            cases:
+              - zeta
+              - alpha
+            refs:
+              zeta: '#/definitions/*[type=zeta]'
+              alpha: '#/definitions/*[type=alpha]'
+      - equal:
+          path: json.definitions["*[type=alpha]"].additionalProperties
+          value: false
+      - equal:
+          path: json.definitions["*[type=alpha]"]["x-crdkit-path"]
+          value: '*[type=alpha]'
+      - equal:
+          path: json.definitions["*[type=alpha]"].properties.a.type
+          value: integer
+      - equal:
+          path: json.definitions["*[type=zeta]"]["x-crdkit-order"]
+          value:
+            - type
+            - z
+  - it: 'C-28: jsonSchema: x-crdkit-shared marks only properties identical in every case'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          switch:
+            by: kind
+            cases:
+              one:
+                type: map
+                properties:
+                  kind: {type: string, static: true, required: true}
+                  same: {type: int, static: true}
+                  differs: {type: int, static: true}
+                  only: {type: int, static: true}
+              two:
+                type: map
+                properties:
+                  kind: {type: string, static: true, required: true}
+                  same: {type: int, static: true}
+                  differs: {type: string, static: true}
+    asserts:
+      - equal:
+          path: json.definitions["[kind=one]"].properties.same["x-crdkit-shared"]
+          value: true
+      - equal:
+          path: json.definitions["[kind=two]"].properties.kind["x-crdkit-shared"]
+          value: true
+      - notExists:
+          path: json.definitions["[kind=one]"].properties.differs["x-crdkit-shared"]
+      - notExists:
+          path: json.definitions["[kind=one]"].properties.only["x-crdkit-shared"]
+      - notExists:
+          path: json.definitions["[kind=two]"].properties.differs["x-crdkit-shared"]
+  - it: 'C-28: jsonSchema: a single case shares nothing'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          switch:
+            by: kind
+            cases:
+              only:
+                type: map
+                properties:
+                  kind: {type: string, static: true, required: true}
+    asserts:
+      - notExists:
+          path: json.definitions["[kind=only]"].properties.kind["x-crdkit-shared"]
+  - it: 'C-28: jsonSchema: examples come through a values map and a switch, unique, on the root and value nodes only'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: map
+          properties:
+            target: {type: string, static: true}
+            services:
+              type: map
+              values:
+                switch:
+                  by: type
+                  cases:
+                    a:
+                      type: map
+                      properties:
+                        type: {type: string, static: true, required: true}
+                        size: {type: int, static: true}
+                    b:
+                      type: map
+                      properties:
+                        type: {type: string, static: true, required: true}
+                        size: {type: int, static: true}
+            untouched: {type: string, static: true}
+        example:
+          target: prod
+          services:
+            X:
+              type: a
+              size: 1
+            Y:
+              type: b
+              size: 1
+            Z:
+              type: a
+              size: 2
+    asserts:
+      - equal:
+          path: json.properties.target.examples
+          value:
+            - prod
+      - notExists:
+          path: json.properties.untouched.examples
+      - notExists:
+          path: json.properties.services.additionalProperties.examples
+      - notExists:
+          path: json.definitions["services.*[type=a]"].examples
+      - equal:
+          path: json.definitions["services.*[type=a]"].properties.size.examples
+          value:
+            - 1
+            - 2
+      - equal:
+          path: json.definitions["services.*[type=b]"].properties.size.examples
+          value:
+            - 1
+      - equal:
+          path: json.definitions["services.*[type=b]"].properties.type.examples
+          value:
+            - b
+      - notExists:
+          path: json.properties.services.examples
+      - equal:
+          path: json.examples[0].services.Y
+          value:
+            type: b
+            size: 1
+  - it: 'C-28: jsonSchema: examples also reach list items and a values entry outside the properties'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: map
+          properties:
+            named: {type: string, static: true}
+          values: {type: string, static: true}
+        example:
+          named: n
+          other: o
+          more: m
+    asserts:
+      - equal:
+          path: json.additionalProperties.examples
+          value:
+            - m
+            - o
+      - equal:
+          path: json.properties.named.examples
+          value:
+            - n
+  - it: 'C-28: jsonSchema: a list example reaches the items node'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: map
+          properties:
+            ports: {type: list, items: {type: int}}
+        example:
+          ports:
+            - 80
+            - 443
+            - 80
+    asserts:
+      - notExists:
+          path: json.properties.ports.examples
+      - equal:
+          path: json.properties.ports.anyOf[0].items.examples
+          value:
+            - 80
+            - 443
+  - it: 'C-28: jsonSchema: sections attach to a case and to a key, as x-crdkit-sections and Markdown'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: map
+          properties:
+            target: {type: string, static: true, doc: "Render target."}
+            services:
+              type: map
+              values:
+                switch:
+                  by: type
+                  cases:
+                    a:
+                      type: map
+                      properties:
+                        type: {type: string, static: true, required: true}
+        sections:
+          services.*[type=a]:
+            - title: Variables
+              doc: Generated.
+              columns:
+                - Name
+                - Value
+              rows:
+                - - A_X
+                  - 1|2
+              code: |
+                env:
+                  A_X: 1
+          target:
+            - title: Note
+    asserts:
+      - equal:
+          path: json.definitions["services.*[type=a]"]["x-crdkit-sections"]
+          value:
+            - title: Variables
+              doc: Generated.
+              columns:
+                - Name
+                - Value
+              rows:
+                - - A_X
+                  - 1|2
+              code: |
+                env:
+                  A_X: 1
+      - equal:
+          path: json.definitions["services.*[type=a]"].markdownDescription
+          value: |-
+            **Variables**
+
+            Generated.
+
+            | Name | Value |
+            | --- | --- |
+            | A_X | 1\|2 |
+
+            ```yaml
+            env:
+              A_X: 1
+            ```
+      - equal:
+          path: json.properties.target.markdownDescription
+          value: |-
+            Render target.
+
+            **Note**
+      - equal:
+          path: json.properties.target.description
+          value: Render target.
+      - notExists:
+          path: diagnostics.error
+  - it: 'C-28: jsonSchema: a malformed section or an unknown node path is an ERROR and dropped'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: map
+          properties:
+            a: {type: string, static: true}
+        sections:
+          a:
+            - title: ""
+            - title: Ok
+            - title: Cols
+              rows:
+                - - x
+            - title: Width
+              columns:
+                - A
+                - B
+              rows:
+                - - x
+            - title: Extra
+              color: red
+            - plain
+          b:
+            - title: T
+          c: not-a-list
+    asserts:
+      - equal:
+          path: json.properties.a["x-crdkit-sections"]
+          value:
+            - title: Ok
+      - lengthEqual:
+          path: diagnostics.error
+          count: 7
+      - exists:
+          path: diagnostics.error[?(@ =~ /'title'\ must\ be\ a\ non\-empty\ string\ —\ dropped/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'rows'\ must\ be\ a\ list\ and\ need\ 'columns'\ —\ dropped/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /row\ 0\ must\ be\ a\ list\ of\ 2\ strings\ —\ dropped/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /unknown\ section\ key\ 'color'\ —\ dropped/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /a\ section\ must\ be\ a\ map\ —\ dropped/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'c'\ must\ be\ a\ list\ of\ sections\ —\ dropped/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'b'\ names\ no\ node\ —\ dropped/)]
+  - it: 'C-28: jsonSchema: an invalid schema records the self-check ERRORs and returns {}'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: thing
+    asserts:
+      - equal:
+          path: json
+          value: {}
+      - lengthEqual:
+          path: diagnostics.error
+          count: 1
+      - exists:
+          path: diagnostics.error[?(@ =~ /unknown\ type\ 'thing'/)]
+  - it: 'C-28: document: json returns the JSON Schema text'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: map
+          properties:
+            target: {type: string}
+        example:
+          target: prod
+        title: Doc
+    asserts:
+      - matchRegex:
+          path: text
+          pattern: '^\{\n  "\$schema": "http://json-schema.org/draft-07/schema#"'
+      - matchRegex:
+          path: text
+          pattern: '"title": "Doc"'
+      - matchRegex:
+          path: text
+          pattern: '"prod"'
+      - notExists:
+          path: diagnostics.error
+  - it: 'C-28: document: html returns the viewer page embedding the same JSON, compact'
+    set:
+      docs:
+        format: html
+        schemaText: |
+          type: map
+          properties:
+            target: {type: string}
+        title: Doc
+    asserts:
+      - matchRegex:
+          path: text
+          pattern: ^<!doctype html>
+      - matchRegex:
+          path: text
+          pattern: 'id="crdkit-schema">\{"\$schema":'
+      - matchRegex:
+          path: text
+          pattern: '"title":"Doc"'
+  - it: 'C-28: document: md returns the Markdown reference with the HTML link'
+    set:
+      docs:
+        format: md
+        schemaText: |
+          type: map
+          properties:
+            target: {type: string}
+        title: Doc
+        htmlLink: VALUES.html
+    asserts:
+      - matchRegex:
+          path: text
+          pattern: ^# Doc\n
+      - matchRegex:
+          path: text
+          pattern: VALUES\.html
+      - matchRegex:
+          path: text
+          pattern: \| `target` \|
+  - it: 'C-28: document: an unknown format records an ERROR and renders nothing'
+    set:
+      docs:
+        format: pdf
+        schemaText: |
+          type: map
+    asserts:
+      - equal:
+          path: text
+          value: ""
+      - lengthEqual:
+          path: diagnostics.error
+          count: 1
+      - exists:
+          path: diagnostics.error[?(@ =~ /unknown\ format\ 'pdf'\ \(json,\ html\ or\ md\)\ —\ nothing\ rendered/)]
+  - it: 'C-28: document: an invalid schema records the self-check ERRORs in every format'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: nonsense
+    asserts:
+      - matchRegex:
+          path: text
+          pattern: ^\{\}\s*$
+      - exists:
+          path: diagnostics.error[?(@ =~ /^schema invalid/)]
+  - it: 'C-28: jsonSchema: id becomes the root $id'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: map
+          properties:
+            target: {type: string}
+        id: https://example.com/lib/v1.2.3/input.schema.json
+    asserts:
+      - equal:
+          path: json["$id"]
+          value: https://example.com/lib/v1.2.3/input.schema.json
+      - notExists:
+          path: diagnostics.error
+  - it: 'C-28: jsonSchema: no id and an empty id emit no $id (json)'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: map
+    asserts:
+      - notMatchRegex:
+          path: text
+          pattern: \$id
+      - notExists:
+          path: diagnostics.error
+  - it: 'C-28: jsonSchema: no id and an empty id emit no $id (json)'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: map
+        id: ""
+    asserts:
+      - notMatchRegex:
+          path: text
+          pattern: \$id
+      - notExists:
+          path: diagnostics.error
+  - it: 'C-28: jsonSchema: a non-string id records an ERROR and is ignored'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: map
+        id: 5
+    asserts:
+      - notMatchRegex:
+          path: text
+          pattern: \$id
+      - lengthEqual:
+          path: diagnostics.error
+          count: 1
+      - exists:
+          path: diagnostics.error[?(@ =~ /'id'\ must\ be\ a\ string\ —\ ignored/)]
+  - it: 'C-28: document: id reaches the JSON, the page and the Markdown (json)'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: map
+        id: https://example.com/v1/input.schema.json
+    asserts:
+      - matchRegex:
+          path: text
+          pattern: '"\$id": "https://example.com/v1/input.schema.json"'
+  - it: 'C-28: document: id reaches the JSON, the page and the Markdown (html)'
+    set:
+      docs:
+        format: html
+        schemaText: |
+          type: map
+        id: https://example.com/v1/input.schema.json
+    asserts:
+      - matchRegex:
+          path: text
+          pattern: id="crdkit-schema">\{"\$id":"https://example.com/v1/input.schema.json"
+  - it: 'C-28: document: id reaches the JSON, the page and the Markdown (md)'
+    set:
+      docs:
+        format: md
+        schemaText: |
+          type: map
+          properties:
+            target: {type: string}
+        title: Doc
+        id: https://example.com/v1/input.schema.json
+    asserts:
+      - matchRegex:
+          path: text
+          pattern: '# Doc\n\n\*\*Editor support\*\*[^\n]*\n\n```yaml\n# yaml-language-server: \$schema=https://example.com/v1/input.schema.json\n```\n\n```yaml\ntarget:'
+  - it: 'C-28: docs: without an $id there is no Editor support block'
+    set:
+      docs:
+        format: md
+        schemaText: |
+          type: map
+          properties:
+            target: {type: string}
+        title: Doc
+    asserts:
+      - notMatchRegex:
+          path: text
+          pattern: Editor support|yaml-language-server
+  - it: 'C-28: jsonSchema: with targetKeys the declaration branch references a shared closed definition per key set and annotations'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: map
+          targetKeys: [ALL, prod]
+          properties:
+            host: {type: string, annotations: [owner]}
+            open:
+              type: map
+              properties:
+                num: {type: int}
+                name: {type: string}
+                dev:
+                  type: map
+                  targetKeys: [dev]
+                  properties:
+                    x: {type: string}
+    asserts:
+      - equal:
+          path: json.properties.host
+          value:
+            anyOf:
+              - type: string
+              - $ref: '#/definitions/targetDeclaration.owner'
+      - equal:
+          path: json.properties.open.properties.num.anyOf[1]
+          value:
+            $ref: '#/definitions/targetDeclaration'
+      - equal:
+          path: json.properties.open.properties.name.anyOf[1]
+          value:
+            $ref: '#/definitions/targetDeclaration'
+      - equal:
+          path: json.properties.open.properties.dev.properties.x.anyOf[1]
+          value:
+            $ref: '#/definitions/targetDeclaration2'
+      - equal:
+          path: json.definitions.targetDeclaration
+          value:
+            type: object
+            minProperties: 1
+            propertyNames:
+              enum:
+                - ALL
+                - prod
+                - default
+                - match
+            properties:
+              match:
+                type: array
+                items:
+                  type: object
+                  minProperties: 1
+                  maxProperties: 1
+      - equal:
+          path: json.definitions["targetDeclaration.owner"]
+          value:
+            type: object
+            minProperties: 1
+            propertyNames:
+              enum:
+                - ALL
+                - prod
+                - default
+                - match
+                - owner
+            properties:
+              match:
+                type: array
+                items:
+                  type: object
+                  minProperties: 1
+                  maxProperties: 1
+              owner:
+                type: string
+      - equal:
+          path: json.definitions.targetDeclaration2.propertyNames
+          value:
+            enum:
+              - dev
+              - default
+              - match
+  - it: 'C-28: jsonSchema: without targetKeys a per-target node keeps the open tokenDeclaration'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: map
+          properties:
+            host: {type: string, annotations: [owner]}
+    asserts:
+      - equal:
+          path: json.properties.host.anyOf[1]
+          value:
+            $ref: '#/definitions/tokenDeclaration'
+      - notExists:
+          path: json.definitions.targetDeclaration
+  - it: 'C-28: docs: closed declarations link to one Token declarations section listing each key set'
+    set:
+      docs:
+        format: md
+        schemaText: |
+          type: map
+          targetKeys: [ALL, prod]
+          properties:
+            host: {type: string, annotations: [owner], doc: "Host."}
+            port: {type: int, doc: "Port."}
+            sub:
+              type: map
+              targetKeys: [dev]
+              doc: "Sub."
+              properties:
+                x: {type: string, doc: "X."}
+    asserts:
+      - matchRegex:
+          path: text
+          pattern: '\| `host` \| string \| \[yes\]\(#token-declarations\), annotations: `owner` \| Host\. \|'
+      - matchRegex:
+          path: text
+          pattern: \| `port` \| int \| \[yes\]\(#token-declarations\) \| Port\. \|
+      - matchRegex:
+          path: text
+          pattern: '## Token declarations\n\nA per-target value is a plain value or a token declaration[^\n]*\n\n- `ALL`, `prod`, `default`, `match`\n- `dev`, `default`, `match`\n$'
+  - it: 'C-28: docs: without targetKeys there is no Token declarations section'
+    set:
+      docs:
+        format: md
+        schemaText: |
+          type: map
+          properties:
+            host: {type: string, doc: "Host."}
+    asserts:
+      - notMatchRegex:
+          path: text
+          pattern: Token declarations
+      - matchRegex:
+          path: text
+          pattern: \| `host` \| string \| yes \| Host\. \|
+  - it: 'C-28: docs: a generated per-target example uses a declared target key when prod is not one'
+    set:
+      docs:
+        format: md
+        schemaText: |
+          type: map
+          targetKeys: [ALL]
+          properties:
+            svc:
+              switch:
+                by: kind
+                cases:
+                  a:
+                    type: map
+                    properties:
+                      kind: {type: string, static: true}
+                      host: {type: string}
+    asserts:
+      - matchRegex:
+          path: text
+          pattern: 'host:\n\s+ALL: text\n\s+default: text'
+      - notMatchRegex:
+          path: text
+          pattern: 'prod: text'
+  - it: 'C-28: jsonSchema: a switch unless excludes the hit from every case; the Markdown type names it (json)'
+    set:
+      docs:
+        format: json
+        schemaText: |
+          type: map
+          properties:
+            services:
+              type: map
+              values:
+                switch:
+                  by: type
+                  unless: {key: enabled, value: false}
+                  cases:
+                    greeter:
+                      type: map
+                      properties:
+                        type: {type: string, static: true}
+                        enabled: {type: bool, static: true}
+    asserts:
+      - equal:
+          path: json.properties.services.additionalProperties.allOf[0]["if"]
+          value:
+            properties:
+              type:
+                const: greeter
+              enabled:
+                not:
+                  const: false
+            required:
+              - type
+      - equal:
+          path: json.properties.services.additionalProperties["x-crdkit-switch"].unless
+          value:
+            key: enabled
+            value: false
+      - notExists:
+          path: diagnostics.error
+  - it: 'C-28: jsonSchema: a switch unless excludes the hit from every case; the Markdown type names it (md)'
+    set:
+      docs:
+        format: md
+        schemaText: |
+          type: map
+          properties:
+            services:
+              type: map
+              values:
+                switch:
+                  by: type
+                  unless: {key: enabled, value: false}
+                  cases:
+                    greeter:
+                      type: map
+                      properties:
+                        type: {type: string, static: true}
+                        enabled: {type: bool, static: true}
+    asserts:
+      - matchRegex:
+          path: text
+          pattern: 'unless `enabled: false`'
+      - notExists:
+          path: diagnostics.error
