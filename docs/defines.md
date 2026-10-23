@@ -499,7 +499,8 @@ Interface:
 Implementation notes:
 - Full-string anchored (`^(?:pattern)$`) — a rule matches the WHOLE
   subject, never a substring.
-- "replacement" may reference capture groups via $1/$2/...
+- "replacement" may reference capture groups via $1/$2/...; a
+  non-string one (a YAML number or bool) is used as its string form.
 - Optional "diag" + "label": with them (consumer rules), each regex is
   validated first; an invalid rule records an ERROR naming the label and
   the regex, is skipped, and later rules are still tried — never a

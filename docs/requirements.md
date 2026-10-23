@@ -73,7 +73,8 @@ Test names cite these ids: every `it:` starts with the ids it covers
 - **C-17** · contract — `crdkit.tokens.substitute [ctx, text, target?]`
   replaces known markers and `@AT@`; unknown markers untouched.
 - **C-18** · contract — `crdkit.matchRules {subject, rules, diag?,
-  label?}` → `{matched, value}`, full-string anchored, first match wins.
+  label?}` → `{matched, value}`, full-string anchored, first match wins;
+  a non-string replacement (number, bool) is its string form.
   With `diag`, an invalid consumer regex → E naming the label and the
   rule, the rule skipped (validity checked before matching); no template
   abort. Without `diag` (library-owned rules) an invalid regex aborts.
