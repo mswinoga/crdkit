@@ -10,6 +10,25 @@ crdkit knows no CRD and no "environment"/"family"/"tier": `target` is an
 opaque string. A specific library (e.g. `mdeploy`) supplies all of that
 and wraps `crdkit.render`.
 
+<!-- toc depth=3 -->
+
+- [Who should depend on this](#who-should-depend-on-this)
+- [What a library supplies to `crdkit.render`](#what-a-library-supplies-to-crdkitrender)
+- [Integration chain and the model](#integration-chain-and-the-model)
+- [Substitution](#substitution)
+- [Resolving tokens](#resolving-tokens)
+- [Target escalation](#target-escalation)
+- [Token model](#token-model)
+  - [Adding tokens from an integration](#adding-tokens-from-an-integration)
+- [Values schema](#values-schema)
+  - [Schema DSL](#schema-dsl)
+  - [Passes](#passes)
+  - [Templates](#templates)
+  - [Documentation](#documentation)
+  - [Editor support](#editor-support)
+
+<!-- /toc -->
+
 ## Who should depend on this
 
 A CRD-rendering library chart (`mdeploy` in this workspace), never an

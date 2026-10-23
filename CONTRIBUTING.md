@@ -29,6 +29,7 @@ integration chain, the values schema and its docs. Usage:
   `reference` (`docs/defines.md`), `diagnostics` (`docs/diagnostics.md`).
 - `scripts/examples.py` — README example blocks from
   `docs/readme-examples/<stem>.{yaml,tpl}`.
+- `scripts/toc.py` — a Markdown file's toc between toc markers.
 - `scripts/trace.sh` — readable diff of a render `trace`.
 - `docs/requirements.md` — the C- requirement catalogue.
 - `docs/defines.md`, `docs/diagnostics.md` — generated; `make docs`
@@ -113,6 +114,11 @@ Implementation notes:
 - `make docs` rewrites the blocks, `make test` (mdeploy: `run.sh docs`)
   fails on a stale block, a render failure or any diagnostic. Block
   shapes and rendering: the `scripts/examples.py` header.
+- The README toc is generated below the intro, levels 2–3, between
+  `<!-- toc depth=3 -->` and `<!-- /toc -->` (`scripts/toc.py`; `make
+  docs` writes it, `make test` / `run.sh docs` fail when stale). A
+  section belongs in the toc → level 2 or 3; a level-4 heading is left
+  out.
 
 ### Helm / Go template facts
 
