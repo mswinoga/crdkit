@@ -87,7 +87,7 @@ Implementation notes:
   {{- end -}}
 {{- end -}}
 
-{{- include "crdkit.integrations.chain" (dict "chain" .chain "ctx" $ctx) -}}
+{{- include "crdkit.integrations.chain" (dict "chain" .chain "ctx" $ctx "trace" .trace) -}}
 
 {{/* One pass over the model: every string leaf substituted, map keys left as data. */}}
 {{- $substituted := dict -}}

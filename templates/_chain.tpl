@@ -6,7 +6,8 @@ dispatcher for a specific library's "integration" templates.
 
 Interface:
 - Params (dict): { "chain": <list of fully-qualified template names>,
-  "ctx": <root/diag/model/tokens/target dict> }
+  "ctx": <root/diag/model/tokens/target dict>, "trace": <optional
+  caller-owned dict> }
 - Returns: nothing (each integration mutates `ctx` in place).
 
 Implementation notes:
@@ -18,11 +19,27 @@ Implementation notes:
 - Chain entry names are the caller's own naming (e.g.
   `"mdeploy.integrations.services"`) — crdkit never needs to know another
   chart's convention.
+- With `trace`, appends to `trace.stages` (created when missing):
+  `{entry: "", ctx}` before the first entry, then `{entry: <template
+  name>, ctx}` after each — a snapshot via
+  crdkit.snapshotCtx.internal. No `trace` → no snapshot, no cost.
 */}}
 {{- define "crdkit.integrations.chain" -}}
 {{- $ctx := .ctx -}}
 {{- $chain := .chain -}}
+{{- $trace := .trace -}}
+{{- if kindIs "map" $trace -}}
+  {{- if not (hasKey $trace "stages") -}}{{- $_ := set $trace "stages" (list) -}}{{- end -}}
+  {{- $snapshot := dict -}}
+  {{- include "crdkit.snapshotCtx.internal" (dict "ctx" $ctx "out" $snapshot) -}}
+  {{- $_ := set $trace "stages" (append $trace.stages (dict "entry" "" "ctx" $snapshot.ctx)) -}}
+{{- end -}}
 {{- range $template := $chain | default list -}}
   {{- include $template $ctx -}}
+  {{- if kindIs "map" $trace -}}
+    {{- $snapshot := dict -}}
+    {{- include "crdkit.snapshotCtx.internal" (dict "ctx" $ctx "out" $snapshot) -}}
+    {{- $_ := set $trace "stages" (append $trace.stages (dict "entry" $template "ctx" $snapshot.ctx)) -}}
+  {{- end -}}
 {{- end -}}
 {{- end -}}
