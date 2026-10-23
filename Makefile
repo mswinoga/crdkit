@@ -14,7 +14,9 @@ docs:
 test: deps
 	helm unittest tests/stub -f '../suites/*_test.yaml'
 	scripts/lint.sh --regex-check-define crdkit.regexValid.internal --pending tests/lint.pending \
-		--scopes public,internal --internal-suffix templates
+		--scopes public,internal --internal-suffix --doc-rules --md README.md --md CONTRIBUTING.md \
+		--md docs/requirements.md --requirements docs/requirements.md --tests tests --readme README.md \
+		templates
 	@set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
 		python3 -I scripts/extract.py reference . "$$tmp/defines.md"; \
 		python3 -I scripts/extract.py diagnostics . "$$tmp/diagnostics.md"; \

@@ -15,7 +15,7 @@ Test names cite these ids: every `it:` starts with the ids it covers
   differently; the entry states the target. The named feature
   (`docs/<feature>/`) fixes it and deletes the marker; its tests are
   committed with `skip:` / `# pending:`. Ids refer to
-  `docs/architecture-review/` (F- findings, Q- decisions).
+  `../docs/architecture-review/` (workspace) (F- findings, Q- decisions).
 
 ## Used by mdeploy
 

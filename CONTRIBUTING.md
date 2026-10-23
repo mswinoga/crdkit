@@ -47,7 +47,7 @@ Applies to CONTRIBUTING.md/README.md files and every template's doc comment.
 - Give a short "why" for non-obvious architectural/implementation
   decisions; skip the rationale when the decision is self-evident.
 - Never label a template or file as "new" (e.g. "(public, new)",
-  "new `templates/_paths.tpl`") — in docs, specs, plans or doc comments.
+  "new `templates/_<name>.tpl`") — in docs, specs, plans or doc comments.
   Name it plainly; specs and plans describe the target state.
 - A doc comment names no define that calls it — `docs/defines.md` lists
   callers, calls and ctx effects. A ctx path is written with its `ctx.`
@@ -82,7 +82,7 @@ non-obvious "why" — never restate what the code already does.
 Example skeleton:
 ```gotemplate
 {{/*
-crdkit.example.internal (internal)
+crdkit.<name>.internal (internal)
 
 Resolves X for Y.
 
@@ -93,7 +93,7 @@ Interface:
 Implementation notes:
 - <corner case, only if non-obvious>
 */}}
-{{- define "crdkit.example.internal" -}}
+{{- define "crdkit.<name>.internal" -}}
 ...
 {{- end -}}
 ```
@@ -516,7 +516,7 @@ Layout:
 - `tests/stub/` — chart `stub` (dependency crdkit `file://../..`): a
   minimal library on crdkit's public API, so a contract test is values
   only.
-  - `templates/_stub.tpl`: `stub.render` passes every `crdkit.render`
+  - `tests/stub/templates/_stub.tpl`: `stub.render` passes every `crdkit.render`
     param from `.Values` (`tokens`, `target`, `system`, `state`,
     `annotations` → `tokenAnnotations`, `diag` seed when the key is
     present, `ladder` → `parentTargetTemplate: stub.parentTarget`);
@@ -532,14 +532,14 @@ Layout:
     `validateValues`, `resolve`, `schemaValue`, `node`, `path`;
     `labels`/`dependencyVersion`/`name`. `at` writes the result at a
     model path, so the final substitution applies to it.
-  - `templates/docs.yaml`: `stub.docs` renders
+  - `tests/stub/templates/docs.yaml`: `stub.docs` renders
     `crdkit.schema.document` from `.Values.docs` (gated; no `docs` key →
     nothing), `text` + decoded `json`, through the adapter.
-  - `templates/_adapter.tpl`: `test.withDiagnostics` prints the render,
+  - `tests/stub/templates/_adapter.tpl`: `test.withDiagnostics` prints the render,
     then its `# ERROR|WARNING|INFO:` lines as data under
     `diagnostics: {error, warning, info}` (a level key only when it has
     lines; no `diagnostics` key on a clean render).
-  - `templates/cr.yaml`: the adapter around `stub.render`.
+  - `tests/stub/templates/cr.yaml`: the adapter around `stub.render`.
 - `tests/fixtures/base.yaml` — `target: b-01`, ladder `b-01 → b → ALL`.
 - `tests/suites/*_test.yaml` — `helm unittest tests/stub -f
   '../suites/*_test.yaml'`; `values: [../fixtures/base.yaml]` + `set:`
@@ -588,7 +588,11 @@ forwarded to the extractor):
   `internal` scope, `--peer` names another chart's defines for the doc
   rules): `define-naming`, `output-writes-ctx`,
   `mutator-undeclared-write`, `dead-define`, `doc-unknown-define`,
-  `doc-names-caller`.
+  `doc-names-caller`; `--doc-rules`: `doc-param-mismatch`, `doc-shape`;
+  `--md <file>`…: `doc-unknown-define` and `dead-reference` over
+  Markdown; `--requirements` + `--tests`: `requirement-ids`;
+  `--readme`: `readme-unmarked-block` (flags and hits:
+  `scripts/extract.py` header).
 - Output: `FAIL <rule> <file>:<line>: <text>`, `PENDING (<reason>) …`,
   `FIXED? (<reason>) <rule> <file>` (a pending entry without a hit),
   then one `lint.sh: <n> hits, <f> failed, <p> pending` summary counting

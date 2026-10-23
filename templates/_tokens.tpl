@@ -83,7 +83,8 @@ string; first match wins.
 
 Interface:
 - Params (dict): { "subject": <string>, "rules": <list of single-key
-  {pattern: replacement} dicts, may be nil/empty> }
+  {pattern: replacement} dicts, may be nil/empty>, "diag": <dict,
+  optional>, "label": <string, optional> }
 - Returns YAML: { "matched": <bool>, "value": <string> }
 
 Implementation notes:
@@ -141,8 +142,8 @@ Default "parentTarget" template when a caller supplies none — no
 escalation beyond the exact target.
 
 Interface:
-- Params (dict): { "target": <string>, "context": <root $> } — the
-  shape every "parentTarget" template receives.
+- Params (dict): the `{target, context}` shape every "parentTarget"
+  template receives; both unused.
 - Returns: nothing.
 */}}
 {{- define "crdkit.noParentTarget" -}}

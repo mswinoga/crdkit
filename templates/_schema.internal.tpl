@@ -702,7 +702,7 @@ Interface:
   value as written: a token declaration, a plain value or a string with
   markers>, "tokens": <bool, the node is per-target>, "path": <values
   path>, "target": <string>, "seen": <dict>, "out": <dict, written in
-  place> }
+  place>, "token": <token name, optional — resolved instead of "def"> }
 - Returns: nothing; sets out.value to the resolved value — for an
   `int` / `number` / `bool` node, a resolved string that passes the node's
   "parses as" check (crdkit.schema.scalarReason.internal) converted to

@@ -496,7 +496,8 @@ string; first match wins.
 
 Interface:
 - Params (dict): { "subject": <string>, "rules": <list of single-key
-  {pattern: replacement} dicts, may be nil/empty> }
+  {pattern: replacement} dicts, may be nil/empty>, "diag": <dict,
+  optional>, "label": <string, optional> }
 - Returns YAML: { "matched": <bool>, "value": <string> }
 
 Implementation notes:
@@ -575,8 +576,8 @@ Default "parentTarget" template when a caller supplies none — no
 escalation beyond the exact target.
 
 Interface:
-- Params (dict): { "target": <string>, "context": <root $> } — the
-  shape every "parentTarget" template receives.
+- Params (dict): the `{target, context}` shape every "parentTarget"
+  template receives; both unused.
 - Returns: nothing.
 
 <a id="crdkit.regexValid.internal"></a>
@@ -1212,9 +1213,9 @@ values schema, for editors and the HTML viewer.
 
 Interface:
 - Params (dict): { "schemaText": <schema as YAML text>, "example":
-  <example values, optional>, "sections": <{<node path>: [<section>]}>,
-  optional>, "title": <root title, optional — default "Values">,
-  "diag": <dict> }
+  <example values, optional>, "sections": <{<node path>: [<section>]},
+  optional>, "title": <root title, optional — default "Values">, "id":
+  <root `$id`, optional>, "diag": <dict> }
 - Returns: the JSON Schema as pretty-printed JSON text; `{}` when the
   schema fails crdkit.schema.check (its ERRORs are recorded).
 
@@ -1705,7 +1706,7 @@ Interface:
   value as written: a token declaration, a plain value or a string with
   markers>, "tokens": <bool, the node is per-target>, "path": <values
   path>, "target": <string>, "seen": <dict>, "out": <dict, written in
-  place> }
+  place>, "token": <token name, optional — resolved instead of "def"> }
 - Returns: nothing; sets out.value to the resolved value — for an
   `int` / `number` / `bool` node, a resolved string that passes the node's
   "parses as" check (crdkit.schema.scalarReason.internal) converted to

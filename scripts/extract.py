@@ -8,9 +8,26 @@ Usage:
       (script tags work on file://, fetch does not). Prints a define and
       edge summary to stderr.
   extract.py lint [--pending <file>] [--scopes <list>] [--internal-suffix]
-                  [--peer <templates dir>]... <templates dir>
-      The rules of spec §8.2, on one templates dir: define naming, ctx
-      writes, dead defines, doc-comment names.
+                  [--peer <templates dir>]... [--doc-rules] [--md <file>]...
+                  [--requirements <file>] [--tests <dir>] [--readme <file>]
+                  <templates dir>
+      The lint rules on one templates dir (the chart dir is its parent):
+      define-naming, output-writes-ctx, mutator-undeclared-write,
+      dead-define, doc-unknown-define (doc comments and every --md
+      file), doc-names-caller; with --doc-rules doc-param-mismatch (a
+      `Params (dict)` key list ≠ the keys the body reads) and doc-shape
+      (a purpose over 2 lines; no `Interface:` outside a callback);
+      requirement-ids (with --requirements and --tests: an R-/C- id
+      cited in --tests files, --md files or doc comments that the
+      catalogue lacks; a core/contract entry no --tests file cites);
+      dead-reference (--md files and template comments: a repo path in a
+      backtick span or link that does not exist, a link anchor no
+      heading has, `See [crdkit ]CONTRIBUTING "<heading>"` naming no
+      heading); readme-unmarked-block (with --readme: a fenced block
+      outside example markers without `<!-- sketch -->` on the line
+      before). Output `FAIL|PENDING (<reason>) <rule> <file>:<line>:
+      <text>`, `FIXED? (<reason>) <rule> <file>`, then one summary line;
+      exit 0 clean, 1 on a failure, 2 on a usage error.
   extract.py reference [--peer <templates dir>]... <chart dir> <out.md>
       The generated per-define reference (spec §9): index, ctx slots
       with writers and readers, one section per define.
@@ -419,7 +436,224 @@ def graph(argv):
 
 
 LINT_RULES = ("define-naming", "output-writes-ctx", "mutator-undeclared-write",
-              "dead-define", "doc-unknown-define", "doc-names-caller")
+              "dead-define", "doc-unknown-define", "doc-names-caller", "doc-param-mismatch",
+              "doc-shape", "requirement-ids", "dead-reference", "readme-unmarked-block")
+
+STRING = re.compile(r'"(?:[^"\\]|\\.)*"|`[^`]*`')
+KEY_READ = re.compile(r'\b(?:index|hasKey|get)\s+(\.|\$[A-Za-z_]\w*)\s+"(\w+)"')
+DOT_READ = re.compile(r'(?<![\w$)\]])\.([A-Za-z_]\w*)')
+ROOT_READ = re.compile(r'\$\.([A-Za-z_]\w*)')
+WHOLE_DOT = re.compile(r'(?<![\w$)\].])\.(?![\w.])|\$(?![\w.])')
+KEYWORD = re.compile(r'^\s*(range|with|if|else|end|block)\b\s*(.*)$', re.S)
+
+
+def documented_params(doc):
+    """Quoted top-level keys of a `Params (dict): { "k": …, … }` line, or None for another params shape."""
+    m = re.search(r'^- Params \(dict\):\s*\{', doc, re.M)
+    if not m:
+        return None
+    depth, keys, i = 1, set(), m.end()
+    while i < len(doc) and depth:
+        ch = doc[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+        elif ch == '"' and depth == 1:
+            k = re.match(r'"([A-Za-z_]\w*)"\s*:', doc[i:])
+            if k:
+                keys.add(k.group(1))
+                i += k.end() - 1
+        i += 1
+    return keys
+
+
+def param_reads(body):
+    """Keys of the define's own dict argument the body reads, or None when `.` is passed on whole."""
+    reads, aliases, dot = set(), set(), [True]
+    stack = []
+    for a in ACTION.finditer(body):
+        text = a.group(1)
+        km = KEYWORD.match(text)
+        word, expr = (km.group(1), km.group(2)) if km else ("", text)
+        if word == "end":
+            if stack:
+                dot[0] = stack.pop()[1]
+            continue
+        rebind = word in ("range", "with")
+        if word == "else" and stack:
+            # The else branch of range/with runs with the outer dot; `else with X` rebinds it again.
+            dot[0] = stack[-1][1] if stack[-1][0] in ("range", "with") else dot[0]
+            sub = KEYWORD.match(expr)
+            if sub and sub.group(1) in ("with", "if"):
+                expr = sub.group(2)
+                if sub.group(1) == "with":
+                    stack[-1], rebind = ("with", dot[0]), True
+        outer = dot[0]
+        for m in KEY_READ.finditer(expr):
+            if (m.group(1) == "." and outer) or m.group(1) in aliases:
+                reads.add(m.group(2))
+        bare = STRING.sub('""', KEY_READ.sub("", expr))
+        reads |= set(ROOT_READ.findall(bare))
+        if outer:
+            reads |= set(DOT_READ.findall(bare))
+            am = ASSIGN.match(bare)
+            if am and am.group(2).strip() == ".":
+                aliases.add(am.group(1))
+                bare = bare[:am.start(2)]
+            if WHOLE_DOT.search(bare):
+                return None
+        for v in aliases:
+            reads |= set(re.findall(re.escape(v) + r'\.([A-Za-z_]\w*)', bare))
+            if re.search(re.escape(v) + r'(?![\w.])', bare) and not re.match(r'\s*' + re.escape(v) + r'\s*:?=', bare):
+                return None
+        if word in ("range", "with", "if", "block"):
+            stack.append((word, outer))
+        if rebind:
+            dot[0] = False
+    return reads
+
+
+def doc_shape(d):
+    """doc-shape problems of one define's doc comment (purpose length, missing Interface)."""
+    lines = d["doc"].splitlines()
+    cut = next((i for i, l in enumerate(lines) if re.match(r'^(Interface|Implementation notes):\s*$', l)), len(lines))
+    purpose = [l for l in lines[:cut] if l.strip()]
+    out = []
+    if len(purpose) > 2:
+        out.append(f"{d['name']} has a {len(purpose)}-line purpose (at most 2)")
+    if d["scope"] != "callback" and not any(re.match(r'^Interface:\s*$', l) for l in lines):
+        out.append(f"{d['name']} has no 'Interface:'")
+    return out
+
+
+def slug(heading):
+    """GitHub anchor of a heading text."""
+    text = re.sub(r'[^\w\- ]', "", heading.strip().lower())
+    return text.replace(" ", "-")
+
+
+def md_headings(text):
+    """(heading texts, anchors) of a Markdown file; fenced blocks skipped, `<a id|name>` anchors included."""
+    texts, anchors, seen, fence = set(), set(), {}, None
+    for line in text.splitlines():
+        f = re.match(r'^\s*(```|~~~)', line)
+        if f:
+            fence = None if fence == f.group(1) else (fence or f.group(1))
+            continue
+        if fence:
+            continue
+        h = re.match(r'^#{1,6}\s+(.*?)\s*#*\s*$', line)
+        if h:
+            texts.add(h.group(1))
+            s = slug(h.group(1))
+            n = seen.get(s, 0)
+            anchors.add(s if n == 0 else f"{s}-{n}")
+            seen[s] = n + 1
+        anchors |= set(re.findall(r'<a\s+(?:id|name)="([^"]+)"', line))
+    return texts, anchors
+
+
+LINE_SUFFIX = re.compile(r':\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*$')
+
+
+def reference_hits(text, src, root, peers, md_cache):
+    """dead-reference hits of one text (a Markdown file or a template comment): [(line index, message)]."""
+    hits = []
+    top = {p.name for p in root.iterdir() if not p.name.startswith(".")}
+    peer_roots = {f"../{p.name}": p for p in peers}
+
+    def headings(path):
+        if path not in md_cache:
+            md_cache[path] = md_headings(path.read_text()) if path.is_file() else (set(), set())
+        return md_cache[path]
+
+    def check_path(ref, base, i, link):
+        ref = LINE_SUFFIX.sub("", ref)
+        path, _, anchor = ref.partition("#")
+        if any(c in path for c in "<*{ ") or re.match(r'^\w+:', path):
+            return
+        if not path:
+            if link and anchor and anchor not in headings(src)[1]:
+                hits.append((i, f"'#{anchor}' names no heading of {src.name}"))
+            return
+        target = None
+        first = path.split("/")[0]
+        if link:
+            resolved = (base / path).resolve()
+            for prefix, proot in peer_roots.items():
+                if path.startswith(prefix + "/") or path == prefix:
+                    target = resolved
+            try:
+                rel = resolved.relative_to(root.resolve())
+                if rel.parts and rel.parts[0] in top:
+                    target = resolved
+            except ValueError:
+                pass
+        elif first in top:
+            target = root / path
+        elif any(path == p or path.startswith(p + "/") for p in peer_roots):
+            target = root / path
+        if target is None:
+            return
+        if not target.exists():
+            hits.append((i, f"'{path}' does not exist"))
+        elif link and anchor and target.suffix == ".md" and anchor not in headings(target)[1]:
+            hits.append((i, f"'{path}#{anchor}' names no heading"))
+
+    fence = None
+    for i, line in enumerate(text.splitlines()):
+        f = re.match(r'^\s*(```|~~~)', line)
+        if f:
+            fence = None if fence == f.group(1) else (fence or f.group(1))
+            continue
+        if fence:
+            continue
+        for m in re.finditer(r'\[[^\]]*\]\(([^)\s]+)\)', line):
+            check_path(m.group(1), src.parent, i, True)
+        for m in re.finditer(r'`([^`]+)`', re.sub(r'\[[^\]]*\]\([^)]*\)', "", line)):
+            check_path(m.group(1), src.parent, i, False)
+        for m in re.finditer(r'See (crdkit )?CONTRIBUTING "([^"]+)"', line):
+            contributing = (peer_roots.get("../crdkit") if m.group(1) else root)
+            if contributing is None:
+                hits.append((i, f"'crdkit CONTRIBUTING' needs --peer ../crdkit/templates"))
+            elif m.group(2) not in headings(contributing / "CONTRIBUTING.md")[0]:
+                hits.append((i, f"CONTRIBUTING has no heading '{m.group(2)}'"))
+    return hits
+
+
+def unmarked_blocks(text):
+    """Line indexes of fenced blocks outside example markers without `<!-- sketch -->` on the line before."""
+    out, lines, fence, inside = [], text.splitlines(), None, False
+    for i, line in enumerate(lines):
+        if re.match(r'^\s*<!--\s*example:', line):
+            inside = True
+        elif re.match(r'^\s*<!--\s*/example\s*-->', line):
+            inside = False
+        f = re.match(r'^\s*(```|~~~)', line)
+        if not f:
+            continue
+        if fence:
+            fence = None if f.group(1) == fence else fence
+            continue
+        fence = f.group(1)
+        if not inside and not (i and lines[i - 1].strip() == "<!-- sketch -->"):
+            out.append(i)
+    return out
+
+
+REQ_ID = re.compile(r'(?<![\w-])(C-\d+|R-[A-Z]+-\d+)(?![\w-])')
+REQ_ENTRY = re.compile(r'^\s*-\s+\*\*(C-\d+|R-[A-Z]+-\d+)\*\*\s+·\s+(\w+)')
+
+
+def text_files(top):
+    """Readable text files under a dir (packaged charts and snapshots skipped)."""
+    for p in sorted(Path(top).rglob("*")):
+        if p.is_file() and not ({"charts", "__snapshot__"} & set(p.parts)):
+            try:
+                yield p, p.read_text()
+            except UnicodeDecodeError:
+                continue
 
 
 def read_pending(path):
@@ -456,30 +690,35 @@ def known_name(name, names):
 
 def lint_options(argv):
     """(options, error): `lint` flags and the one templates dir."""
-    opts = {"pending": "", "scopes": [], "internal_suffix": False, "peers": [], "dir": "", "help": False}
+    opts = {"pending": "", "scopes": [], "internal_suffix": False, "doc_rules": False, "peers": [], "md": [],
+            "requirements": "", "tests": "", "readme": "", "dir": "", "help": False}
     args = list(argv)
     while args:
         a = args.pop(0)
         if a in ("-h", "--help"):
             opts["help"] = True
-        elif a in ("--pending", "--scopes", "--peer"):
+        elif a in ("--pending", "--scopes", "--peer", "--md", "--requirements", "--tests", "--readme"):
             if not args:
                 return opts, f"{a} needs a value"
             v = args.pop(0)
-            if a == "--pending":
-                opts["pending"] = v
-            elif a == "--scopes":
+            if a == "--scopes":
                 opts["scopes"] = [s for s in v.split(",") if s]
+            elif a in ("--peer", "--md"):
+                opts[a[2:] + ("s" if a == "--peer" else "")].append(v)
             else:
-                opts["peers"].append(v)
+                opts[a[2:]] = v
         elif a == "--internal-suffix":
             opts["internal_suffix"] = True
+        elif a == "--doc-rules":
+            opts["doc_rules"] = True
         elif a.startswith("-"):
             return opts, f"unknown flag: {a}"
         elif not opts["dir"]:
             opts["dir"] = a.rstrip("/")
         else:
             return opts, "lint takes one <templates dir>"
+    if bool(opts["requirements"]) != bool(opts["tests"]):
+        return opts, "--requirements and --tests go together"
     return opts, "" if (opts["dir"] or opts["help"]) else "lint takes <templates dir>"
 
 
@@ -492,13 +731,17 @@ def lint(argv):
         print(__doc__.strip())
         return 0
 
-    meta, parsed = chart_templates(Path(opts["dir"]).parent)
+    root = Path(opts["dir"]).parent
+    meta, parsed = chart_templates(root)
+    bodies = {d["name"]: code[d["_span"][0]:d["_span"][1]] for _, code, ds, _ in parsed for d in ds}
     defines, edges = analyze_chart(parsed)
-    prefix = meta.get("name") or Path(opts["dir"]).parent.name
+    prefix = meta.get("name") or root.name
     names = {d["name"] for d in defines}
     prefixes = [prefix]
+    peer_roots = []
     for peer in opts["peers"]:
-        pmeta, pparsed = chart_templates(Path(peer.rstrip("/")).parent)
+        peer_roots.append(Path(peer.rstrip("/")).parent)
+        pmeta, pparsed = chart_templates(peer_roots[-1])
         pdefines, _ = analyze_chart(pparsed)
         names |= {d["name"] for d in pdefines}
         prefixes.append(pmeta.get("name") or Path(peer).parent.name)
@@ -513,6 +756,9 @@ def lint(argv):
 
     def hit(rule, d, text, line=None):
         hits.append((rule, f"{opts['dir']}/{d['file']}", d["line"] if line is None else line, text))
+
+    def hit_at(rule, file, line, text):
+        hits.append((rule, str(file), line, text))
 
     for d in defines:
         name, scope = d["name"], d["scope"]
@@ -557,6 +803,66 @@ def lint(argv):
                 hit("doc-unknown-define", d, f"{mention} is not a define", d["docLine"] + i)
             elif scope != "callback" and mention in callers.get(name, ()):
                 hit("doc-names-caller", d, f"{mention} calls {name}", d["docLine"] + i)
+        documented = documented_params(d["doc"]) if opts["doc_rules"] else None
+        if documented is not None:
+            read = param_reads(bodies[name])
+            # A callback documents the caller's fixed shape: it may leave keys unread.
+            unread = documented - read if read is not None and scope != "callback" else set()
+            if read is not None and (unread or read - documented):
+                gaps = [f"documented, never read: {', '.join(sorted(unread))}" if unread else "",
+                        f"read, undocumented: {', '.join(sorted(read - documented))}" if read - documented else ""]
+                hit("doc-param-mismatch", d, f"{name} params — " + "; ".join(g for g in gaps if g))
+        if scope and opts["doc_rules"]:
+            for problem in doc_shape(d):
+                hit("doc-shape", d, problem)
+
+    md_texts = {md: Path(md).read_text() for md in opts["md"] + ([opts["readme"]] if opts["readme"] else [])}
+    for md in opts["md"]:
+        for mention, i in name_mentions(md_texts[md], prefixes):
+            if not known_name(mention, names):
+                hit_at("doc-unknown-define", md, i + 1, f"{mention} is not a define")
+
+    if opts["requirements"]:
+        catalogue = Path(opts["requirements"])
+        entries = {}
+        for i, line in enumerate(catalogue.read_text().splitlines()):
+            m = REQ_ENTRY.match(line)
+            if m:
+                entries[m.group(1)] = (m.group(2), i + 1)
+        cited = set()
+
+        def cite(file, text, base=1):
+            for i, line in enumerate(text.splitlines()):
+                for m in REQ_ID.finditer(line):
+                    if m.group(1) not in entries:
+                        hit_at("requirement-ids", file, base + i, f"{m.group(1)} is not in {catalogue}")
+        for p, text in text_files(opts["tests"]):
+            cited |= set(REQ_ID.findall(text))
+            cite(p, text)
+        for md in opts["md"]:
+            if Path(md).resolve() != catalogue.resolve():
+                cite(md, md_texts[md])
+        for d in defines:
+            cite(f"{opts['dir']}/{d['file']}", d["doc"], d["docLine"])
+        for rid, (cls, line) in sorted(entries.items()):
+            if cls in ("core", "contract") and rid not in cited:
+                hit_at("requirement-ids", catalogue, line, f"{rid} ({cls}) is cited by no file under {opts['tests']}")
+
+    md_cache = {}
+    for md, text in md_texts.items():
+        for i, msg in reference_hits(text, Path(md), root, peer_roots, md_cache):
+            hit_at("dead-reference", md, i + 1, msg)
+    for p, _, _, _ in parsed:
+        raw = p.read_text()
+        for c in COMMENT.finditer(raw):
+            base = raw.count("\n", 0, c.start()) + 1
+            for i, msg in reference_hits(c.group(0), p, root, peer_roots, md_cache):
+                hit_at("dead-reference", f"{opts['dir']}/{p.relative_to(root / 'templates')}", base + i, msg)
+
+    if opts["readme"]:
+        for i in unmarked_blocks(md_texts[opts["readme"]]):
+            hit_at("readme-unmarked-block", opts["readme"], i + 1,
+                   "fenced block outside example markers, no '<!-- sketch -->' on the line before")
 
     pending, order = read_pending(opts["pending"])
     seen, hits_n, failed, pending_n = set(), 0, 0, 0

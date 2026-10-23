@@ -400,9 +400,9 @@ values schema, for editors and the HTML viewer.
 
 Interface:
 - Params (dict): { "schemaText": <schema as YAML text>, "example":
-  <example values, optional>, "sections": <{<node path>: [<section>]}>,
-  optional>, "title": <root title, optional — default "Values">,
-  "diag": <dict> }
+  <example values, optional>, "sections": <{<node path>: [<section>]},
+  optional>, "title": <root title, optional — default "Values">, "id":
+  <root `$id`, optional>, "diag": <dict> }
 - Returns: the JSON Schema as pretty-printed JSON text; `{}` when the
   schema fails crdkit.schema.check (its ERRORs are recorded).
 
