@@ -1,0 +1,159 @@
+suite: crdkit library API — annotations, markers, diagnostics
+templates: [cr.yaml]
+values: [../fixtures/base.yaml]
+tests:
+  # --- C-35 token.annotate ---
+  - it: "C-35: annotate overwrites a declared key and never affects the value"
+    set:
+      annotations: [owner]
+      tokens: {T: old}
+      ops:
+        - {add: T, value: old, annotations: {owner: team-a}}
+        - {annotate: T, annotations: {owner: team-b}}
+        - {info: T, at: [info]}
+        - {tokenValue: T, at: [value]}
+    asserts:
+      - equal: {path: info.annotations.owner, value: team-b}
+      - equal: {path: value, value: old}
+      - notExists: {path: diagnostics}
+  - it: "C-35: annotate on an unknown token is an ERROR and is ignored"
+    set:
+      annotations: [owner]
+      ops: [{annotate: NOPE, annotations: {owner: x}}]
+    asserts:
+      - lengthEqual: {path: diagnostics.error, count: 1}
+      - exists: {path: "diagnostics.error[?(@ =~ /annotate: unknown token 'NOPE'/)]"}
+  - it: "C-35: non-dict annotations is an ERROR and is ignored"
+    set:
+      annotations: [owner]
+      tokens: {T: old}
+      ops: [{annotate: T, annotations: [x]}]
+    asserts:
+      - exists: {path: "diagnostics.error[?(@ =~ /annotate for 'T'.*must be a dict/)]"}
+  - it: "C-35: an undeclared annotation key is an ERROR and is dropped"
+    set:
+      annotations: [owner]
+      tokens: {T: old}
+      ops:
+        - {annotate: T, annotations: {other: x, owner: ok}}
+        - {info: T, at: [info]}
+    asserts:
+      - equal: {path: info.annotations, value: {owner: ok}}
+      - exists: {path: "diagnostics.error[?(@ =~ /annotate for 'T': 'other' is not a token annotation/)]"}
+  # --- C-36 token.info ---
+  - it: "C-36: info reports a declared token's declared annotation keys only"
+    set:
+      annotations: [owner]
+      tokens: {T: {default: d, owner: team-a}}
+      ops: [{info: T, at: [info]}]
+    asserts:
+      - equal: {path: info, value: {exists: true, annotations: {owner: team-a}}}
+      - notExists: {path: diagnostics}
+  - it: "C-36: info on a missing token reports exists: false and no diagnostic"
+    set:
+      annotations: [owner]
+      ops: [{info: NOPE, at: [info]}]
+    asserts:
+      - equal: {path: info.exists, value: false}
+      - equal: {path: info.annotations, value: {}}
+      - notExists: {path: diagnostics}
+  # --- C-37 token.names ---
+  - it: "C-37: names lists every token sorted"
+    set:
+      tokens: {B: "1", A: "2", C: "3"}
+      ops: [{names: {}, at: [names]}]
+    asserts:
+      - equal: {path: names, value: [A, B, C]}
+  - it: "C-37: names filters by annotation and by its value"
+    set:
+      annotations: [service]
+      tokens:
+        B: {default: "1", service: PAY}
+        A: {default: "2", service: PAY}
+        C: {default: "3", service: OTHER}
+      ops:
+        - {names: {}, at: [all]}
+        - {names: {annotation: service}, at: [annotated]}
+        - {names: {annotation: service, equals: PAY}, at: [paid]}
+        - {names: {annotation: absent}, at: [none]}
+    asserts:
+      - equal: {path: all, value: [A, B, C]}
+      - equal: {path: annotated, value: [A, B, C]}
+      - equal: {path: paid, value: [A, B]}
+      - equal: {path: none, value: []}
+  # --- C-38 markerPattern, markers ---
+  - it: "C-38: markerPattern returns the one marker regex, grouped on request"
+    set:
+      ops:
+        - {markerPattern: {}, at: [plain]}
+        - {markerPattern: {group: true}, at: [grouped]}
+    asserts:
+      - equal: {path: plain, value: "@[A-Za-z0-9_.]+@"}
+      - equal: {path: grouped, value: "@([A-Za-z0-9_.]+)@"}
+  - it: "C-38: markers lists string leaves only, deduplicated, without AT"
+    set:
+      ops:
+        - {markers: {a: "x @A@ @B@", b: ["@A@", "@AT@", "@.rel@"], "@K@": x}, at: [markers]}
+    asserts:
+      - equal: {path: markers, value: [A, B, .rel]}
+  # --- C-39 diag.lines, diag.count ---
+  - it: "C-39: lines print ERROR, WARNING, INFO in order, deduplicated"
+    set:
+      ops:
+        - {diag: info, msg: i1}
+        - {diag: warning, msg: w1}
+        - {diag: error, msg: e2}
+        - {diag: error, msg: e1}
+        - {diag: error, msg: e1}
+        - {diagLines: {}, at: [text]}
+    asserts:
+      - equal:
+          path: text
+          value: |-
+            # ERROR: e2
+            # ERROR: e1
+            # WARNING: w1
+            # INFO: i1
+  - it: "C-39: lines honour a level subset and are empty when clean"
+    set:
+      ops:
+        - {diag: error, msg: e1}
+        - {diag: warning, msg: w1}
+        - {diagLines: [warning], at: [warn]}
+        - {diagLines: [info], at: [info]}
+    asserts:
+      - equal: {path: warn, value: "# WARNING: w1"}
+      - equal: {path: info, value: ""}
+  - it: "C-39: count is the distinct count of one level; a missing level is 0"
+    set:
+      ops:
+        - {diag: error, msg: e1}
+        - {diag: error, msg: e1}
+        - {diag: error, msg: e2}
+        - {diag: warning, msg: w1}
+        - {diagCount: error, at: [errors]}
+        - {diagCount: warning, at: [warnings]}
+        - {diagCount: nope, at: [unknown]}
+    asserts:
+      - equal: {path: errors, value: "2"}
+      - equal: {path: warnings, value: "1"}
+      - equal: {path: unknown, value: "0"}
+  # --- C-14 add/underlay undeclared annotation key ---
+  - it: "C-14: add drops an undeclared annotation key with an ERROR"
+    set:
+      annotations: [owner]
+      ops:
+        - {add: T, value: v, annotations: {nope: x}}
+        - {info: T, at: [info]}
+    asserts:
+      - equal: {path: info.annotations, value: {}}
+      - exists: {path: "diagnostics.error[?(@ =~ /token.add for 'T': 'nope' is not a token annotation/)]"}
+  - it: "C-15: underlay drops an undeclared annotation key with an ERROR"
+    set:
+      annotations: [owner]
+      ops:
+        - {underlay: T, value: v, annotations: {nope: x}}
+        - {info: T, at: [info]}
+    asserts:
+      - equal: {path: info.annotations, value: {}}
+      - exists: {path: "diagnostics.error[?(@ =~ /token.underlay for 'T': 'nope' is not a token annotation/)]"}

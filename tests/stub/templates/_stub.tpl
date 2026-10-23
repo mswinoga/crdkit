@@ -15,26 +15,33 @@ Interface:
     stub.parentTarget`;
   - `schema` + `input` → `crdkit.schema.validate` before the render;
     the validated input and the schema reach the chain as
-    `state.input` / `state.schema`;
+    `state.input` / `state.schema` (and `state.seen` starts as `{}`);
   - `ops` → run by `stub.ops`, the only chain entry;
   - `reportSeed: true` → appends `seed: {errors: <n>}`, the length of
-    the caller's seed `errors` after the render.
-- Returns: the `crdkit.render` text (+ the `seed` line).
+    the caller's seed `errors` after the render;
+  - `trace: true` → passes `trace: {}` and appends `trace: <compact
+    JSON>`.
+- Returns: the `crdkit.render` text (+ the `seed`/`trace` lines).
 
 Implementation notes:
+- `state` is a fresh copy; `seen` is the shared de-duplication dict of
+  the schema ops.
 - The default seed holds all three lists: a pre-render pass
   (`schema.validate`) appends to them before `crdkit.render` fills in
   missing ones.
 */}}
 {{- define "stub.render" -}}
 {{- $v := .Values | toYaml | fromYaml -}}
+{{- $state := $v.state | default dict -}}
+{{- $_ := set $state "seen" (dict) -}}
 {{- $args := dict "context" . "tokens" ($v.tokens | default dict) "target" $v.target
-      "system" ($v.system | default dict) "chain" (list "stub.ops")
-      "tokenAnnotations" ($v.annotations | default list) "state" ($v.state | default dict) -}}
+      "system" ($v.system | default dict) "defaults" ($v.defaults | default dict) "chain" (list "stub.ops")
+      "tokenAnnotations" ($v.annotations | default list) "state" $state -}}
 {{- if $v.ladder -}}{{- $_ := set $args "parentTargetTemplate" "stub.parentTarget" -}}{{- end -}}
 {{- $diag := dict "errors" (list) "warnings" (list) "infos" (list) -}}
 {{- if hasKey $v "diag" -}}{{- $diag = $v.diag -}}{{- end -}}
 {{- $_ := set $args "diag" $diag -}}
+{{- if $v.trace -}}{{- $_ := set $args "trace" (dict) -}}{{- end -}}
 {{- if $v.schema -}}
   {{- $input := (include "crdkit.schema.validate" (dict "schema" $v.schema "values" ($v.input | default dict) "diag" $diag) | fromYaml).value -}}
   {{- $_ := set $args "state" (merge (dict "schema" $v.schema "input" $input) $args.state) -}}
@@ -43,6 +50,9 @@ Implementation notes:
 {{- if $v.reportSeed }}
 seed: {errors: {{ len ($diag.errors | default list) }}}
 {{- end -}}
+{{- if $v.trace }}
+trace: {{ (index $args "trace") | toJson | quote }}
+{{- end }}
 {{- end -}}
 
 {{/*
@@ -61,6 +71,25 @@ Interface:
 {{- end -}}
 
 {{/*
+stub.write (test)
+
+Writes `value` at the `at` path of `model`, creating map levels.
+Invoked by `stub.ops` for ops whose result is not a map merge.
+
+Interface:
+- Params: `{model, at, value}` (`at` has at least one element).
+- Returns: "".
+*/}}
+{{- define "stub.write" -}}
+{{- $node := .model -}}
+{{- range $key := initial .at -}}
+  {{- if not (hasKey $node $key) -}}{{- $_ := set $node $key (dict) -}}{{- end -}}
+  {{- $node = index $node $key -}}
+{{- end -}}
+{{- $_ := set $node (last .at) .value -}}
+{{- end -}}
+
+{{/*
 stub.ops (test)
 
 The stub's only chain integration. Invoked by `crdkit.integrations.chain`.
@@ -68,32 +97,140 @@ Sets `kind: Stub`, then runs `.Values.ops` in list order.
 
 Interface:
 - Param: ctx.
-- Ops (one key selects the op):
-  - `{put: [k1..kN], value}` — `crdkit.dictMerge`: model.k1…kN = value;
-  - `{add: name, value, annotations?, target?}` — `crdkit.token.add`;
-  - `{underlay: name, value, annotations?, target?}` —
-    `crdkit.token.underlay`;
+- Ops (the key selects the op; `at` is a model path written through
+  `stub.write`):
+  - `{put: [k1..kN], value}` — `crdkit.dictMerge`;
+  - `{listExtend: [k1..kN], value}` — `crdkit.listExtend`;
+  - `{ensureDictKey: key, default}` — `crdkit.ensureDictKey`;
+  - `{hasPath: [k1..kN], at}` — `crdkit.model.hasPath`;
+  - `{add|underlay: name, value, annotations?, target?}` —
+    `crdkit.token.add` / `crdkit.token.underlay`;
+  - `{tokenValue: name, target?, at}` · `{tokenString: name, target?,
+    at}` — `crdkit.token.value` (`.value`) · `crdkit.token.string`;
+  - `{tokenDef: <decl>, id, target?, string?, at}` —
+    `crdkit.tokenDef.value` / `crdkit.tokenDef.string`;
+  - `{substitute: text, target?, at}` — `crdkit.tokens.substitute`;
+  - `{matchRules: rules, subject, consumer?, at}` — `crdkit.matchRules`
+    (`consumer: true` → `diag` + `label: rules`);
   - `{diag: error|warning|info, msg}` — `crdkit.diag.<level>`;
-  - `{resolve: [keys], at: [k1..kN]}` — `crdkit.schema.resolve` of
-    `ctx.input` against `ctx.schema` (set by `stub.render` from
-    `schema` + `input`) → model.k1…kN.
+  - `{state: key, at}` — copies `ctx.<key>` of a `state` key;
+  - `{check: {}, at}` — `crdkit.schema.check` of `ctx.schema`;
+  - `{validateValues: {path?, target?}}` — `crdkit.schema.validateValues`
+    of `ctx.input` (its `seen` effects are readable through `state`);
+  - `{resolve: [k1..kN], target?, at}` — `crdkit.schema.resolve`;
+  - `{schemaValue: {node, def | token, path, target?}, at}` —
+    `crdkit.schema.value`;
+  - `{node: [k1..kN], at}` — `crdkit.schema.node`;
+  - `{path: {keys, path?}, at}` — `crdkit.schema.path`;
+  - `{labels: {}, at}` — `crdkit.standardLabels`;
+  - `{dependencyVersion: name, at}` — `crdkit.dependencyVersion`;
+  - `{name: {}, at}` — `crdkit.name`.
 - Returns: "".
 */}}
 {{- define "stub.ops" -}}
 {{- $ctx := . -}}
+{{- $v := $ctx.root.Values | toYaml | fromYaml -}}
 {{- include "crdkit.dictMerge" (list $ctx.model (dict "kind" "Stub")) -}}
-{{- range $op := ($ctx.root.Values | toYaml | fromYaml).ops | default list -}}
+{{- range $op := $v.ops | default (list) -}}
   {{- if hasKey $op "put" -}}
-    {{- include "crdkit.dictMerge" (concat (list $ctx.model) (initial $op.put) (list (dict (last $op.put) $op.value))) -}}
+    {{- if $op.put -}}
+      {{- include "crdkit.dictMerge" (concat (list $ctx.model) (initial $op.put) (list (dict (last $op.put) $op.value))) -}}
+    {{- else -}}
+      {{- include "crdkit.dictMerge" (list $ctx.model $op.value) -}}
+    {{- end -}}
+  {{- else if hasKey $op "listExtend" -}}
+    {{- include "crdkit.listExtend" (concat (list $ctx.model) $op.listExtend (list $op.value)) -}}
+  {{- else if hasKey $op "ensureDictKey" -}}
+    {{- include "crdkit.ensureDictKey" (dict "model" $ctx.model "key" $op.ensureDictKey "default" $op.default) -}}
+  {{- else if hasKey $op "hasPath" -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (include "crdkit.model.hasPath" (concat (list $ctx.model) $op.hasPath))) -}}
   {{- else if hasKey $op "add" -}}
     {{- include "crdkit.token.add" (list $ctx $op.add $op.value ($op.annotations | default dict) ($op.target | default "")) -}}
   {{- else if hasKey $op "underlay" -}}
     {{- include "crdkit.token.underlay" (list $ctx $op.underlay $op.value ($op.annotations | default dict) ($op.target | default "")) -}}
+  {{- else if hasKey $op "tokenValue" -}}
+    {{- $r := (include "crdkit.token.value" (list $ctx $op.tokenValue ($op.target | default "")) | fromYaml).value -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" $r) -}}
+  {{- else if hasKey $op "tokenString" -}}
+    {{- $r := include "crdkit.token.string" (list $ctx $op.tokenString ($op.target | default "")) -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" $r) -}}
+  {{- else if hasKey $op "tokenDef" -}}
+    {{- if $op.string -}}
+      {{- $r := include "crdkit.tokenDef.string" (list $ctx $op.id $op.tokenDef ($op.target | default "")) -}}
+      {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" $r) -}}
+    {{- else -}}
+      {{- $r := (include "crdkit.tokenDef.value" (list $ctx $op.id $op.tokenDef ($op.target | default "")) | fromYaml).value -}}
+      {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" $r) -}}
+    {{- end -}}
+  {{- else if hasKey $op "substitute" -}}
+    {{- $r := include "crdkit.tokens.substitute" (list $ctx $op.substitute ($op.target | default "")) -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" $r) -}}
+  {{- else if hasKey $op "matchRules" -}}
+    {{- $args := dict "subject" $op.subject "rules" $op.matchRules -}}
+    {{- if $op.consumer -}}{{- $_ := set $args "diag" $ctx.diag -}}{{- $_ := set $args "label" "rules" -}}{{- end -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (include "crdkit.matchRules" $args | fromYaml)) -}}
+  {{- else if hasKey $op "annotate" -}}
+    {{- include "crdkit.token.annotate" (list $ctx $op.annotate ($op.annotations | default dict)) -}}
+  {{- else if hasKey $op "info" -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (include "crdkit.token.info" (list $ctx $op.info) | fromYaml)) -}}
+  {{- else if hasKey $op "names" -}}
+    {{- $a := $op.names | default dict -}}
+    {{- $args := dict "ctx" $ctx -}}
+    {{- if hasKey $a "annotation" -}}{{- $_ := set $args "annotation" $a.annotation -}}{{- end -}}
+    {{- if hasKey $a "equals" -}}{{- $_ := set $args "equals" $a.equals -}}{{- end -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (include "crdkit.token.names" $args | fromYaml).value) -}}
+  {{- else if hasKey $op "markers" -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (include "crdkit.markers" (dict "value" $op.markers) | fromYaml).value) -}}
+  {{- else if hasKey $op "markerPattern" -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (include "crdkit.markerPattern" ($op.markerPattern | default dict))) -}}
+  {{- else if hasKey $op "diagLines" -}}
+    {{- $args := dict "diag" $ctx.diag -}}
+    {{- if $op.diagLines -}}{{- $_ := set $args "levels" $op.diagLines -}}{{- end -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (include "crdkit.diag.lines" $args)) -}}
+  {{- else if hasKey $op "diagCount" -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (include "crdkit.diag.count" (dict "diag" $ctx.diag "level" $op.diagCount))) -}}
   {{- else if hasKey $op "diag" -}}
     {{- include (printf "crdkit.diag.%s" $op.diag) (list $ctx.diag $op.msg) -}}
+  {{- else if hasKey $op "state" -}}
+    {{- if hasKey $ctx $op.state -}}
+      {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (index $ctx $op.state)) -}}
+    {{- end -}}
+  {{- else if hasKey $op "check" -}}
+    {{- $schema := $ctx.schema -}}{{- if hasKey $op "schema" -}}{{- $schema = $op.schema -}}{{- end -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (include "crdkit.schema.check" (dict "schema" $schema "diag" $ctx.diag))) -}}
+  {{- else if hasKey $op "validate" -}}
+    {{- $schema := $ctx.schema -}}{{- if hasKey $op "schema" -}}{{- $schema = $op.schema -}}{{- end -}}
+    {{- $values := $ctx.input -}}{{- if hasKey $op "values" -}}{{- $values = $op.values -}}{{- end -}}
+    {{- $r := include "crdkit.schema.validate" (dict "schema" $schema "values" $values "path" ($op.path | default "") "diag" $ctx.diag) | fromYaml -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" $r.value) -}}
+  {{- else if hasKey $op "validateValues" -}}
+    {{- $a := $op.validateValues -}}
+    {{- $schema := $ctx.schema -}}{{- if hasKey $op "schema" -}}{{- $schema = $op.schema -}}{{- end -}}
+    {{- $values := $ctx.input -}}{{- if hasKey $op "values" -}}{{- $values = $op.values -}}{{- end -}}
+    {{- include "crdkit.schema.validateValues" (dict "ctx" $ctx "schema" $schema "values" $values "path" ($a.path | default "") "target" ($a.target | default "") "seen" $ctx.seen) -}}
   {{- else if hasKey $op "resolve" -}}
-    {{- $r := (include "crdkit.schema.resolve" (dict "ctx" $ctx "schema" $ctx.schema "values" $ctx.input "keys" $op.resolve) | fromYaml).value -}}
-    {{- include "crdkit.dictMerge" (concat (list $ctx.model) (initial $op.at) (list (dict (last $op.at) $r))) -}}
+    {{- $schema := $ctx.schema -}}{{- if hasKey $op "schema" -}}{{- $schema = $op.schema -}}{{- end -}}
+    {{- $values := $ctx.input -}}{{- if hasKey $op "values" -}}{{- $values = $op.values -}}{{- end -}}
+    {{- $r := include "crdkit.schema.resolve" (dict "ctx" $ctx "schema" $schema "values" $values "keys" $op.resolve "target" ($op.target | default "") "seen" $ctx.seen) | fromYaml -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (dict "found" (hasKey $r "value") "value" $r.value)) -}}
+  {{- else if hasKey $op "schemaValue" -}}
+    {{- $a := $op.schemaValue -}}
+    {{- $r := (include "crdkit.schema.value" (dict "ctx" $ctx "node" $a.node "def" ($a.def | default dict) "token" ($a.token | default "") "path" $a.path "target" ($a.target | default "") "seen" $ctx.seen) | fromYaml).value -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" $r) -}}
+  {{- else if hasKey $op "node" -}}
+    {{- $schema := $ctx.schema -}}{{- if hasKey $op "schema" -}}{{- $schema = $op.schema -}}{{- end -}}
+    {{- $values := $ctx.input -}}{{- if hasKey $op "values" -}}{{- $values = $op.values -}}{{- end -}}
+    {{- $r := include "crdkit.schema.node" (dict "schema" $schema "values" $values "keys" $op.node) | fromYaml -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (dict "found" (hasKey $r "value") "value" $r.value)) -}}
+  {{- else if hasKey $op "path" -}}
+    {{- $a := $op.path -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (include "crdkit.schema.path" (dict "keys" $a.keys "path" ($a.path | default "")))) -}}
+  {{- else if hasKey $op "labels" -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (include "crdkit.standardLabels" (dict "context" $ctx.root) | fromYaml)) -}}
+  {{- else if hasKey $op "dependencyVersion" -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (include "crdkit.dependencyVersion" (dict "name" $op.dependencyVersion "context" $ctx.root))) -}}
+  {{- else if hasKey $op "name" -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (include "crdkit.name" $ctx.root)) -}}
   {{- end -}}
 {{- end -}}
 {{- end -}}

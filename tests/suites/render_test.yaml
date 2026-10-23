@@ -1,17 +1,58 @@
-suite: crdkit.render contract — chain, diagnostics
+suite: crdkit.render contract — chain, state, substitution, diagnostics
 templates: [cr.yaml]
 values: [../fixtures/base.yaml]
 tests:
-  - it: "C-1: the chain alone builds the model"
+  - it: "C-1: the chain alone builds the model, emitted verbatim"
     set:
-      ops: [{put: [v], value: x}]
+      ops: [{put: [spec], value: {a: 1}}]
     asserts:
-      - equal: {path: v, value: x}
       - equal: {path: kind, value: Stub}
+      - equal: {path: spec, value: {a: 1}}
       - notExists: {path: target}
       - notExists: {path: ladder}
       - notExists: {path: ops}
-  - it: "C-3: diagnostics print per level"
+  - it: "C-1: the model starts as a bare dict — no apiVersion, metadata or spec from crdkit"
+    set:
+      ops: []
+    asserts:
+      - equal: {path: kind, value: Stub}
+      - notExists: {path: apiVersion}
+      - notExists: {path: metadata}
+  - it: "C-4: integrations run in list order on the shared ctx"
+    set:
+      tokens: {T: old}
+      ops:
+        - {tokenValue: T, at: [before]}
+        - {add: T, value: added}
+        - {tokenValue: T, at: [after]}
+    asserts:
+      - equal: {path: before, value: old}
+      - equal: {path: after, value: added}
+  - it: "C-2: a state key is copied into ctx and visible to the chain"
+    set:
+      state: {libraryData: {input: {a: 1}}}
+      ops: [{state: libraryData, at: [state, libraryData]}]
+    asserts:
+      - equal: {path: state.libraryData, value: {input: {a: 1}}}
+      - notExists: {path: diagnostics}
+  - it: "C-2: a state key colliding with a crdkit ctx key is an ERROR; ctx stays intact"
+    set:
+      state: {model: {hijacked: true}, target: other}
+      ops: [{state: target, at: [state, target]}]
+    asserts:
+      - equal: {path: kind, value: Stub}
+      - notExists: {path: hijacked}
+      - equal: {path: state.target, value: b-01}
+      - exists: {path: "diagnostics.error[?(@ =~ /'model'.*collides with a crdkit ctx key/)]"}
+      - exists: {path: "diagnostics.error[?(@ =~ /'target'.*collides with a crdkit ctx key/)]"}
+  - it: "C-2: an absent state seed changes nothing"
+    set:
+      ops: [{put: [v], value: {x: 1}}]
+    asserts:
+      - equal: {path: v.x, value: 1}
+      - notExists: {path: state}
+      - notExists: {path: diagnostics}
+  - it: "C-3: diagnostics print per level after the model"
     set:
       ops:
         - {diag: error, msg: chain-error}
@@ -23,14 +64,68 @@ tests:
       - exists: {path: "diagnostics.info[?(@ =~ /chain-info/)]"}
   - it: "C-3: a clean render prints no diagnostics"
     set:
-      ops: [{put: [v], value: x}]
+      ops: [{put: [v], value: {x: 1}}]
     asserts:
       - notExists: {path: diagnostics}
   - it: "C-3 F-12: the caller's empty seed receives the diagnostics"
-    skip: {reason: "F-12 open (crdkit-0.2)"}
     set:
       diag: {}
       reportSeed: true
       ops: [{diag: error, msg: boom}]
     asserts:
       - equal: {path: seed.errors, value: 1}
+  - it: "C-3: a seeded diag.errors is transported and the model still renders"
+    set:
+      diag: {errors: [seeded]}
+      ops: [{put: [v], value: {x: 1}}]
+    asserts:
+      - equal: {path: v.x, value: 1}
+      - exists: {path: "diagnostics.error[?(@ =~ /seeded/)]"}
+  - it: "C-7: one substitution pass over the model; map keys are data"
+    set:
+      tokens: {K: x, V: y}
+      ops:
+        - {put: ["@K@"], value: {v: "@V@"}}
+        - {hasPath: ["@K@", v], at: [key-kept]}
+    asserts:
+      - equal: {path: key-kept, value: "true"}
+      - notExists: {path: diagnostics}
+  - it: "C-7: typo scan warns per unknown marker"
+    set:
+      ops: [{put: [v], value: {a: "@NOPE@", b: "@ALSO@"}}]
+    asserts:
+      - exists: {path: "diagnostics.warning[?(@ =~ /'@ALSO@'.*possible typo/)]"}
+      - exists: {path: "diagnostics.warning[?(@ =~ /'@NOPE@'.*possible typo/)]"}
+  - it: "C-7: @AT@ renders a literal @ and is not a typo"
+    set:
+      tokens: {G: "@AT@example.com@AT@"}
+      ops: [{put: [v], value: {x: "@G@"}}]
+    asserts:
+      - equal: {path: v.x, value: "@example.com@"}
+      - notExists: {path: diagnostics}
+  - it: "C-7: a list value splices comma-joined into text"
+    set:
+      tokens: {L: [a, b]}
+      ops: [{put: [v], value: {hosts: "hosts=@L@"}}]
+    asserts:
+      - equal: {path: v.hosts, value: "hosts=a,b"}
+  - it: "C-7: non-string scalars keep their type"
+    set:
+      ops: [{put: [v], value: {n: 1, f: 1.5, b: true}}]
+    asserts:
+      - equal: {path: v.n, value: 1}
+      - equal: {path: v.f, value: 1.5}
+      - equal: {path: v.b, value: true}
+  - it: "C-7 F-1: a value with a quote and a newline renders as written"
+    set:
+      tokens: {Q: "it's\nline2"}
+      ops: [{put: [v], value: {x: "@Q@"}}]
+    asserts:
+      - equal: {path: v.x, value: "it's\nline2"}
+      - notExists: {path: diagnostics}
+  - it: "C-29: the defaults param feeds token declarations like consumer tokens"
+    set:
+      defaults: {D: from-defaults}
+      ops: [{put: [v], value: {x: "@D@"}}]
+    asserts:
+      - equal: {path: v.x, value: from-defaults}

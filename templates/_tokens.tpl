@@ -6,8 +6,8 @@ callers pass "system"/"defaults" dicts explicitly
 (crdkit.tokens.merge.internal).
 
 Diagnostics: every helper that can fail takes a "diag" dict
-(`{errors, warnings}`, both lists) and appends to it instead of calling
-`fail` — a single author mistake must never hard-abort a render.
+(`{errors, warnings, infos}`, any subset) and appends to it instead of
+calling `fail` — a single author mistake must never hard-abort a render.
 
 Resolution is lazy, per-target, and memoized:
 - A token resolves (and is diagnosed, if malformed) only when
@@ -36,8 +36,9 @@ Token declaration shape (what a consumer/integration writes/reads on
   IS a target entry.
 - Token annotations are static metadata on a declaration (e.g. an owner or an
   exposure marker). crdkit never interprets their names or values and
-  never resolves them; a library reads them directly off
-  `ctx.tokens[NAME]`.
+  never resolves them. Libraries read and write them only through
+  crdkit.token.annotate / crdkit.token.info / crdkit.token.names, never
+  by reading or writing a declaration dict.
 - Internal keys written into a declaration by a consumer, defaults or
   system are stripped at merge time with a WARNING
   (crdkit.tokens.merge.internal).
@@ -91,7 +92,7 @@ Dependency graph (who calls whom):
                         -> (self, recursing into nested map/list values)
          -> crdkit.stringify.internal                (coerce for splicing into text)
 
-  Every marker match uses crdkit.markerPattern.internal.
+  Every marker match uses crdkit.markerPattern.
 
   crdkit.token.string / crdkit.tokenDef.string (public)
     -> crdkit.token.value / crdkit.tokenDef.value (public)
@@ -125,23 +126,42 @@ Implementation notes:
 - Full-string anchored (`^(?:pattern)$`) — a rule matches the WHOLE
   subject, never a substring.
 - "replacement" may reference capture groups via $1/$2/...
-- Uses `must*` regex variants deliberately: a malformed pattern aborts
-  the render (a Helm template error), not a diagnostic — the one
-  scoped exception to "never fail()," since Go templates can't catch
-  and downgrade a `must*` error.
+- Optional "diag" + "label": with them (consumer rules), each regex is
+  validated first; an invalid rule records an ERROR naming the label and
+  the regex, is skipped, and later rules are still tried — never a
+  non-`must*` match on an unchecked pattern. Without "diag"
+  (library-owned rules) an invalid regex aborts via mustRegex*.
 */}}
 {{- define "crdkit.matchRules" -}}
 {{- $subject := .subject -}}
 {{- $rules := .rules | default (list) -}}
+{{- $diag := .diag -}}
+{{- $label := .label | default "" -}}
 {{- $result := "" -}}
 {{- $found := false -}}
 {{- range $rule := $rules -}}
   {{- if not $found -}}
     {{- range $pattern, $repl := $rule -}}
-      {{- $anchored := printf "^(?:%s)$" $pattern -}}
-      {{- if mustRegexMatch $anchored $subject -}}
-        {{- $result = mustRegexReplaceAll $anchored $subject $repl -}}
-        {{- $found = true -}}
+      {{- $valid := true -}}
+      {{- if $diag -}}
+        {{- if not (include "crdkit.regexValid.internal" (dict "pattern" $pattern)) -}}
+          {{- include "crdkit.diag.error" (list $diag (printf "'%s': match rule '%s' is not a valid regex — skipped" $label $pattern)) -}}
+          {{- $valid = false -}}
+        {{- end -}}
+      {{- end -}}
+      {{- if $valid -}}
+        {{- $anchoredRe := printf "^(?:%s)$" $pattern -}}
+        {{- if $diag -}}
+          {{- if regexMatch $anchoredRe $subject -}}
+            {{- $result = regexReplaceAll $anchoredRe $subject $repl -}}
+            {{- $found = true -}}
+          {{- end -}}
+        {{- else -}}
+          {{- if mustRegexMatch $anchoredRe $subject -}}
+            {{- $result = mustRegexReplaceAll $anchoredRe $subject $repl -}}
+            {{- $found = true -}}
+          {{- end -}}
+        {{- end -}}
       {{- end -}}
     {{- end -}}
   {{- end -}}
@@ -162,6 +182,153 @@ Interface:
 - Returns: nothing.
 */}}
 {{- define "crdkit.noParentTarget" -}}
+{{- end -}}
+
+{{/*
+crdkit.markerPattern (public)
+
+The one definition of a "@NAME@" marker; every marker match in crdkit
+(substitution, unresolved-marker scan, schema checks, JSON Schema
+`markers` pattern) uses it.
+
+Interface:
+- Params: an empty dict, or `{group: true}`.
+- Returns: the regex as plain text — `@[A-Za-z0-9_.]+@`, or
+  `@([A-Za-z0-9_.]+)@` with `group: true` (the captured name).
+
+Implementation notes:
+- "." is part of a name, so a dotted name (`@A.b@`) and a library's
+  relative form (`@.x@`) are markers too. Side effect: text like
+  `@example.com@` is a marker — escape it with "@AT@".
+*/}}
+{{- define "crdkit.markerPattern" -}}
+{{- if .group -}}
+@([A-Za-z0-9_.]+)@
+{{- else -}}
+@[A-Za-z0-9_.]+@
+{{- end -}}
+{{- end -}}
+
+{{/*
+crdkit.markers (public)
+
+Lists the marker names in a value's string leaves.
+
+Interface:
+- Params (dict): { "value": <any structure> }
+- Returns YAML: { "value": [names] } — each name without its "@" pair.
+
+Implementation notes:
+- Map values are walked in sorted key order, list items in list order,
+  map keys never; first occurrence wins and duplicates are dropped.
+- "AT" is excluded (it is crdkit's escape, not a token reference); dotted
+  and relative names (".x") are kept as written.
+*/}}
+{{- define "crdkit.markers" -}}
+{{- $state := dict "names" (list) "seen" (dict) -}}
+{{- include "crdkit.markersWalk.internal" (dict "value" .value "state" $state) -}}
+{{- dict "value" $state.names | toYaml -}}
+{{- end -}}
+
+{{/*
+crdkit.token.annotate (public)
+
+Sets token annotation keys on an existing declaration.
+
+Interface:
+- Params (list): [ctx, name, annotations]
+  - ctx: dict with "tokens"/"diag"/"reservedKeys" keys
+  - name: token name
+  - annotations: dict of annotation key-value pairs
+- Returns: "" (mutates the declaration in place; no `ctx.gen` bump —
+  annotations never affect resolution).
+
+Implementation notes:
+- Existing keys are overwritten.
+- Unknown token, non-dict `annotations`, or a key that is not a declared
+  token annotation → ERROR, that input ignored (a key alone is dropped).
+*/}}
+{{- define "crdkit.token.annotate" -}}
+{{- $ctx := index . 0 -}}
+{{- $name := index . 1 -}}
+{{- $annotations := index . 2 -}}
+{{- if not (hasKey $ctx.tokens $name) -}}
+  {{- include "crdkit.diag.error" (list $ctx.diag (printf "crdkit.token.annotate: unknown token '%s' — ignored" $name)) -}}
+{{- else if not (kindIs "map" $annotations) -}}
+  {{- include "crdkit.diag.error" (list $ctx.diag (printf "crdkit.token.annotate for '%s': annotations must be a dict — ignored" $name)) -}}
+{{- else -}}
+  {{- $decl := index $ctx.tokens $name -}}
+  {{- range $k, $v := $annotations -}}
+    {{- if include "crdkit.annotationKey.internal" (dict "ctx" $ctx "key" $k) -}}
+      {{- $_ := set $decl $k $v -}}
+    {{- else -}}
+      {{- include "crdkit.diag.error" (list $ctx.diag (printf "crdkit.token.annotate for '%s': '%s' is not a token annotation — ignored" $name $k)) -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+crdkit.token.info (public)
+
+Reads a declaration's token annotations.
+
+Interface:
+- Params (list): [ctx, name]
+- Returns YAML: { "exists": <bool>, "annotations": {<key>: <value>} } —
+  only declared annotation keys that the declaration carries; a missing
+  token gives `exists: false` and empty annotations; no diagnostic.
+*/}}
+{{- define "crdkit.token.info" -}}
+{{- $ctx := index . 0 -}}
+{{- $name := index . 1 -}}
+{{- $found := dict -}}
+{{- if hasKey $ctx.tokens $name -}}
+  {{- $decl := index $ctx.tokens $name -}}
+  {{- if kindIs "map" $decl -}}
+    {{- range $key := $ctx.reservedKeys | default (list) -}}
+      {{- if and (include "crdkit.annotationKey.internal" (dict "ctx" $ctx "key" $key)) (hasKey $decl $key) -}}
+        {{- $_ := set $found $key (index $decl $key) -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+exists: {{ hasKey $ctx.tokens $name }}
+annotations:
+{{ $found | toYaml | indent 2 }}
+{{- end -}}
+
+{{/*
+crdkit.token.names (public)
+
+Lists token names, optionally filtered by an annotation value.
+
+Interface:
+- Params (dict): { "ctx": <ctx>, "annotation": <name, optional>,
+  "equals": <value, optional> }
+- Returns YAML: { "value": [names, sorted] }.
+
+Implementation notes:
+- `annotation` alone keeps names whose declaration carries that key;
+  `equals` additionally requires `toString` equality with the value.
+*/}}
+{{- define "crdkit.token.names" -}}
+{{- $ctx := .ctx -}}
+{{- $annotation := .annotation | default "" -}}
+{{- $equals := .equals -}}
+{{- $hasEquals := hasKey . "equals" -}}
+{{- $names := list -}}
+{{- range $name, $decl := $ctx.tokens -}}
+  {{- $keep := true -}}
+  {{- if $annotation -}}
+    {{- $keep = and (kindIs "map" $decl) (hasKey $decl $annotation) -}}
+    {{- if and $keep $hasEquals (ne (toString (index $decl $annotation)) (toString $equals)) -}}
+      {{- $keep = false -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if $keep -}}{{- $names = append $names $name -}}{{- end -}}
+{{- end -}}
+{{- dict "value" ($names | sortAlpha) | toYaml -}}
 {{- end -}}
 
 {{/*
@@ -388,7 +555,11 @@ Implementation notes:
 
 {{- if and $rawAnnotations (kindIs "map" $rawAnnotations) -}}
   {{- range $k, $v := $rawAnnotations -}}
-    {{- $_ := set $decl $k $v -}}
+    {{- if include "crdkit.annotationKey.internal" (dict "ctx" $ctx "key" $k) -}}
+      {{- $_ := set $decl $k $v -}}
+    {{- else -}}
+      {{- include "crdkit.diag.error" (list $diag (printf "crdkit.token.add for '%s': '%s' is not a token annotation — ignored" $name $k)) -}}
+    {{- end -}}
   {{- end -}}
 {{- end -}}
 
@@ -430,45 +601,25 @@ Implementation notes:
 */}}
 {{- define "crdkit.token.underlay" -}}
 {{- $ctx := index . 0 -}}
-{{- $name := index . 1 -}}
-{{- $value := index . 2 -}}
-{{- $rawAnnotations := "" -}}
-{{- if gt (len .) 3 -}}
-  {{- $rawAnnotations = index . 3 -}}
-{{- end -}}
-{{- $target := $ctx.target -}}
-{{- if and (gt (len .) 4) (index . 4) -}}
-  {{- $target = index . 4 -}}
-{{- end -}}
-{{- $tokens := $ctx.tokens -}}
-{{- $diag := $ctx.diag -}}
-
-{{- if and $rawAnnotations (not (kindIs "map" $rawAnnotations)) -}}
-  {{- include "crdkit.diag.error" (list $diag (printf "crdkit.token.underlay for '%s': annotations must be a dict — ignored" $name)) -}}
-{{- end -}}
-
-{{- $decl := dict -}}
-{{- if hasKey $tokens $name -}}
-  {{- $existing := index $tokens $name -}}
-  {{- if kindIs "map" $existing -}}
-    {{- $decl = omit $existing "_value" "_gen" -}}
-  {{- end -}}
-{{- end -}}
-
-{{- if and $rawAnnotations (kindIs "map" $rawAnnotations) -}}
-  {{- range $k, $v := $rawAnnotations -}}
-    {{- if not (hasKey $decl $k) -}}
+{{- $prologue := dict -}}
+{{- include "crdkit.tokenPrologue.internal" (dict "ctx" $ctx "args" . "verb" "crdkit.token.underlay" "holder" $prologue) -}}
+{{- $name := $prologue.name -}}
+{{- $decl := $prologue.declaration -}}
+{{- if and $prologue.rawAnnotations $prologue.annotationsValid -}}
+  {{- range $k, $v := $prologue.rawAnnotations -}}
+    {{- if not (include "crdkit.annotationKey.internal" (dict "ctx" $ctx "key" $k)) -}}
+      {{- include "crdkit.diag.error" (list $ctx.diag (printf "crdkit.token.underlay for '%s': '%s' is not a token annotation — ignored" $name $k)) -}}
+    {{- else if not (hasKey $decl $k) -}}
       {{- $_ := set $decl $k $v -}}
     {{- end -}}
   {{- end -}}
 {{- end -}}
-
 {{- $generated := dict -}}
 {{- if and (hasKey $decl "_generated") (kindIs "map" (index $decl "_generated")) -}}
   {{- $generated = index $decl "_generated" -}}
 {{- end -}}
-{{- $_ := set $generated $target $value -}}
+{{- $_ := set $generated $prologue.target $prologue.value -}}
 {{- $_ := set $decl "_generated" $generated -}}
 {{- $_ := set $ctx "gen" (add1 $ctx.gen) -}}
-{{- $_ := set $tokens $name $decl -}}
+{{- $_ := set $ctx.tokens $name $decl -}}
 {{- end -}}

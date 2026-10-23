@@ -2,8 +2,7 @@
 crdkit.render (public)
 
 The engine's entry point. Product-specific input (tokens, chain,
-taxonomy) is supplied by the caller's own thin wrapper (e.g.
-mdeploy.render).
+taxonomy) is supplied by the caller's own thin wrapper.
 
 Interface:
 - Params (dict):
@@ -53,7 +52,7 @@ Implementation notes:
   finds nothing.
 */}}
 {{- define "crdkit.render" -}}
-{{- $diag := .diag | default dict -}}
+{{- $diag := ternary .diag (dict) (kindIs "map" .diag) -}}
 {{- if not (hasKey $diag "errors") -}}
   {{- $diag = set $diag "errors" (list) -}}
 {{- end -}}
@@ -78,7 +77,7 @@ Implementation notes:
 {{- $tokens := $tokensYaml | fromYaml -}}
 
 {{- $model := dict -}}
-{{- $ctx := dict "root" $root "diag" $diag "model" $model "tokens" $tokens "target" $target "parentTargetTemplate" $parentTargetTemplate "reservedKeys" $reservedKeys "gen" 0 -}}
+{{- $ctx := dict "root" $root "diag" $diag "model" $model "tokens" $tokens "target" $target "parentTargetTemplate" $parentTargetTemplate "reservedKeys" $reservedKeys "gen" 0 "schemaChecks" (dict) -}}
 {{- range $key, $value := .state | default dict -}}
   {{- if hasKey $ctx $key -}}
     {{- include "crdkit.diag.error" (list $diag (printf "state key '%s' collides with a crdkit ctx key and was ignored" $key)) -}}
@@ -87,14 +86,16 @@ Implementation notes:
   {{- end -}}
 {{- end -}}
 
-{{- include "crdkit.integrations.chain" (dict "chain" .chain "ctx" $ctx) -}}
+{{- include "crdkit.integrations.chain" (dict "chain" .chain "ctx" $ctx "trace" .trace) -}}
 
-{{- $substitutedText := include "crdkit.tokens.substituteMarkers.internal" (list $ctx ($model | toYaml) $target) -}}
+{{/* One pass over the model: every string leaf substituted, map keys left as data. */}}
+{{- $substituted := dict -}}
+{{- $unresolved := dict -}}
+{{- include "crdkit.substituteValue.internal" (dict "ctx" $ctx "value" $model "holder" $substituted "unresolved" $unresolved) -}}
+{{- $substitutedModel := $substituted.value -}}
 
 {{/* leftover "@word@" after substitution = possible typo; a genuine cycle is already reported elsewhere with a more specific message. Scanned before "@AT@" becomes "@", so an escaped marker is never reported. */}}
-{{- $unresolvedMarkers := regexFindAll (include "crdkit.markerPattern.internal" (dict)) $substitutedText -1 -}}
-{{- $substitutedModel := $substitutedText | replace "@AT@" "@" | fromYaml -}}
-{{- range $marker := $unresolvedMarkers -}}
+{{- range $marker := keys $unresolved | sortAlpha -}}
   {{- $name := trimSuffix "@" (trimPrefix "@" $marker) -}}
   {{- if and (ne $name "AT") (not (hasKey $tokens $name)) -}}
     {{- include "crdkit.diag.warning" (list $diag (printf "'%s' in the rendered model does not match any known token after resolution — possible typo" $marker)) -}}
@@ -102,5 +103,8 @@ Implementation notes:
 {{- end -}}
 
 {{ $substitutedModel | toYaml }}
-{{- include "crdkit.renderDiagnostics.internal" (dict "diag" $diag) }}
+{{- $diagText := include "crdkit.diag.lines" (dict "diag" $diag) }}
+{{- if $diagText }}
+{{ $diagText }}
+{{- end }}
 {{- end -}}

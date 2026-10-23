@@ -21,7 +21,7 @@ contract.
 # mdeploy's Chart.yaml
 dependencies:
   - name: crdkit
-    version: "0.0.0"
+    version: "0.2.0"
     repository: "file://../crdkit"
 ```
 
@@ -43,6 +43,10 @@ Everything product-specific, as an explicit dict param — see
 - `state`: optional dict whose keys are copied into `ctx` for the
   library's own integrations (e.g. normalized input); a key colliding
   with a crdkit `ctx` key records an `# ERROR:` and is ignored
+- `trace`: optional caller-owned dict; crdkit appends
+  `{stages: [{entry, ctx}, ...]}` (one snapshot before the chain and
+  after each integration). `scripts/trace.sh` prints the changed leaves
+  per stage. No `trace` → no snapshot, no cost
 
 Not a param at all: `apiVersion`/`kind`/labels/anything about the CR's
 shape. `crdkit.render` never reads `context.Values` — the chain builds
@@ -51,8 +55,11 @@ first in the list). See "Building ctx.model" below.
 
 ## Integration chain
 
-Integrations receive a shared `ctx` (`root`/`diag`/`model`/`tokens`/
-`target`/`reservedKeys`/`gen`), mutated in place across the traversal.
+Integrations receive a shared `ctx` (`root`, `diag`, `model`, `tokens`,
+`target`, `parentTargetTemplate`, `reservedKeys`, `gen`, `schemaChecks`
+plus every accepted `state` key — see `crdkit.render`'s doc comment),
+mutated in place across the traversal. A caller-owned `trace` dict
+records one snapshot per stage (see "Context trace").
 
 - Visibility is order-dependent: a token/model field set partway
   through the chain is only visible to code running after that point
@@ -84,7 +91,6 @@ crdkit's concern.
 {{- include "crdkit.dictMerge" (list .ctx.model "metadata" "labels" (dig "metadata" "labels" (dict) .ctx.root.Values)) -}}
 {{- include "crdkit.dictMerge" (list .ctx.model "metadata" "labels" (include "crdkit.standardLabels" (dict "context" .ctx.root) | fromYaml)) -}}
 {{- include "crdkit.dictMerge" (list .ctx.model "spec" (.ctx.root.Values.spec | default dict)) -}}
-{{- include "crdkit.integrations.chain" . -}}
 {{- end -}}
 ```
 
@@ -96,9 +102,15 @@ crdkit's concern.
   .ctx.model "spec" "services") }}`.
 - `crdkit.diag.error` / `crdkit.diag.warning` / `crdkit.diag.info` —
   `(list diag message)` append `message` to `diag.errors` /
-  `diag.warnings` / `diag.infos` in place and return `""` (INFO: a valid
-  outcome worth reporting, never a problem); an integration passes `.ctx.diag`:
+  `diag.warnings` / `diag.infos` in place (creating a missing list) and
+  return `""` (INFO: a valid outcome worth reporting, never a problem);
+  an integration passes `.ctx.diag`:
   `{{- include "crdkit.diag.error" (list .ctx.diag "service 'X' is misconfigured") -}}`.
+- `crdkit.diag.lines {diag, levels?}` formats the diagnostics as
+  `# ERROR:` / `# WARNING:` / `# INFO:` lines (ERROR → WARNING → INFO,
+  de-duplicated, no leading or trailing newline);
+  `crdkit.diag.count {diag, level}` returns the distinct count of one
+  level. Both are read-only.
 - Order is the precedence policy: consumer labels first,
   `crdkit.standardLabels` second (wins on collision), then the rest of
   the chain (which can still override anything).
@@ -113,24 +125,21 @@ crdkit's concern.
 
 ## Substitution
 
-One `toYaml`/`tokens.substitute`/`fromYaml` round-trip, over `ctx.model`
-as a whole, after the chain finishes:
+One pass over `ctx.model` after the chain finishes: every string value
+is substituted in a copy of the model, never by serializing it to text
+and parsing it back.
 
-```gotemplate
-{{- $substitutedText := include "crdkit.tokens.substituteMarkers.internal" (list $ctx ($model | toYaml) $target) -}}
-{{- $substitutedModel := $substitutedText | replace "@AT@" "@" | fromYaml -}}
-```
-
-crdkit never reads `context.Values`, so there's nothing else to
-substitute — whatever a library wanted from consumer `Values` is
-already in `ctx.model` by the time this runs. The "possible typo"
-unresolved-marker check runs over the same text, before `@AT@` becomes
-`@`.
-
+- Map keys are data: they are never substituted.
+- Non-string scalars pass through untouched.
+- crdkit never reads `context.Values`, so there's nothing else to
+  substitute — whatever a library wanted from consumer `Values` is
+  already in `ctx.model` by the time this runs. The "possible typo"
+  unresolved-marker check runs on each substituted leaf, before `@AT@`
+  becomes `@`.
 - A marker is `@<name>@`, the name made of `A-Z a-z 0-9 _ .`
-  (`@[A-Za-z0-9_.]+@`, crdkit.markerPattern.internal — the one
-  definition every marker match uses). A dotted name (`@SVC1.host@`)
-  is a marker like any other.
+  (`@[A-Za-z0-9_.]+@`, crdkit.markerPattern — the one definition every
+  marker match uses). A dotted name (`@SVC1.host@`) is a marker like any
+  other.
 - `@AT@` renders as a literal `@`, after every other marker: write
   `@AT@example.com@` for text that would otherwise read as a marker
   (`@example.com@` alone is one, reported as a possible typo when no
@@ -228,10 +237,11 @@ parentTargetTemplate: "mylib.parentTarget"
 ```
 
 `tokens.REGION: {NONPROD: "us-east-1"}`, rendered with `target: qa-01`,
-resolves by walking `qa-01 → qa → QA → NONPROD` — every rung visited
-gets cached, so a later `prod-01`-family lookup sharing a rung is
-instant. Every rung is a plain literal key; `match:` only ever applies
-to the exact original target, before any escalation.
+resolves by walking `qa-01 → qa → QA → NONPROD` — a marker-free rung
+visited is cached, so a later `prod-01`-family lookup sharing it is
+instant; a marker-holding or generated entry is not cached. Every rung
+is a plain literal key; `match:` only ever applies to the exact
+original target, before any escalation.
 
 **GOTCHA**: a bare `{{- index $map $target -}}` as the last, unassigned
 thing a `define` emits renders as the literal text `<no value>` for a
@@ -250,6 +260,12 @@ above).
 - Resolving a token (`crdkit.token.value`) returns a separate shape,
   `{value}` — the interpolated result for one name+target pair (a
   string, or a structure if the selected entry is itself one).
+- Annotation API: `crdkit.token.annotate [ctx, name, annotations]` sets
+  keys (overwrite; undeclared key, unknown token or non-dict → ERROR);
+  `crdkit.token.info [ctx, name]` → `{exists, annotations}`;
+  `crdkit.token.names {ctx, annotation?, equals?}` → `{value: [names,
+  sorted]}`. `crdkit.markers {value}` lists marker names in a value's
+  string leaves (map keys excluded, `AT` excluded).
 
 ```yaml
 tokens:
@@ -262,12 +278,14 @@ tokens:
   directly regardless of taxonomy, even under `crdkit.noParentTarget`.
   A token with no `default` key that can't resolve for a target
   produces the ordinary "no value found" diagnostic, lazily.
-- Token annotations are static metadata: crdkit stores them, never resolves
-  or validates them, and never knows their names. A library reads them
-  directly off the declaration (`ctx.tokens.DB_HOST.owner`) and owns
-  any policy (validation, locking). An annotation name equal to a
-  crdkit-internal key, `match` or `default` records an `# ERROR:` and
-  is ignored. A target equal to an annotation name is not a target
+- Token annotations are static metadata: crdkit stores them, never
+  resolves or validates them, and never knows their names. A library
+  reads and writes them only through the API
+  (`crdkit.token.annotate`, `crdkit.token.info`,
+  `crdkit.token.names`) and owns any policy (validation, locking); the
+  declaration's storage shape is not contract. An annotation name equal
+  to a crdkit-internal key, `match` or `default` records an `# ERROR:`
+  and is ignored. A target equal to an annotation name is not a target
   entry.
 - A resolved value reaches `ctx.model` for free — an integration can
   write e.g. `variables: {DB_HOST: "@DB_HOST@"}`, and it resolves in
@@ -435,10 +453,15 @@ however often the schema is checked:
   node (`'static' does not apply below a per-target node`; a switch
   case's `by` / `unless.key` excepted); `default` with `required: true`;
 - a switch case not declaring its `by` key (or `unless.key`) as a
-  static scalar; a malformed `unless` or `unless.key` equal to `by`.
+  static scalar; a malformed `unless` or `unless.key` equal to `by`;
+- a `keys` map key matching `y/n/yes/no/on/off/true/false` (any case) —
+  ERROR naming the parsed key, key dropped; checked before
+  `keys.pattern` (Helm reads YAML 1.1 values, so `on:` arrives as
+  `true`).
 
 An invalid regex in `pattern`/`keys.pattern` aborts the render
-(`mustRegexMatch`), like a `match:` rule.
+(`mustRegexMatch` — library-owned pattern). An invalid consumer `match:`
+rule is an ERROR naming the rule; the rule is skipped.
 
 ### Passes
 
@@ -741,7 +764,9 @@ Layout and assert rules: `CONTRIBUTING.md` "Testing".
   own templates).
 - `tests/requirements.md` — the requirement catalogue (C- ids) the
   tests cite.
-- `harness/` + `tests/*_test.yaml` — legacy suites, being migrated.
+- `scripts/trace.sh [<file>|-]` — human-readable diff of a `trace`
+  (`helm template … --set trace=true | yq -o json '.trace' |
+  scripts/trace.sh`).
 
 End to end, crdkit runs under mdeploy's tests
 (`../mdeploy/README.md` "Testing").

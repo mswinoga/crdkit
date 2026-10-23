@@ -225,7 +225,7 @@ Implementation notes:
 {{- $ctx := .ctx -}}
 {{/* never `.seen | default dict`: an empty dict is falsy, so the caller's shared dict would be swapped for a fresh one. */}}
 {{- $seen := ternary .seen (dict) (kindIs "map" .seen) -}}
-{{- if include "crdkit.schema.check" (dict "schema" .schema "diag" $ctx.diag) -}}
+{{- if include "crdkit.schema.checkMemo.internal" (dict "ctx" $ctx "schema" .schema) -}}
   {{- include "crdkit.schema.valuesWalk.internal" (dict "ctx" $ctx "node" .schema "value" .values "path" (.path | default "") "target" (.target | default $ctx.target) "seen" $seen) -}}
 {{- end -}}
 {{- end -}}
@@ -267,58 +267,18 @@ Implementation notes:
 {{- define "crdkit.schema.resolve" -}}
 {{- $ctx := .ctx -}}
 {{- $seen := ternary .seen (dict) (kindIs "map" .seen) -}}
-{{- if include "crdkit.schema.check" (dict "schema" .schema "diag" $ctx.diag) -}}
-  {{- $node := .schema -}}
-  {{- $value := .values -}}
-  {{- $none := index (dict) "none" -}}
-  {{- $found := true -}}
-  {{- $inTokens := false -}}
-  {{- $path := "" -}}
-  {{- range $key := .keys | default (list) -}}
-    {{- if and $found (hasKey $node "switch") -}}
-      {{- $by := "" -}}
-      {{- if kindIs "map" $value -}}
-        {{- $by = index $value $node.switch.by -}}
-      {{- end -}}
-      {{- if and (not (kindIs "invalid" $by)) (ne (toString $by) "") (hasKey $node.switch.cases (toString $by)) -}}
-        {{- $node = index $node.switch.cases (toString $by) -}}
-      {{- else -}}
-        {{- $found = false -}}
-      {{- end -}}
-    {{- end -}}
-    {{- if $found -}}
-      {{- $inTokens = or $inTokens (ne (include "crdkit.schema.perTarget.internal" (dict "node" $node "inTokens" $inTokens)) "") -}}
-      {{- $shape := include "crdkit.schema.shape.internal" (dict "node" $node) -}}
-      {{- if and (eq $shape "map") (kindIs "map" $value) -}}
-        {{- $properties := $node.properties | default dict -}}
-        {{- if hasKey $properties (toString $key) -}}
-          {{- $node = index $properties (toString $key) -}}
-        {{- else if hasKey $node "values" -}}
-          {{- $node = $node.values -}}
-        {{- else -}}
-          {{- $found = false -}}
-        {{- end -}}
-        {{- $value = index $value (toString $key) -}}
-        {{- $path = include "crdkit.schema.path" (dict "keys" (list (toString $key)) "path" $path) -}}
-      {{- else if and (eq $shape "list") (kindIs "slice" $value) (regexMatch "^[0-9]+$" (toString $key)) (lt (int (toString $key)) (len $value)) -}}
-        {{- $node = $node.items | default (dict "type" "any") -}}
-        {{- $value = index $value (int (toString $key)) -}}
-        {{- $path = include "crdkit.schema.path" (dict "keys" (list (int (toString $key))) "path" $path) -}}
-      {{- else -}}
-        {{- $found = false -}}
-      {{- end -}}
-    {{- end -}}
-  {{- end -}}
-  {{- if and $found (not (kindIs "invalid" $value)) -}}
+{{- if include "crdkit.schema.checkMemo.internal" (dict "ctx" $ctx "schema" .schema) -}}
+  {{- $loc := dict -}}
+  {{- include "crdkit.schema.locate.internal" (dict "node" .schema "value" .values "keys" .keys "path" "" "mode" "resolve" "finalSwitch" false "out" $loc) -}}
+  {{- if and $loc.found (not (kindIs "invalid" $loc.value)) -}}
     {{- $out := dict -}}
-    {{- include "crdkit.schema.valuesWalk.internal" (dict "ctx" $ctx "node" $node "value" $value "path" $path "target" (.target | default $ctx.target) "seen" $seen "inTokens" $inTokens "out" $out) -}}
+    {{- include "crdkit.schema.valuesWalk.internal" (dict "ctx" $ctx "node" $loc.node "value" $loc.value "path" $loc.path "target" (.target | default $ctx.target) "seen" $seen "inTokens" $loc.inTokens "out" $out) -}}
     {{- if hasKey $out "value" -}}
 value: {{ $out.value | toYaml | nindent 2 }}
     {{- end -}}
   {{- end -}}
 {{- end -}}
 {{- end -}}
-
 {{/*
 crdkit.schema.value (public)
 
@@ -328,14 +288,19 @@ than the render's own.
 
 Interface:
 - Params (dict): { "ctx": <ctx>, "node": <the field's node, see
-  crdkit.schema.node>, "def": <the field's value as written>, "path":
-  <its values path, see crdkit.schema.path>, "target": <optional —
-  defaults to ctx.target>, "seen": <dict shared with
+  crdkit.schema.node>, "def": <the field's value as written>, "token":
+  <optional token name — when present, "def" is ignored>, "path": <its
+  values path, see crdkit.schema.path>, "target": <optional — defaults
+  to ctx.target>, "seen": <dict shared with
   crdkit.schema.validateValues, optional> }
 - Returns YAML: { "value": <resolved value> }
 
 Implementation notes:
-- A per-target node or a string with markers is resolved and
+- A "token" is always resolved through crdkit.token.value for the
+  target, whatever the node's per-target state, then checked like any
+  resolved value; no value → the resolution ERROR, "" and no check
+  ERROR; an unknown token → its ERROR, "".
+- Otherwise a per-target node or a string with markers is resolved and
   checked (once per path and target, see "seen"); any other value is
   returned as written — the structural pass already checked it.
 - A resolved string of an `int` / `number` / `bool` node is returned
@@ -349,10 +314,11 @@ Implementation notes:
 {{- define "crdkit.schema.value" -}}
 {{- $ctx := .ctx -}}
 {{- $node := .node | default dict -}}
-{{- $out := dict "value" .def -}}
+{{- $token := .token | default "" -}}
+{{- $out := dict "value" (ternary .def "" (eq $token "")) -}}
 {{- $tokens := include "crdkit.schema.perTarget.internal" (dict "node" $node "inTokens" false) -}}
-{{- if or $tokens (and (kindIs "string" .def) (regexMatch (include "crdkit.markerPattern.internal" (dict)) .def)) -}}
-  {{- include "crdkit.schema.resolveAndCheck.internal" (dict "ctx" $ctx "node" $node "def" .def "tokens" (ne $tokens "") "path" .path "target" (.target | default $ctx.target) "seen" (ternary .seen (dict) (kindIs "map" .seen)) "out" $out) -}}
+{{- if or .token $tokens (and (kindIs "string" .def) (regexMatch (include "crdkit.markerPattern" (dict)) .def)) -}}
+  {{- include "crdkit.schema.resolveAndCheck.internal" (dict "ctx" $ctx "node" $node "def" .def "token" .token "tokens" (ne $tokens "") "path" .path "target" (.target | default $ctx.target) "seen" (ternary .seen (dict) (kindIs "map" .seen)) "out" $out) -}}
 {{- end -}}
 value: {{ $out.value | toYaml | nindent 2 }}
 {{- end -}}
@@ -375,63 +341,16 @@ Implementation notes:
   final switch node is returned as its selected case.
 */}}
 {{- define "crdkit.schema.node" -}}
-{{- $node := .schema -}}
-{{- $value := .values -}}
-{{- $none := index (dict) "none" -}}
-{{- $found := true -}}
-{{- $inTokens := false -}}
-{{- range $key := concat (.keys | default (list)) (list "") -}}
-  {{- if $found -}}
-    {{- if and (kindIs "map" $node) (hasKey $node "switch") -}}
-      {{- $by := "" -}}
-      {{- if kindIs "map" $value -}}
-        {{- $by = index $value $node.switch.by -}}
-      {{- end -}}
-      {{- if and (not (kindIs "invalid" $by)) (ne (toString $by) "") (hasKey $node.switch.cases (toString $by)) -}}
-        {{- $node = index $node.switch.cases (toString $by) -}}
-      {{- else -}}
-        {{- $found = false -}}
-      {{- end -}}
-    {{- end -}}
-  {{- end -}}
-  {{- if and $found (ne (toString $key) "") -}}
-    {{- $inTokens = or $inTokens (ne (include "crdkit.schema.perTarget.internal" (dict "node" $node "inTokens" $inTokens)) "") -}}
-    {{- $shape := include "crdkit.schema.shape.internal" (dict "node" $node) -}}
-    {{- if eq $shape "map" -}}
-      {{- $properties := $node.properties | default dict -}}
-      {{- if hasKey $properties (toString $key) -}}
-        {{- $node = index $properties (toString $key) -}}
-      {{- else if hasKey $node "values" -}}
-        {{- $node = $node.values -}}
-      {{- else -}}
-        {{- $found = false -}}
-      {{- end -}}
-      {{- if kindIs "map" $value -}}
-        {{- $value = index $value (toString $key) -}}
-      {{- else -}}
-        {{- $value = $none -}}
-      {{- end -}}
-    {{- else if and (eq $shape "list") (regexMatch "^[0-9]+$" (toString $key)) -}}
-      {{- $node = $node.items | default (dict "type" "any") -}}
-      {{- $index := int (toString $key) -}}
-      {{- if and (kindIs "slice" $value) (lt $index (len $value)) -}}
-        {{- $value = index $value $index -}}
-      {{- else -}}
-        {{- $value = $none -}}
-      {{- end -}}
-    {{- else -}}
-      {{- $found = false -}}
-    {{- end -}}
-  {{- end -}}
-{{- end -}}
-{{- if $found -}}
+{{- $loc := dict -}}
+{{- include "crdkit.schema.locate.internal" (dict "node" .schema "value" .values "keys" .keys "path" "" "mode" "node" "finalSwitch" true "out" $loc) -}}
+{{- if $loc.found -}}
+  {{- $node := $loc.node -}}
   {{- if has (include "crdkit.schema.shape.internal" (dict "node" $node)) (list "scalar" "list") -}}
-    {{- $node = merge (dict "perTarget" (ne (include "crdkit.schema.perTarget.internal" (dict "node" $node "inTokens" $inTokens)) "")) (omit $node "perTarget") -}}
+    {{- $node = merge (dict "perTarget" (ne (include "crdkit.schema.perTarget.internal" (dict "node" $node "inTokens" $loc.inTokens)) "")) (omit $node "perTarget") -}}
   {{- end -}}
 value: {{ $node | toYaml | nindent 2 }}
 {{- end -}}
 {{- end -}}
-
 {{/*
 crdkit.schema.docs (public)
 
@@ -572,7 +491,7 @@ Implementation notes:
       {{- $_ := set $sections $sectionPath $valid -}}
     {{- end -}}
   {{- end -}}
-  {{- $acc := dict "definitions" (dict "tokenDeclaration" (dict "type" "object" "minProperties" 1) "markers" (dict "type" "string" "pattern" (include "crdkit.markerPattern.internal" (dict)))) "paths" (dict) -}}
+  {{- $acc := dict "definitions" (dict "tokenDeclaration" (dict "type" "object" "minProperties" 1) "markers" (dict "type" "string" "pattern" (include "crdkit.markerPattern" (dict)))) "paths" (dict) -}}
   {{- $out := dict -}}
   {{- include "crdkit.schema.jsonNode.internal" (dict "node" $schema "schemaPath" "" "nodePath" "" "inTokens" false "instances" (ternary (list $example) (list) (kindIs "map" $example)) "order" $order "sections" $sections "acc" $acc "out" $out) -}}
   {{- range $sectionPath := keys $sections | sortAlpha -}}

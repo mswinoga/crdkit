@@ -1,9 +1,0 @@
-apiVersion: v2
-name: harness
-description: Local dev/test harness for crdkit's own templates (not published)
-type: application
-version: 0.0.0
-dependencies:
-  - name: crdkit
-    version: 0.1.0
-    repository: file://../

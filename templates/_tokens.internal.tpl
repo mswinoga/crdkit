@@ -3,24 +3,120 @@ Internal helpers of templates/_tokens.tpl — see its file-level doc
 comment for the overview and dependency graph.
 */}}
 
-{{/*
-crdkit.markerPattern.internal (internal)
 
-The one definition of a "@NAME@" marker; every marker match in crdkit
-(substitution, unresolved-marker scan, schema checks, JSON Schema
-`markers` pattern) uses it.
+{{/*
+crdkit.annotationKey.internal (internal)
+
+Reports whether a key names a declared token annotation.
 
 Interface:
-- Params: none (pass an empty dict).
-- Returns: the regex as plain text — `@[A-Za-z0-9_.]+@`.
+- Params (dict): { "ctx": <ctx>, "key": <string> }
+- Returns: "true" when the key is a declared annotation, "" otherwise.
 
 Implementation notes:
-- "." is part of a name, so a dotted name (`@A.b@`) and a library's
-  relative form (`@.x@`) are markers too. Side effect: text like
-  `@example.com@` is a marker — escape it with "@AT@".
+- The annotation names are ctx.reservedKeys minus the built-in reserved
+  keys; a colliding declaration was dropped at merge time, so it is not
+  an annotation here either.
 */}}
-{{- define "crdkit.markerPattern.internal" -}}
-@[A-Za-z0-9_.]+@
+{{- define "crdkit.annotationKey.internal" -}}
+{{- $key := .key -}}
+{{- if not (has $key (list "_value" "_gen" "_generated" "match")) -}}
+  {{- if has $key (.ctx.reservedKeys | default (list)) -}}true{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+crdkit.markersWalk.internal (internal)
+
+Collects marker names from a value's string leaves into
+`state.names`/`state.seen`. Invoked by crdkit.markers.
+
+Interface:
+- Params (dict): { "value": <any structure>, "state": {"names": <list>,
+  "seen": <dict>} }
+- Returns: "" (mutates `state`).
+*/}}
+{{- define "crdkit.markersWalk.internal" -}}
+{{- $state := .state -}}
+{{- $v := .value -}}
+{{- if kindIs "string" $v -}}
+  {{- range $m := regexFindAll (include "crdkit.markerPattern" (dict)) $v -1 -}}
+    {{- $name := trimSuffix "@" (trimPrefix "@" $m) -}}
+    {{- if and (ne $name "AT") (not (hasKey $state.seen $name)) -}}
+      {{- $_ := set $state.seen $name true -}}
+      {{- $_ := set $state "names" (append $state.names $name) -}}
+    {{- end -}}
+  {{- end -}}
+{{- else if kindIs "map" $v -}}
+  {{- range $k := keys $v | sortAlpha -}}
+    {{- include "crdkit.markersWalk.internal" (dict "value" (index $v $k) "state" $state) -}}
+  {{- end -}}
+{{- else if kindIs "slice" $v -}}
+  {{- range $e := $v -}}
+    {{- include "crdkit.markersWalk.internal" (dict "value" $e "state" $state) -}}
+  {{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+crdkit.regexValid.internal (internal)
+
+Validates a compiled-or-not regex without aborting.
+
+Interface:
+- Params (dict): { "pattern": <regex text> }
+- Returns: "true" when the regex compiles, "" otherwise.
+
+Implementation notes:
+- `(?:<re>)|` always matches "", so a match on "" succeeds exactly when
+  the regex compiles.
+*/}}
+{{- define "crdkit.regexValid.internal" -}}
+{{- if regexMatch (printf "(?:%s)|" .pattern) "" -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+crdkit.tokenPrologue.internal (internal)
+
+Shared prologue of crdkit.token.add and crdkit.token.underlay.
+
+Interface:
+- Params (dict): { "ctx": <ctx>, "args": <the public call's list>,
+  "verb": "crdkit.token.add" | "crdkit.token.underlay", "holder":
+  <dict, written in place> }
+- Returns: ""; sets holder's name, value, target, rawAnnotations,
+  declaration (copy without `_value`/`_gen`) and annotationsValid.
+
+Implementation notes:
+- `target` defaults to ctx.target (an explicitly empty target counts as
+  absent, like the public defines always did).
+- Non-dict annotations → ERROR naming the token, "annotations must be a
+  dict"; the caller ignores them.
+*/}}
+{{- define "crdkit.tokenPrologue.internal" -}}
+{{- $ctx := .ctx -}}
+{{- $args := .args -}}
+{{- $name := index $args 1 -}}
+{{- $rawAnnotations := "" -}}
+{{- if gt (len $args) 3 -}}{{- $rawAnnotations = index $args 3 -}}{{- end -}}
+{{- $target := $ctx.target -}}
+{{- if and (gt (len $args) 4) (index $args 4) -}}{{- $target = index $args 4 -}}{{- end -}}
+{{- if and $rawAnnotations (not (kindIs "map" $rawAnnotations)) -}}
+  {{- include "crdkit.diag.error" (list $ctx.diag (printf "%s for '%s': annotations must be a dict — ignored" .verb $name)) -}}
+{{- end -}}
+{{- $decl := dict -}}
+{{- if hasKey $ctx.tokens $name -}}
+  {{- $existing := index $ctx.tokens $name -}}
+  {{- if kindIs "map" $existing -}}
+    {{- $decl = omit $existing "_value" "_gen" -}}
+  {{- end -}}
+{{- end -}}
+{{- $_ := set .holder "name" $name -}}
+{{- $_ := set .holder "value" (index $args 2) -}}
+{{- $_ := set .holder "target" $target -}}
+{{- $_ := set .holder "rawAnnotations" $rawAnnotations -}}
+{{- $_ := set .holder "declaration" $decl -}}
+{{- $_ := set .holder "annotationsValid" (or (not $rawAnnotations) (kindIs "map" $rawAnnotations)) -}}
 {{- end -}}
 
 {{/*
@@ -239,7 +335,7 @@ value: {{ index $cache $target | toYaml | nindent 2 }}
       {{- $found = true -}}
     {{- end -}}
     {{- if and (not $found) (hasKey $raw "match") -}}
-      {{- $matchResult := include "crdkit.matchRules" (dict "subject" $target "rules" $raw.match) | fromYaml -}}
+      {{- $matchResult := include "crdkit.matchRules" (dict "subject" $target "rules" $raw.match "diag" $diag "label" $fieldId) | fromYaml -}}
       {{- if $matchResult.matched -}}
         {{- $rawValue = $matchResult.value -}}
         {{- $found = true -}}
@@ -305,7 +401,7 @@ value: {{ index $cache $target | toYaml | nindent 2 }}
     {{- if or (kindIs "map" $rawValue) (kindIs "slice" $rawValue) -}}
       {{- $rawText = toJson $rawValue -}}
     {{- end -}}
-    {{- $hasMarker := and (kindIs "string" $rawText) (regexMatch (include "crdkit.markerPattern.internal" (dict)) $rawText) -}}
+    {{- $hasMarker := and (kindIs "string" $rawText) (regexMatch (include "crdkit.markerPattern" (dict)) $rawText) -}}
     {{/* rungs are shared across targets: a generated value (per target) or a marker-holding entry (substituted per target) must not leak into rung caches. */}}
     {{- if or $fromGenerated $hasMarker -}}
       {{- $_ := set $cache $target $resolvedValue -}}
@@ -413,7 +509,7 @@ Implementation notes:
 {{- $resolving := .resolving -}}
 {{- $reservedKeys := .reservedKeys -}}
 {{- $gen := .gen -}}
-{{- $markers := regexFindAll (include "crdkit.markerPattern.internal" (dict)) $text -1 -}}
+{{- $markers := regexFindAll (include "crdkit.markerPattern" (dict)) $text -1 -}}
 {{- range $marker := $markers -}}
   {{- $refName := trimSuffix "@" (trimPrefix "@" $marker) -}}
   {{- if and (ne $refName "AT") (hasKey $tokens $refName) -}}
@@ -494,7 +590,7 @@ Implementation notes:
   {{- $target = index . 2 -}}
 {{- end -}}
 {{- $tokens := $ctx.tokens -}}
-{{- $markers := regexFindAll (include "crdkit.markerPattern.internal" (dict)) $text -1 -}}
+{{- $markers := regexFindAll (include "crdkit.markerPattern" (dict)) $text -1 -}}
 {{- range $marker := $markers -}}
   {{- $name := trimSuffix "@" (trimPrefix "@" $marker) -}}
   {{- if and (ne $name "AT") (hasKey $tokens $name) -}}
@@ -503,4 +599,52 @@ Implementation notes:
   {{- end -}}
 {{- end -}}
 {{- $text -}}
+{{- end -}}
+
+{{/*
+crdkit.substituteValue.internal (internal)
+
+Builds a copy of a value with every string leaf substituted; map keys
+are data. Invoked by crdkit.render's final pass.
+
+Interface:
+- Params (dict): { "ctx": <ctx>, "value": <any>, "holder": <dict>,
+  "unresolved": <dict marker -> true> }
+- Returns: ""; writes the substituted copy to `holder.value`.
+
+Implementation notes:
+- Builds new maps/lists instead of mutating: a subtree may alias `state`
+  data or another subtree and a second visit would re-read an
+  `@AT@`-escaped leaf as a marker.
+- Each leaf's leftover markers (before `@AT@` becomes "@") are collected
+  into `unresolved` for the typo scan.
+*/}}
+{{- define "crdkit.substituteValue.internal" -}}
+{{- $holder := .holder -}}
+{{- $v := .value -}}
+{{- if kindIs "string" $v -}}
+  {{- $text := include "crdkit.tokens.substituteMarkers.internal" (list .ctx $v) -}}
+  {{- range $m := regexFindAll (include "crdkit.markerPattern" (dict)) $text -1 -}}
+    {{- $_ := set $.unresolved $m true -}}
+  {{- end -}}
+  {{- $_ := set $holder "value" ($text | replace "@AT@" "@") -}}
+{{- else if kindIs "map" $v -}}
+  {{- $out := dict -}}
+  {{- range $k, $e := $v -}}
+    {{- $h := dict -}}
+    {{- include "crdkit.substituteValue.internal" (dict "ctx" $.ctx "value" $e "holder" $h "unresolved" $.unresolved) -}}
+    {{- $_ := set $out $k $h.value -}}
+  {{- end -}}
+  {{- $_ := set $holder "value" $out -}}
+{{- else if kindIs "slice" $v -}}
+  {{- $out := list -}}
+  {{- range $e := $v -}}
+    {{- $h := dict -}}
+    {{- include "crdkit.substituteValue.internal" (dict "ctx" $.ctx "value" $e "holder" $h "unresolved" $.unresolved) -}}
+    {{- $out = append $out $h.value -}}
+  {{- end -}}
+  {{- $_ := set $holder "value" $out -}}
+{{- else -}}
+  {{- $_ := set $holder "value" $v -}}
+{{- end -}}
 {{- end -}}

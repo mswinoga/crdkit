@@ -303,8 +303,9 @@ Interface:
 Implementation notes:
 - An unknown key → ERROR `'<path>.<key>' is not a target key — ignored;
   allowed: <keys>; an exact target goes in 'match'`, key dropped.
-- `match` that is not a list of single-key maps → ERROR, dropped; its
-  regexes are checked at resolution (crdkit.matchRules).
+- `match` that is not a list of single-key maps → ERROR, dropped; each
+  well-formed rule's regex is checked here (invalid → ERROR
+  `'<path>.match[<i>]'`, rule dropped).
 - Keys are visited in sorted order, so messages are stable.
 */}}
 {{- define "crdkit.schema.checkDeclaration.internal" -}}
@@ -324,7 +325,16 @@ Implementation notes:
       {{- end -}}
     {{- end -}}
     {{- if $valid -}}
-      {{- $_ := set $result $key $entry -}}
+      {{- $kept := list -}}
+      {{- range $i, $rule := $entry -}}
+        {{- $pattern := first (keys $rule) -}}
+        {{- if include "crdkit.regexValid.internal" (dict "pattern" $pattern) -}}
+          {{- $kept = append $kept $rule -}}
+        {{- else -}}
+          {{- include "crdkit.diag.error" (list $diag (printf "'%s[%d]': '%s' is not a valid regex — rule ignored" $keyPath $i $pattern)) -}}
+        {{- end -}}
+      {{- end -}}
+      {{- $_ := set $result $key $kept -}}
     {{- else -}}
       {{- include "crdkit.diag.error" (list $diag (printf "'%s' must be a list of single-key maps {<regex>: <value>} — ignored" $keyPath)) -}}
     {{- end -}}
@@ -333,6 +343,128 @@ Implementation notes:
   {{- end -}}
 {{- end -}}
 {{- $_ := set .out "value" $result -}}
+{{- end -}}
+
+{{/*
+crdkit.schema.checkMemo.internal (internal)
+
+Self-checks a schema once per distinct schema and render.
+
+Interface:
+- Params (dict): { "ctx": <ctx>, "schema": <root node> }
+- Returns: `true` or "" like crdkit.schema.check.
+
+Implementation notes:
+- Keyed by `sha256sum (toJson schema)` in `ctx.schemaChecks`, created by
+  crdkit.render; a caller ctx without it falls back to a plain check.
+- Only the ctx-taking passes memoize; `crdkit.schema.check` itself stays
+  unmemoized (no ctx).
+*/}}
+{{- define "crdkit.schema.checkMemo.internal" -}}
+{{- $ctx := .ctx -}}
+{{- if hasKey $ctx "schemaChecks" -}}
+  {{- $key := sha256sum (toJson .schema) -}}
+  {{- $checks := $ctx.schemaChecks -}}
+  {{- if not (hasKey $checks $key) -}}
+    {{- $_ := set $checks $key (include "crdkit.schema.check" (dict "schema" .schema "diag" $ctx.diag)) -}}
+  {{- end -}}
+  {{- get $checks $key -}}
+{{- else -}}
+  {{- include "crdkit.schema.check" (dict "schema" .schema "diag" $ctx.diag) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+crdkit.schema.locate.internal (internal)
+
+Walks the schema and the values one key at a time, following switches
+and tracking the values path and the per-target state. Shared by
+crdkit.schema.node and crdkit.schema.resolve.
+
+Interface:
+- Params (dict): { "node": <starting node>, "value": <starting value>,
+  "keys": <list of keys>, "path": <starting values path>, "mode":
+  "node" | "resolve", "finalSwitch": <bool, also follow a switch after
+  the last key>, "out": <dict, written in place> }
+- Returns: nothing; sets out.found, out.node, out.value, out.inTokens,
+  out.path.
+
+Implementation notes:
+- "node" mode tolerates a missing map/list value (a sentinel
+  "none" value); "resolve" mode stops unless the value is a map (for
+  "map") or a list with the index in range.
+- `crdkit.schema.perTarget.internal` state is threaded, so a returned
+  node knows its ancestors.
+*/}}
+{{- define "crdkit.schema.locate.internal" -}}
+{{- $node := .node -}}
+{{- $value := .value -}}
+{{- $none := index (dict) "none" -}}
+{{- $found := true -}}
+{{- $inTokens := false -}}
+{{- $path := .path | default "" -}}
+{{- $mode := .mode -}}
+{{- $keys := .keys | default (list) -}}
+{{- if .finalSwitch -}}{{- $keys = concat $keys (list "") -}}{{- end -}}
+{{- range $key := $keys -}}
+  {{- if and $found (kindIs "map" $node) (hasKey $node "switch") -}}
+    {{- $by := "" -}}
+    {{- if kindIs "map" $value -}}
+      {{- $by = index $value $node.switch.by -}}
+    {{- end -}}
+    {{- if and (not (kindIs "invalid" $by)) (ne (toString $by) "") (hasKey $node.switch.cases (toString $by)) -}}
+      {{- $node = index $node.switch.cases (toString $by) -}}
+    {{- else -}}
+      {{- $found = false -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if and $found (ne (toString $key) "") -}}
+    {{- $inTokens = or $inTokens (ne (include "crdkit.schema.perTarget.internal" (dict "node" $node "inTokens" $inTokens)) "") -}}
+    {{- $shape := include "crdkit.schema.shape.internal" (dict "node" $node) -}}
+    {{- if eq $shape "map" -}}
+      {{- if and (eq $mode "resolve") (not (kindIs "map" $value)) -}}
+        {{- $found = false -}}
+      {{- else -}}
+        {{- $properties := $node.properties | default dict -}}
+        {{- if hasKey $properties (toString $key) -}}
+          {{- $node = index $properties (toString $key) -}}
+        {{- else if hasKey $node "values" -}}
+          {{- $node = $node.values -}}
+        {{- else -}}
+          {{- $found = false -}}
+        {{- end -}}
+        {{- if $found -}}
+          {{- if kindIs "map" $value -}}
+            {{- $value = index $value (toString $key) -}}
+          {{- else -}}
+            {{- $value = $none -}}
+          {{- end -}}
+          {{- $path = include "crdkit.schema.path" (dict "keys" (list (toString $key)) "path" $path) -}}
+        {{- end -}}
+      {{- end -}}
+    {{- else if and (eq $shape "list") (regexMatch "^[0-9]+$" (toString $key)) -}}
+      {{- if and (eq $mode "resolve") (not (and (kindIs "slice" $value) (lt (int (toString $key)) (len $value)))) -}}
+        {{- $found = false -}}
+      {{- else -}}
+        {{- $node = $node.items | default (dict "type" "any") -}}
+        {{- $index := int (toString $key) -}}
+        {{- if and (kindIs "slice" $value) (lt $index (len $value)) -}}
+          {{- $value = index $value $index -}}
+        {{- else -}}
+          {{- $value = $none -}}
+        {{- end -}}
+        {{- $path = include "crdkit.schema.path" (dict "keys" (list $index) "path" $path) -}}
+      {{- end -}}
+    {{- else -}}
+      {{- $found = false -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- $_ := set .out "found" $found -}}
+{{- $_ := set .out "node" $node -}}
+{{- $_ := set .out "value" $value -}}
+{{- $_ := set .out "inTokens" $inTokens -}}
+{{- $_ := set .out "path" $path -}}
 {{- end -}}
 
 {{/*
@@ -389,7 +521,9 @@ Implementation notes:
   map on a static scalar node → ERROR, whatever `required` says (a
   fallback to the default would invert e.g. `enabled: {PROD: false}`);
   a node that fails is dropped (its parent's default then
-  applies), a key failing "keys.pattern" with its value. A per-target
+  applies), a key failing "keys.pattern" with its value, and a YAML 1.1
+  boolean word (y/n/yes/no/on/off/true/false, any case) as a `keys` map
+  key (checked before the pattern). A per-target
   node holding a dict is a token declaration: kept as written, checked
   by the value pass; with target keys in effect (the node's own
   `targetKeys`, else the inherited ones) its keys are checked first
@@ -451,7 +585,7 @@ Implementation notes:
     {{- include $shapeDiag (list $diag (printf "'%s'%s must be a scalar%s" $path $suffix $tail)) -}}
     {{- $_ := set $out "keep" false -}}
   {{- else -}}
-    {{- $hasMarkers := and (not $resolved) (kindIs "string" $value) (regexMatch (include "crdkit.markerPattern.internal" (dict)) $value) -}}
+    {{- $hasMarkers := and (not $resolved) (kindIs "string" $value) (regexMatch (include "crdkit.markerPattern" (dict)) $value) -}}
     {{- if and $hasMarkers (eq (toString $node.static) "true") -}}
       {{- include "crdkit.diag.error" (list $diag (printf "'%s' must not contain '@NAME@' markers — ignored" $path)) -}}
       {{- $_ := set $out "keep" false -}}
@@ -500,13 +634,22 @@ Implementation notes:
       {{- if not (kindIs "invalid" $child) -}}
         {{- $childNode := dict -}}
         {{- $badKey := false -}}
+        {{- $booleanWord := false -}}
         {{- if hasKey $properties $key -}}
           {{- $childNode = index $properties $key -}}
         {{- else if hasKey $node "values" -}}
           {{- $childNode = $node.values -}}
-          {{- $badKey = and (hasKey $node "keys") (not (mustRegexMatch $node.keys.pattern $key)) -}}
+          {{- if hasKey $node "keys" -}}
+            {{- if and (not $resolved) (regexMatch "(?i)^(y|n|yes|no|on|off|true|false)$" $key) -}}
+              {{- $booleanWord = true -}}
+            {{- else -}}
+              {{- $badKey = not (mustRegexMatch $node.keys.pattern $key) -}}
+            {{- end -}}
+          {{- end -}}
         {{- end -}}
-        {{- if $badKey -}}
+        {{- if $booleanWord -}}
+          {{- include "crdkit.diag.error" (list $diag (printf "key '%s'%s is a YAML 1.1 boolean word (y, n, yes, no, on, off, true, false) — ignored" $childPath $suffix)) -}}
+        {{- else if $badKey -}}
           {{- include "crdkit.diag.error" (list $diag (printf "key '%s'%s must match '%s'%s" $childPath $suffix $node.keys.pattern $tail)) -}}
         {{- else if not $childNode -}}
           {{- include "crdkit.diag.warning" (list $diag (printf "'%s'%s is not a known key%s" $childPath $suffix $tail)) -}}
@@ -555,9 +698,9 @@ Implementation notes:
 - A value that fails the check, or still holds an unresolved marker
   (e.g. one left for a later substitution pass), is returned
   unconverted. `string` / `scalar` nodes are returned as resolved.
-- A per-target node resolves through crdkit.tokenDef.value (field
-  id = the values path); any other value through
-  crdkit.tokens.substitute.
+- A "token" param resolves through crdkit.token.value; a per-target
+  node otherwise through crdkit.tokenDef.value (field id = the values
+  path); any other value through crdkit.tokens.substitute.
 - Checked at most once per `<path>|<target>` (recorded in "seen").
 - Not checked when resolution itself recorded an ERROR (e.g. "no value
   found") or left a marker unresolved — that diagnostic already names
@@ -569,13 +712,15 @@ Implementation notes:
 {{- $target := .target -}}
 {{- $errorsBefore := len $ctx.diag.errors -}}
 {{- $value := "" -}}
-{{- if .tokens -}}
+{{- if .token -}}
+  {{- $value = (include "crdkit.token.value" (list $ctx .token $target) | fromYaml).value -}}
+{{- else if .tokens -}}
   {{- $value = (include "crdkit.tokenDef.value" (list $ctx .path .def $target) | fromYaml).value -}}
 {{- else -}}
   {{- $value = include "crdkit.tokens.substitute" (list $ctx .def $target) -}}
 {{- end -}}
 {{- $_ := set .out "value" $value -}}
-{{- $unresolved := and (kindIs "string" $value) (regexMatch (include "crdkit.markerPattern.internal" (dict)) $value) -}}
+{{- $unresolved := and (kindIs "string" $value) (regexMatch (include "crdkit.markerPattern" (dict)) $value) -}}
 {{- $type := $node.type | default "" | toString -}}
 {{/* converted on every call, not only the checked one: a repeated call (check skipped via "seen") must return the same value. */}}
 {{- if and (kindIs "string" $value) (not $unresolved) (has $type (list "int" "number" "bool")) -}}
@@ -651,7 +796,7 @@ Implementation notes:
   {{- end -}}
 {{- else if eq $shape "any" -}}
   {{- if $collect -}}{{- $_ := set $out "value" $value -}}{{- end -}}
-{{- else if or $tokens (and (eq $shape "scalar") (kindIs "string" $value) (regexMatch (include "crdkit.markerPattern.internal" (dict)) $value)) -}}
+{{- else if or $tokens (and (eq $shape "scalar") (kindIs "string" $value) (regexMatch (include "crdkit.markerPattern" (dict)) $value)) -}}
   {{- $leaf := dict -}}
   {{- $errorsBefore := len .ctx.diag.errors -}}
   {{- include "crdkit.schema.resolveAndCheck.internal" (merge (dict "node" $node "def" $value "tokens" (ne $tokens "") "path" $path "out" $leaf) $common) -}}

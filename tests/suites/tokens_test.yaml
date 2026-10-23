@@ -1,0 +1,2311 @@
+suite: crdkit tokens
+templates:
+  - cr.yaml
+values:
+  - ../fixtures/base.yaml
+tests:
+  - it: 'C-11: resolves a simple scalar token'
+    set:
+      target: prod-01
+      tokens:
+        GREETING: hello
+      ops:
+        - put:
+            - structure
+          value:
+            message: '@GREETING@'
+    asserts:
+      - equal:
+          path: structure.message
+          value: hello
+  - it: 'C-11: ''default'' is a hardcoded crdkit-level fallback, resolving unconditionally for ANY target — no taxonomy needed'
+    set:
+      target: some-unrecognized-target-with-no-taxonomy-hop-at-all
+      tokens:
+        DB_HOST:
+          default: db.internal
+      ops:
+        - tokenValue: DB_HOST
+          target: some-unrecognized-target-with-no-taxonomy-hop-at-all
+          at:
+            - crossResolved
+            - some-unrecognized-target-with-no-taxonomy-hop-at-all
+            - DB_HOST
+    asserts:
+      - equal:
+          path: crossResolved.some-unrecognized-target-with-no-taxonomy-hop-at-all.DB_HOST
+          value: db.internal
+      - notExists:
+          path: diagnostics.error
+  - it: 'C-12: ''default'' is checked AFTER the parentTarget walk, not before — a more specific taxonomy-reached value always wins over it'
+    set:
+      target: prod-01
+      tokens:
+        REGION:
+          default: generic-region
+          PROD: prod-specific-region
+      ladder:
+        prod-01: PROD
+      ops:
+        - put:
+            - structure
+          value:
+            region: '@REGION@'
+    asserts:
+      - equal:
+          path: structure.region
+          value: prod-specific-region
+  - it: 'C-11: a token referencing another token (one level) resolves correctly'
+    set:
+      target: prod-01
+      tokens:
+        A: foo
+        B: '@A@-bar'
+      ops:
+        - put:
+            - structure
+          value:
+            message: '@B@'
+    asserts:
+      - equal:
+          path: structure.message
+          value: foo-bar
+  - it: 'C-11: a token referencing a chain of 3+ tokens resolves via the iterative resolver'
+    set:
+      target: prod-01
+      tokens:
+        T1: one
+        T2: '@T1@-two'
+        T3: '@T2@-three'
+      ops:
+        - put:
+            - structure
+          value:
+            message: '@T3@'
+    asserts:
+      - equal:
+          path: structure.message
+          value: one-two-three
+  - it: 'C-12: a direct two-token @ref@ cycle records an ERROR mentioning a cycle, and does not hang'
+    set:
+      target: prod-01
+      tokens:
+        A: '@B@'
+        B: '@A@'
+      ops:
+        - put:
+            - structure
+          value:
+            x: '@A@'
+    asserts:
+      - exists:
+          path: diagnostics.error[?(@ =~ /cycle/)]
+  - it: 'C-17: @AT@ resolves to a literal @ character, applied only on the final substitution pass'
+    set:
+      target: prod-01
+      ops:
+        - put:
+            - structure
+          value:
+            email: user@AT@example.com
+    asserts:
+      - equal:
+          path: structure.email
+          value: user@example.com
+  - it: 'C-17: @AT@ escapes text the marker pattern would otherwise read as a marker'
+    set:
+      target: prod-01
+      ops:
+        - put:
+            - structure
+          value:
+            email: '@AT@example.com@AT@'
+    asserts:
+      - equal:
+          path: structure.email
+          value: '@example.com@'
+      - notExists:
+          path: diagnostics.warning
+  - it: 'C-11: a dotted token name resolves through its ''@A.b@'' marker'
+    set:
+      target: prod-01
+      tokens:
+        A.b: hello
+      ops:
+        - put:
+            - structure
+          value:
+            message: '@A.b@ world'
+    asserts:
+      - equal:
+          path: structure.message
+          value: hello world
+      - notExists:
+          path: diagnostics.error
+  - it: 'C-11: dotted token names chain like any other name, per target'
+    set:
+      target: prod-01
+      tokens:
+        SVC.host: h1
+        SVC.port:
+          default: "80"
+          prod-01: "8080"
+        SVC.url: http://@SVC.host@:@SVC.port@
+      ops:
+        - put:
+            - structure
+          value:
+            url: '@SVC.url@'
+    asserts:
+      - equal:
+          path: structure.url
+          value: http://h1:8080
+  - it: 'C-11: a dotted marker naming no token is left untouched'
+    set:
+      target: prod-01
+      ops:
+        - put:
+            - structure
+          value:
+            email: '@example.com@'
+    asserts:
+      - equal:
+          path: structure.email
+          value: '@example.com@'
+  - it: 'C-13: a declared-but-never-used token produces no diagnostic at all, even if it would error if resolved'
+    set:
+      target: prod-01
+      tokens:
+        BROKEN: {}
+      ops: []
+    asserts:
+      - notExists:
+          path: diagnostics.error
+      - notExists:
+          path: diagnostics.warning
+  - it: 'C-13: an entirely unset target produces NO diagnostic when nothing is ever resolved against it — no proactive check anymore'
+    set:
+      target: ""
+      tokens: {}
+      ops: []
+    asserts:
+      - notExists:
+          path: diagnostics.error
+  - it: 'C-16: resolving a name that was never declared at all (e.g. via crossTargets/crdkit.token.value directly) records an ERROR, not a fail()'
+    set:
+      target: prod-01
+      ops:
+        - tokenValue: NEVER_DECLARED
+          target: prod-01
+          at:
+            - crossResolved
+            - prod-01
+            - NEVER_DECLARED
+    asserts:
+      - exists:
+          path: diagnostics.error[?(@ =~ /unknown\ token\ 'NEVER_DECLARED'\ referenced/)]
+      - equal:
+          path: crossResolved.prod-01.NEVER_DECLARED
+          value: ""
+  - it: 'C-33: a dedicated attribute (literal key equal to the exact target) resolves directly, at any granularity'
+    set:
+      target: prod-01
+      tokens:
+        COLOR:
+          prod-01: red
+          blue-thing: blue
+      ops:
+        - put:
+            - structure
+          value:
+            color: '@COLOR@'
+    asserts:
+      - equal:
+          path: structure.color
+          value: red
+  - it: 'C-33: a dedicated attribute works for a bare, unsequenced target too — crdkit doesn''t care about shape'
+    set:
+      target: staging
+      tokens:
+        COLOR:
+          staging: teal
+      ops:
+        - put:
+            - structure
+          value:
+            color: '@COLOR@'
+    asserts:
+      - equal:
+          path: structure.color
+          value: teal
+  - it: 'C-12: no dedicated attribute, no match, no parentTargetMap configured — an honest ERROR, not a silent wrong answer'
+    set:
+      target: prod-01
+      tokens:
+        BROKEN:
+          qa-01: wrong-target-entirely
+      ops:
+        - put:
+            - structure
+          value:
+            x: '@BROKEN@'
+    asserts:
+      - exists:
+          path: diagnostics.error[?(@ =~ /no\ value\ found\ for\ 'BROKEN'\ —\ target\ chain\ exhausted\ at\ 'prod\-01'\ starting\ from\ 'prod\-01'/)]
+  - it: 'C-18: match: resolves against the full target string — no shape requirement, works for any target'
+    set:
+      target: canary-thing
+      tokens:
+        SUBENV:
+          match:
+            - canary-.*: is-canary
+      ops:
+        - put:
+            - structure
+          value:
+            subenv: '@SUBENV@'
+    asserts:
+      - equal:
+          path: structure.subenv
+          value: is-canary
+  - it: 'C-18: match: rule values can reference capture groups from the pattern'
+    set:
+      target: qam1-05
+      tokens:
+        PREFIX:
+          match:
+            - (.+)-[0-9]{2}: $1
+      ops:
+        - put:
+            - structure
+          value:
+            prefix: '@PREFIX@'
+    asserts:
+      - equal:
+          path: structure.prefix
+          value: qam1
+  - it: 'C-18: match: first matching rule wins even when a later rule would also match'
+    set:
+      target: prod-01
+      tokens:
+        MULTI:
+          match:
+            - prod-01: first-match
+            - prod-[0-9]{2}: second-match-would-also-fit
+      ops:
+        - put:
+            - structure
+          value:
+            multi: '@MULTI@'
+    asserts:
+      - equal:
+          path: structure.multi
+          value: first-match
+  - it: 'C-33: a dedicated attribute wins over a match rule that would also fire — most specific always beats pattern-based'
+    set:
+      target: prod-01
+      tokens:
+        HOST:
+          prod-01: dedicated-wins
+          match:
+            - prod-[0-9]{2}: pattern-would-fire-too
+      ops:
+        - put:
+            - structure
+          value:
+            host: '@HOST@'
+    asserts:
+      - equal:
+          path: structure.host
+          value: dedicated-wins
+  - it: 'C-12: walks a single escalation hop when the exact target has no dedicated attribute'
+    set:
+      target: prod-01
+      tokens:
+        REGION:
+          prod: us-east-1
+      ladder:
+        prod-01: prod
+      ops:
+        - put:
+            - structure
+          value:
+            region: '@REGION@'
+    asserts:
+      - equal:
+          path: structure.region
+          value: us-east-1
+  - it: 'C-12: walks multiple escalation hops, caching every rung visited along the way, not just the one where the value was found'
+    set:
+      target: qam1-01
+      tokens:
+        REGION2:
+          NONPROD: region-nonprod
+      ladder:
+        qam1-01: qam1
+        qam1: QA
+        QA: NONPROD
+      ops:
+        - tokenValue: REGION2
+          target: qam1-01
+          at:
+            - crossResolved
+            - qam1-01
+            - REGION2
+        - tokenValue: REGION2
+          target: qam1-01
+          at:
+            - tv
+            - REGION2
+            - qam1-01
+        - tokenValue: REGION2
+          target: qam1
+          at:
+            - tv
+            - REGION2
+            - qam1
+        - tokenValue: REGION2
+          target: QA
+          at:
+            - tv
+            - REGION2
+            - QA
+        - tokenValue: REGION2
+          target: NONPROD
+          at:
+            - tv
+            - REGION2
+            - NONPROD
+    asserts:
+      - equal:
+          path: crossResolved.qam1-01.REGION2
+          value: region-nonprod
+      - equal:
+          path: tv["REGION2"]["qam1-01"]
+          value: region-nonprod
+      - equal:
+          path: tv["REGION2"]["qam1"]
+          value: region-nonprod
+      - equal:
+          path: tv["REGION2"]["QA"]
+          value: region-nonprod
+      - equal:
+          path: tv["REGION2"]["NONPROD"]
+          value: region-nonprod
+  - it: 'C-12: with no parentTargetMap configured, there is NO escalation at all — same as crdkit.noParentTarget'
+    set:
+      target: prod-01
+      tokens:
+        REGION:
+          prod: us-east-1
+      ops:
+        - put:
+            - structure
+          value:
+            region: '@REGION@'
+    asserts:
+      - exists:
+          path: diagnostics.error[?(@ =~ /no\ value\ found\ for\ 'REGION'\ —\ target\ chain\ exhausted\ at\ 'prod\-01'\ starting\ from\ 'prod\-01'/)]
+  - it: 'C-12: a malformed client escalation map that cycles back on itself is caught as an ERROR, not a hang'
+    set:
+      target: a
+      tokens:
+        X:
+          unused: never-reached
+      ladder:
+        a: b
+        b: a
+      ops:
+        - put:
+            - structure
+          value:
+            x: '@X@'
+    asserts:
+      - exists:
+          path: diagnostics.error[?(@ =~ /target\ escalation\ chain\ for\ 'X'\ cycles\ back\ to\ 'a'\ while\ resolving\ from\ 'a'/)]
+      - lengthEqual:
+          path: diagnostics.error
+          count: 1
+  - it: 'C-18: match: is evaluated fresh for the exact target even when a broader rung''s cache is already populated from a DIFFERENT target''s walk'
+    set:
+      target: prod-01
+      tokens:
+        SPECIAL:
+          NONPROD: generic-nonprod
+          match:
+            - qap1-[0-9]{2}: special-value
+      ladder:
+        qam1-01: qam1
+        qam1: QA
+        QA: NONPROD
+        qap1-02: qap1
+        qap1: QA
+      ops:
+        - tokenValue: SPECIAL
+          target: qam1-01
+          at:
+            - crossResolved
+            - qam1-01
+            - SPECIAL
+        - tokenValue: SPECIAL
+          target: qap1-02
+          at:
+            - crossResolved
+            - qap1-02
+            - SPECIAL
+        - tokenValue: SPECIAL
+          target: QA
+          at:
+            - tv
+            - SPECIAL
+            - QA
+    asserts:
+      - equal:
+          path: crossResolved.qam1-01.SPECIAL
+          value: generic-nonprod
+      - equal:
+          path: crossResolved.qap1-02.SPECIAL
+          value: special-value
+      - equal:
+          path: tv["SPECIAL"]["QA"]
+          value: generic-nonprod
+  - it: 'C-12: the walk supports an arbitrary number of named rungs, not a fixed "family/tier" depth — some branches shorter than others'
+    set:
+      target: prod-01
+      tokens:
+        REGION3:
+          PROD: us-east-1
+      ladder:
+        prod-01: prod
+        prod: PROD
+      ops:
+        - put:
+            - structure
+          value:
+            region: '@REGION3@'
+    asserts:
+      - equal:
+          path: structure.region
+          value: us-east-1
+  - it: 'C-12: a value found via the walk still gets @ref@-chained normally, same as a dedicated attribute or match result'
+    set:
+      target: qa-01
+      tokens:
+        HOST_NAME: db1
+        DB_HOST:
+          QA: '@HOST_NAME@.internal'
+      ladder:
+        qa-01: qa
+        qa: QA
+      ops:
+        - put:
+            - structure
+          value:
+            dbHost: '@DB_HOST@'
+    asserts:
+      - equal:
+          path: structure.dbHost
+          value: db1.internal
+  - it: 'C-17: a dict-shaped resolved value comes back as a dict, with every string leaf''s @ref@ markers substituted'
+    set:
+      target: prod
+      tokens:
+        DB_HOST: db.internal
+        CONFIG:
+          default:
+            host: '@DB_HOST@'
+            port: 5432
+      ops:
+        - tokenValue: CONFIG
+          target: prod
+          at:
+            - crossResolved
+            - prod
+            - CONFIG
+    asserts:
+      - equal:
+          path: crossResolved.prod.CONFIG
+          value:
+            host: db.internal
+            port: 5432
+  - it: 'C-17: a list-shaped resolved value comes back as a list, with every string element''s @ref@ markers substituted'
+    set:
+      target: prod
+      tokens:
+        DB_HOST: db.internal
+        HOSTS:
+          default:
+            - '@DB_HOST@'
+            - static-host
+      ops:
+        - tokenValue: HOSTS
+          target: prod
+          at:
+            - crossResolved
+            - prod
+            - HOSTS
+    asserts:
+      - equal:
+          path: crossResolved.prod.HOSTS
+          value:
+            - db.internal
+            - static-host
+  - it: 'C-17: a non-string scalar value (bool/int/float) resolves to its NATIVE type, not a stringified copy'
+    set:
+      target: prod
+      tokens:
+        ENABLED: true
+        PORT: 5432
+      ops:
+        - tokenValue: ENABLED
+          target: prod
+          at:
+            - crossResolved
+            - prod
+            - ENABLED
+        - tokenValue: PORT
+          target: prod
+          at:
+            - crossResolved
+            - prod
+            - PORT
+    asserts:
+      - equal:
+          path: crossResolved.prod.ENABLED
+          value: true
+      - equal:
+          path: crossResolved.prod.PORT
+          value: 5432
+  - it: 'C-14: a structured value can still reference a token added later via crdkit.token.add — same lazy-resolution guarantee as a scalar'
+    set:
+      target: prod
+      tokens:
+        CONFIG:
+          default:
+            host: '@DERIVED_HOST@'
+      ops:
+        - add: DERIVED_HOST
+          value: computed.internal
+        - tokenValue: CONFIG
+          target: prod
+          at:
+            - crossResolved
+            - prod
+            - CONFIG
+    asserts:
+      - equal:
+          path: crossResolved.prod.CONFIG
+          value:
+            host: computed.internal
+  - it: 'C-31: crdkit.token.string stringifies a non-string scalar for text embedding'
+    set:
+      target: prod
+      tokens:
+        ENABLED: true
+      ops:
+        - tokenString: ENABLED
+          at:
+            - stringResolved
+            - "0"
+          target: prod
+    asserts:
+      - equal:
+          path: stringResolved["0"]
+          value: "true"
+  - it: 'C-31: crdkit.token.string on a dict returns its JSON, with no diagnostic'
+    set:
+      target: prod
+      tokens:
+        CONFIG:
+          default:
+            host: x
+            port: 80
+      ops:
+        - tokenString: CONFIG
+          at:
+            - stringResolved
+            - "0"
+          target: prod
+    asserts:
+      - equal:
+          path: stringResolved["0"]
+          value: '{"host":"x","port":80}'
+      - notExists:
+          path: diagnostics.error
+  - it: 'C-31: crdkit.token.string on a list joins its elements with '','''
+    set:
+      target: prod
+      tokens:
+        HOSTS:
+          default:
+            - a
+            - b
+            - 3
+      ops:
+        - tokenString: HOSTS
+          at:
+            - stringResolved
+            - "0"
+          target: prod
+    asserts:
+      - equal:
+          path: stringResolved["0"]
+          value: a,b,3
+  - it: 'C-17: a marker to a list token splices its elements joined by '','' (no space)'
+    set:
+      target: prod
+      tokens:
+        L:
+          default:
+            - a
+            - b
+            - 3
+      ops:
+        - put:
+            - structure
+          value:
+            x: hosts=@L@
+    asserts:
+      - equal:
+          path: structure.x
+          value: hosts=a,b,3
+      - notExists:
+          path: diagnostics.error
+  - it: 'C-11: a structured list element is spliced as JSON'
+    set:
+      target: prod
+      tokens:
+        L:
+          default:
+            - a
+            - k: v
+            - - 1
+              - 2
+      ops:
+        - put:
+            - structure
+          value:
+            x: '@L@'
+    asserts:
+      - equal:
+          path: structure.x
+          value: a,{"k":"v"},[1,2]
+  - it: 'C-17: a marker to a dict token splices its JSON'
+    set:
+      target: prod
+      tokens:
+        D:
+          default:
+            k: v
+      ops:
+        - put:
+            - structure
+          value:
+            x: cfg=@D@
+    asserts:
+      - equal:
+          path: structure.x
+          value: cfg={"k":"v"}
+      - notExists:
+          path: diagnostics.error
+  - it: 'C-17: an empty list splices as an empty string'
+    set:
+      target: prod
+      tokens:
+        L:
+          default: []
+      ops:
+        - put:
+            - structure
+          value:
+            x: '[@L@]'
+    asserts:
+      - equal:
+          path: structure.x
+          value: '[]'
+  - it: 'C-11: a per-target list token is resolved for the target before it is spliced, markers in its elements included'
+    set:
+      target: prod
+      tokens:
+        HOST: h1
+        L:
+          default:
+            - x
+          prod:
+            - '@HOST@'
+            - b
+        URL: hosts=@L@
+      ops:
+        - put:
+            - structure
+          value:
+            x: '@URL@'
+    asserts:
+      - equal:
+          path: structure.x
+          value: hosts=h1,b
+  - it: 'C-31: crdkit.tokenDef.string on a structure returns it as text'
+    set:
+      target: prod
+      ops:
+        - id: f
+          tokenDef:
+            default:
+              - a
+              - b
+          at:
+            - tokenDefResolved
+            - "0"
+            - value
+          target: prod
+        - id: f
+          tokenDef:
+            default:
+              - a
+              - b
+          at:
+            - tokenDefResolved
+            - "0"
+            - string
+          target: prod
+          string: true
+    asserts:
+      - equal:
+          path: tokenDefResolved["0"].string
+          value: a,b
+      - notExists:
+          path: diagnostics.error
+  - it: 'C-31: crdkit.tokenDef.value resolves an ad-hoc structure using the same escalation rules as a real token, without registering it'
+    set:
+      target: prod
+      tokens:
+        DB_HOST: db.internal
+      ops:
+        - id: myField
+          tokenDef:
+            default: generic-@DB_HOST@
+            prod: special-@DB_HOST@
+          at:
+            - tokenDefResolved
+            - "0"
+            - value
+        - id: myField
+          tokenDef:
+            default: generic-@DB_HOST@
+            prod: special-@DB_HOST@
+          at:
+            - tokenDefResolved
+            - "0"
+            - string
+          string: true
+    asserts:
+      - equal:
+          path: tokenDefResolved["0"].value
+          value: special-db.internal
+      - equal:
+          path: tokenDefResolved["0"].string
+          value: special-db.internal
+  - it: 'C-31: crdkit.tokenDef.value falls back to the ad-hoc structure''s own ''default'' entry when the target doesn''t match'
+    set:
+      target: qa
+      ops:
+        - id: myField
+          tokenDef:
+            default: fallback-value
+            prod: prod-only-value
+          at:
+            - tokenDefResolved
+            - "0"
+            - value
+        - id: myField
+          tokenDef:
+            default: fallback-value
+            prod: prod-only-value
+          at:
+            - tokenDefResolved
+            - "0"
+            - string
+          string: true
+    asserts:
+      - equal:
+          path: tokenDefResolved["0"].value
+          value: fallback-value
+  - it: 'C-31: crdkit.tokenDef.value returns a structural result unchanged, same recursive substitution as a real token'
+    set:
+      target: prod
+      tokens:
+        DB_HOST: db.internal
+      ops:
+        - id: myField
+          tokenDef:
+            default:
+              host: '@DB_HOST@'
+              port: 5432
+          at:
+            - tokenDefResolved
+            - "0"
+            - value
+        - id: myField
+          tokenDef:
+            default:
+              host: '@DB_HOST@'
+              port: 5432
+          at:
+            - tokenDefResolved
+            - "0"
+            - string
+          string: true
+    asserts:
+      - equal:
+          path: tokenDefResolved["0"].value
+          value:
+            host: db.internal
+            port: 5432
+      - equal:
+          path: tokenDefResolved["0"].string
+          value: '{"host":"db.internal","port":5432}'
+  - it: 'C-31: crdkit.tokenDef.value records a ''no value found'' error using the caller-supplied fieldId, same diagnostic shape as a real token'
+    set:
+      target: unrecognized
+      ops:
+        - id: myField
+          tokenDef:
+            prod: only-for-prod
+          at:
+            - tokenDefResolved
+            - "0"
+            - value
+        - id: myField
+          tokenDef:
+            prod: only-for-prod
+          at:
+            - tokenDefResolved
+            - "0"
+            - string
+          string: true
+    asserts:
+      - exists:
+          path: diagnostics.error[?(@ =~ /no\ value\ found\ for\ 'myField'\ —\ target\ chain\ exhausted\ at\ 'unrecognized'\ starting\ from\ 'unrecognized'/)]
+  - it: 'C-10: an annotation is written literally alongside target entries, no "value" wrapper'
+    set:
+      target: prod-01
+      tokens:
+        DB_HOST:
+          default: db.internal
+          exposure: main
+      annotations:
+        - exposure
+      ops:
+        - info: DB_HOST
+          at:
+            - info
+            - DB_HOST
+    asserts:
+      - equal:
+          path: info["DB_HOST"].annotations["exposure"]
+          value: main
+  - it: 'C-10: an annotation value is never validated — arbitrary values are allowed'
+    set:
+      target: prod
+      tokens:
+        EXPOSED:
+          default: x
+          exposure: bogus-value
+      annotations:
+        - exposure
+      ops:
+        - info: EXPOSED
+          at:
+            - info
+            - EXPOSED
+    asserts:
+      - notExists:
+          path: diagnostics.error
+      - notExists:
+          path: diagnostics.warning
+      - equal:
+          path: info["EXPOSED"].annotations["exposure"]
+          value: bogus-value
+  - it: 'C-10: an annotation on a system (locked) token is preserved after merge'
+    set:
+      target: prod
+      system:
+        LOCKED_VAR:
+          default: x
+          exposure: lib-value
+      annotations:
+        - exposure
+      ops:
+        - info: LOCKED_VAR
+          at:
+            - info
+            - LOCKED_VAR
+    asserts:
+      - equal:
+          path: info["LOCKED_VAR"].annotations["exposure"]
+          value: lib-value
+  - it: 'C-10: a token declaring ONLY an annotation, no target entries at all, produces the ordinary "no value found" error'
+    set:
+      target: prod
+      tokens:
+        BROKEN:
+          exposure: main
+      annotations:
+        - exposure
+      ops:
+        - tokenValue: BROKEN
+          target: prod
+          at:
+            - crossResolved
+            - prod
+            - BROKEN
+        - info: BROKEN
+          at:
+            - info
+            - BROKEN
+    asserts:
+      - exists:
+          path: diagnostics.error[?(@ =~ /no\ value\ found\ for\ 'BROKEN'\ —\ target\ chain\ exhausted\ at\ 'prod'\ starting\ from\ 'prod'/)]
+      - equal:
+          path: crossResolved.prod.BROKEN
+          value: ""
+      - equal:
+          path: info["BROKEN"].annotations["exposure"]
+          value: main
+  - it: 'C-10: an annotation token can still chain off another token''s value normally'
+    set:
+      target: prod
+      tokens:
+        HOST_NAME: db1
+        DB_HOST:
+          prod: '@HOST_NAME@.internal'
+          exposure: main
+      annotations:
+        - exposure
+      ops:
+        - tokenValue: DB_HOST
+          target: prod
+          at:
+            - crossResolved
+            - prod
+            - DB_HOST
+        - info: DB_HOST
+          at:
+            - info
+            - DB_HOST
+    asserts:
+      - equal:
+          path: crossResolved.prod.DB_HOST
+          value: db1.internal
+      - equal:
+          path: info["DB_HOST"].annotations["exposure"]
+          value: main
+  - it: 'C-9: a locked (system) token collision discards the user value and records a WARNING'
+    set:
+      target: prod-01
+      system:
+        API_GROUP: locked.example.com
+      tokens:
+        API_GROUP: hijacked.example.com
+      ops:
+        - put:
+            - structure
+          value:
+            group: '@API_GROUP@'
+    asserts:
+      - equal:
+          path: structure.group
+          value: locked.example.com
+      - exists:
+          path: diagnostics.warning[?(@ =~ /token\ 'API_GROUP'\ is\ reserved\ by\ the\ library\ and\ was\ overridden\ back\ to\ the\ library\ value/)]
+  - it: 'C-9: a system (locked) token can declare a structural value — same recursive substitution as any token, and it still can''t be overridden by the user'
+    set:
+      target: prod
+      tokens:
+        DB_HOST: db.internal
+        CONFIG:
+          default:
+            host: hijacked
+      system:
+        CONFIG:
+          default:
+            host: '@DB_HOST@'
+            locked: true
+      ops:
+        - tokenValue: CONFIG
+          target: prod
+          at:
+            - crossResolved
+            - prod
+            - CONFIG
+    asserts:
+      - equal:
+          path: crossResolved.prod.CONFIG
+          value:
+            host: db.internal
+            locked: true
+      - exists:
+          path: diagnostics.warning[?(@ =~ /token\ 'CONFIG'\ is\ reserved\ by\ the\ library\ and\ was\ overridden\ back\ to\ the\ library\ value/)]
+  - it: 'C-11: a default token can be overridden by the user with no diagnostic'
+    set:
+      target: prod-01
+      defaults:
+        LOG_LEVEL: info
+      tokens:
+        LOG_LEVEL: debug
+      ops:
+        - put:
+            - structure
+          value:
+            level: '@LOG_LEVEL@'
+    asserts:
+      - equal:
+          path: structure.level
+          value: debug
+      - notExists:
+          path: diagnostics.warning
+      - notExists:
+          path: diagnostics.error
+  - it: 'C-11: a default token''s structural value can be overridden by the user''s own structural value, with no diagnostic'
+    set:
+      target: prod
+      defaults:
+        CONFIG:
+          default:
+            host: default-host
+      tokens:
+        CONFIG:
+          default:
+            host: user-host
+      ops:
+        - tokenValue: CONFIG
+          target: prod
+          at:
+            - crossResolved
+            - prod
+            - CONFIG
+    asserts:
+      - equal:
+          path: crossResolved.prod.CONFIG
+          value:
+            host: user-host
+      - notExists:
+          path: diagnostics.warning
+      - notExists:
+          path: diagnostics.error
+  - it: 'C-9: ''AT'' is crdkit''s one reserved built-in name — user-supplied tokens.AT is discarded with a WARNING'
+    set:
+      target: prod-01
+      tokens:
+        AT: hijacked
+      ops: []
+    asserts:
+      - exists:
+          path: diagnostics.warning[?(@ =~ /token\ 'AT'\ is\ a\ reserved\ built\-in\ and\ cannot\ be\ redefined;\ the\ user\-supplied\ value\ was\ ignored/)]
+  - it: 'C-8: token names are not checked by crdkit (naming policy belongs to the library)'
+    set:
+      target: prod-01
+      tokens:
+        myToken: hello
+        1BAD: x
+        _BAD: y
+      ops:
+        - put:
+            - structure
+          value:
+            message: '@myToken@'
+    asserts:
+      - equal:
+          path: structure.message
+          value: hello
+      - notExists:
+          path: diagnostics.warning
+  - it: 'C-9: GOTCHA: a differently-cased near-miss of a locked name is NOT blocked as a collision'
+    set:
+      target: prod-01
+      system:
+        API_GROUP: locked.example.com
+      tokens:
+        apiGroup: not-actually-blocked
+      ops:
+        - put:
+            - structure
+          value:
+            group: '@apiGroup@'
+    asserts:
+      - equal:
+          path: structure.group
+          value: not-actually-blocked
+      - notExists:
+          path: diagnostics.warning
+  - it: 'C-14: crdkit.token.add against an existing scalar-normalized token (''default'') MERGES a new dedicated attribute in, preserving ''default'' as the fallback for every other target'
+    set:
+      target: prod-01
+      tokens:
+        EXISTING: was-a-plain-scalar
+      ops:
+        - add: EXISTING
+          value: now-dedicated-for-prod-01
+        - tokenValue: EXISTING
+          at:
+            - tv
+            - EXISTING
+    asserts:
+      - equal:
+          path: tv["EXISTING"]
+          value: now-dedicated-for-prod-01
+  - it: 'C-14: crdkit.token.add stores ''value'' as a DEDICATED ATTRIBUTE (a literal key equal to the exact target) — not resolved at add-time'
+    set:
+      target: prod-01
+      tokens:
+        GREETING: hello
+      ops:
+        - add: DERIVED_VAR
+          value: prefix-@GREETING@
+        - tokenValue: DERIVED_VAR
+          at:
+            - tv
+            - DERIVED_VAR
+    asserts:
+      - equal:
+          path: tv["DERIVED_VAR"]
+          value: prefix-hello
+  - it: 'C-14: a token.add-added token resolves lazily via its dedicated attribute, exactly like any hand-declared token, once actually referenced'
+    set:
+      target: prod-01
+      tokens:
+        GREETING: hello
+      ops:
+        - add: DERIVED_VAR
+          value: prefix-@GREETING@
+        - put:
+            - structure
+          value:
+            x: '@DERIVED_VAR@'
+    asserts:
+      - equal:
+          path: structure.x
+          value: prefix-hello
+  - it: 'C-14: a token.add-added token has no fallback for a target it was never given a value for, and no parentTargetMap configured'
+    set:
+      target: prod-01
+      ops:
+        - add: DERIVED_VAR
+          value: prefix-value
+        - tokenValue: DERIVED_VAR
+          target: qa
+          at:
+            - crossResolved
+            - qa
+            - DERIVED_VAR
+    asserts:
+      - exists:
+          path: diagnostics.error[?(@ =~ /no\ value\ found\ for\ 'DERIVED_VAR'\ —\ target\ chain\ exhausted\ at\ 'qa'\ starting\ from\ 'qa'/)]
+  - it: 'C-14: a second crdkit.token.add call for the SAME name but a DIFFERENT target adds another dedicated attribute, preserving the first'
+    set:
+      target: prod-01
+      ops:
+        - add: DERIVED_VAR
+          value: prod-value
+          target: prod-01
+        - add: DERIVED_VAR
+          value: qa-value
+          target: qa
+        - tokenValue: DERIVED_VAR
+          at:
+            - tv
+            - DERIVED_VAR
+    asserts:
+      - equal:
+          path: tv["DERIVED_VAR"]
+          value: prod-value
+  - it: 'C-14: a second crdkit.token.add call for the SAME (name, target) pair overwrites in place'
+    set:
+      target: prod-01
+      ops:
+        - add: DERIVED_VAR
+          value: first-value
+          target: prod-01
+        - add: DERIVED_VAR
+          value: second-value
+          target: prod-01
+        - tokenValue: DERIVED_VAR
+          at:
+            - tv
+            - DERIVED_VAR
+    asserts:
+      - equal:
+          path: tv["DERIVED_VAR"]
+          value: second-value
+  - it: 'C-14: a second crdkit.token.add call with annotations overwrites existing annotation keys and adds new ones'
+    set:
+      target: prod-01
+      annotations:
+        - exposure
+        - owner
+      ops:
+        - add: DERIVED_VAR
+          value: prod-value
+          annotations:
+            exposure: main
+          target: prod-01
+        - add: DERIVED_VAR
+          value: qa-value
+          annotations:
+            owner: team-b
+          target: qa
+        - add: DERIVED_VAR
+          value: prod-value-2
+          annotations:
+            exposure: side-car
+          target: prod-01
+        - info: DERIVED_VAR
+          at:
+            - info
+            - DERIVED_VAR
+        - info: DERIVED_VAR
+          at:
+            - info
+            - DERIVED_VAR
+        - tokenValue: DERIVED_VAR
+          at:
+            - tv
+            - DERIVED_VAR
+    asserts:
+      - equal:
+          path: info["DERIVED_VAR"].annotations["exposure"]
+          value: side-car
+      - equal:
+          path: info["DERIVED_VAR"].annotations["owner"]
+          value: team-b
+      - equal:
+          path: tv["DERIVED_VAR"]
+          value: prod-value-2
+  - it: 'C-14: crdkit.token.add''s value chain-resolves against the FINAL state of ctx.tokens — a value referencing a token added by a LATER token.add call still resolves'
+    set:
+      target: prod-01
+      ops:
+        - add: FIRST_VAR
+          value: uses-@SECOND_VAR@
+        - add: SECOND_VAR
+          value: computed-later
+        - put:
+            - structure
+          value:
+            x: '@FIRST_VAR@'
+    asserts:
+      - equal:
+          path: structure.x
+          value: uses-computed-later
+  - it: 'C-14: crdkit.token.add can silently overwrite an existing token, including a locked one — no protection, by design'
+    set:
+      target: prod-01
+      system:
+        API_GROUP: locked.example.com
+      ops:
+        - add: API_GROUP
+          value: overwritten-by-integration
+        - tokenValue: API_GROUP
+          at:
+            - tv
+            - API_GROUP
+    asserts:
+      - equal:
+          path: tv["API_GROUP"]
+          value: overwritten-by-integration
+  - it: 'C-14: crdkit.token.add warns on a non-conforming name and errors if annotations is not a dict'
+    set:
+      target: prod-01
+      ops:
+        - add: derivedVar
+          value: computed
+          annotations: main
+    asserts:
+      - exists:
+          path: diagnostics.error[?(@ =~ /annotations must be a dict/)]
+      - lengthEqual:
+          path: diagnostics.error
+          count: 1
+  - it: 'C-9: system token replaces consumer token wholesale; collision warning still fires'
+    set:
+      target: prod
+      system:
+        X:
+          default: locked
+      tokens:
+        X:
+          prod: hijack
+      ops:
+        - put:
+            - structure
+          value:
+            v: '@X@'
+    asserts:
+      - equal:
+          path: structure.v
+          value: locked
+      - exists:
+          path: diagnostics.warning[?(@ =~ /token 'X' is reserved by the library/)]
+  - it: 'C-9: defaults deep-merge with user tokens; both keys preserved'
+    set:
+      target: prod
+      defaults:
+        Y:
+          default: d
+      tokens:
+        Y:
+          prod: u
+      ops:
+        - tokenValue: Y
+          at:
+            - tv
+            - Y
+    asserts:
+      - equal:
+          path: tv["Y"]
+          value: u
+  - it: 'C-11: token with only default value renders correctly via fallback'
+    set:
+      target: prod-01
+      tokens:
+        DEFAULT:
+          default: default value
+      ladder:
+        prod-01: PROD
+        PROD: default
+      ops:
+        - put:
+            - structure
+          value:
+            value_of_default: '@DEFAULT@'
+    asserts:
+      - equal:
+          path: structure.value_of_default
+          value: default value
+  - it: 'C-10: annotation on a defaults token is preserved after merge'
+    set:
+      target: prod
+      defaults:
+        Y:
+          default: d
+          exposure: x
+      annotations:
+        - exposure
+      ops:
+        - info: Y
+          at:
+            - info
+            - Y
+    asserts:
+      - equal:
+          path: info["Y"].annotations["exposure"]
+          value: x
+  - it: 'C-11: tokenOps ''resolve'' records the value resolved at that point in the op sequence'
+    set:
+      target: prod-01
+      tokens:
+        GREETING: hello
+      ops:
+        - tokenValue: GREETING
+          at:
+            - opsResolved
+            - "0"
+    asserts:
+      - equal:
+          path: opsResolved["0"]
+          value: hello
+  - it: 'C-10: a target equal to an annotation name does not hit the annotation key — default resolves'
+    set:
+      target: owner
+      tokens:
+        X:
+          default: d
+          owner: o
+      annotations:
+        - owner
+      ops:
+        - put:
+            - structure
+          value:
+            v: '@X@'
+    asserts:
+      - equal:
+          path: structure.v
+          value: d
+      - notExists:
+          path: diagnostics.error
+  - it: 'C-10: without the annotation declared, the same target hits the ''owner'' entry'
+    set:
+      target: owner
+      tokens:
+        X:
+          default: d
+          owner: o
+      ops:
+        - put:
+            - structure
+          value:
+            v: '@X@'
+    asserts:
+      - equal:
+          path: structure.v
+          value: o
+  - it: 'C-10: reserved annotation names are honored on a chained @ref@ resolution (reservedKeys threaded to nested lookups)'
+    set:
+      target: owner
+      tokens:
+        A: pre-@X@
+        X:
+          default: d
+          owner: o
+      annotations:
+        - owner
+      ops:
+        - put:
+            - structure
+          value:
+            v: '@A@'
+    asserts:
+      - equal:
+          path: structure.v
+          value: pre-d
+  - it: 'C-31: reserved annotation names are honored in crdkit.token.value for a cross target and in tokenDef'
+    set:
+      target: prod
+      tokens:
+        X:
+          default: d
+          owner: o
+      annotations:
+        - owner
+      ops:
+        - tokenValue: X
+          target: owner
+          at:
+            - crossResolved
+            - owner
+            - X
+        - id: myDef
+          tokenDef:
+            default: dd
+            owner: oo
+          at:
+            - tokenDefResolved
+            - "0"
+            - value
+          target: owner
+        - id: myDef
+          tokenDef:
+            default: dd
+            owner: oo
+          at:
+            - tokenDefResolved
+            - "0"
+            - string
+          target: owner
+          string: true
+    asserts:
+      - equal:
+          path: crossResolved.owner.X
+          value: d
+      - equal:
+          path: tokenDefResolved["0"].value
+          value: dd
+  - it: 'C-10: an annotation named ''match'' is rejected with an ERROR and ''match'' rules keep working'
+    set:
+      target: prod-07
+      tokens:
+        X:
+          default: d
+          match:
+            - prod-.*: matched
+      annotations:
+        - match
+      ops:
+        - put:
+            - structure
+          value:
+            v: '@X@'
+    asserts:
+      - equal:
+          path: structure.v
+          value: matched
+      - exists:
+          path: diagnostics.error[?(@ =~ /token\ annotation\ name\ 'match'\ collides\ with\ a\ crdkit\-reserved\ key\ and\ was\ ignored/)]
+  - it: 'C-10: an annotation named ''default'' is rejected with an ERROR and ''default'' keeps working as a fallback'
+    set:
+      target: anything
+      tokens:
+        X:
+          default: d
+      annotations:
+        - default
+      ops:
+        - put:
+            - structure
+          value:
+            v: '@X@'
+    asserts:
+      - equal:
+          path: structure.v
+          value: d
+      - exists:
+          path: diagnostics.error[?(@ =~ /token\ annotation\ name\ 'default'\ collides\ with\ a\ crdkit\-reserved\ key\ and\ was\ ignored/)]
+  - it: 'C-14: a dependent token is re-resolved after crdkit.token.add changes the token it references'
+    set:
+      target: prod-01
+      tokens:
+        A: pre-@B@
+        B: old
+      ops:
+        - tokenValue: A
+          at:
+            - opsResolved
+            - "0"
+        - add: B
+          value: new
+        - tokenValue: A
+          at:
+            - opsResolved
+            - "1"
+        - tokenValue: A
+          target: prod-01
+          at:
+            - tv
+            - A
+            - prod-01
+    asserts:
+      - equal:
+          path: opsResolved["0"]
+          value: pre-old
+      - equal:
+          path: opsResolved["1"]
+          value: pre-new
+      - equal:
+          path: tv["A"]["prod-01"]
+          value: pre-new
+  - it: 'C-13: without a mutation, a second resolve is served from the cache (no repeated diagnostics)'
+    set:
+      target: qa
+      tokens:
+        X:
+          prod: p
+      ops:
+        - tokenValue: X
+          at:
+            - opsResolved
+            - "0"
+        - tokenValue: X
+          at:
+            - opsResolved
+            - "1"
+        - tokenValue: X
+          target: qa
+          at:
+            - tv
+            - X
+            - qa
+    asserts:
+      - lengthEqual:
+          path: diagnostics.error
+          count: 1
+      - exists:
+          path: tv["X"]["qa"]
+  - it: 'C-13: a cache hit requires the exact target key — a cache holding only other targets does not short-circuit'
+    set:
+      target: prod-01
+      tokens:
+        X:
+          prod-01: one
+          prod-02: two
+      ops:
+        - tokenValue: X
+          at:
+            - opsResolved
+            - "0"
+          target: prod-01
+        - tokenValue: X
+          at:
+            - opsResolved
+            - "1"
+          target: prod-02
+        - tokenValue: X
+          target: prod-02
+          at:
+            - tv
+            - X
+            - prod-02
+    asserts:
+      - equal:
+          path: opsResolved["0"]
+          value: one
+      - equal:
+          path: opsResolved["1"]
+          value: two
+      - exists:
+          path: tv["X"]["prod-02"]
+  - it: 'C-14: a tokenDef structure is re-resolved after crdkit.token.add changes a token it references'
+    set:
+      target: prod-01
+      tokens:
+        B: old
+      ops:
+        - tokenDef:
+            default: d-@B@
+          id: D
+          at:
+            - opsResolved
+            - "0"
+        - add: B
+          value: new
+        - tokenDef:
+            default: d-@B@
+          id: D
+          at:
+            - opsResolved
+            - "1"
+    asserts:
+      - equal:
+          path: opsResolved["0"]
+          value: d-old
+      - equal:
+          path: opsResolved["1"]
+          value: d-new
+  - it: 'C-12: a marker-holding default resolves per target in one render (prod-01, then prodp) — never cached at a rung'
+    set:
+      target: prod-01
+      tokens:
+        KS:
+          default: t
+          prod: p
+        CERT:
+          default: '@KS@/c'
+      ladder:
+        prod-01: prod
+        prod: PROD
+        prodp: PROD
+        PROD: ALL
+      ops:
+        - tokenValue: CERT
+          at:
+            - opsResolved
+            - "0"
+          target: prod-01
+        - tokenValue: CERT
+          at:
+            - opsResolved
+            - "1"
+          target: prodp
+        - tokenValue: KS
+          target: prod
+          at:
+            - tv
+            - KS
+            - prod
+    asserts:
+      - equal:
+          path: opsResolved["0"]
+          value: p/c
+      - equal:
+          path: opsResolved["1"]
+          value: t/c
+      - notExists:
+          path: diagnostics.error
+      - equal:
+          path: tv["KS"]["prod"]
+          value: p
+  - it: 'C-11: a marker-holding default resolves per target in one render (prodp, then prod-01)'
+    set:
+      target: prod-01
+      tokens:
+        KS:
+          default: t
+          prod: p
+        CERT:
+          default: '@KS@/c'
+      ladder:
+        prod-01: prod
+        prod: PROD
+        prodp: PROD
+        PROD: ALL
+      ops:
+        - tokenValue: CERT
+          at:
+            - opsResolved
+            - "0"
+          target: prodp
+        - tokenValue: CERT
+          at:
+            - opsResolved
+            - "1"
+          target: prod-01
+    asserts:
+      - equal:
+          path: opsResolved["0"]
+          value: t/c
+      - equal:
+          path: opsResolved["1"]
+          value: p/c
+  - it: 'C-12: a marker-holding entry found at a shared rung substitutes per target; a map entry is checked as a whole'
+    set:
+      target: qa
+      tokens:
+        L:
+          qa: a
+          qam1: b
+          qap1: c
+        URL:
+          QA: x-@L@
+        CFG:
+          QA:
+            url: y-@L@
+            port: 8080
+      ladder:
+        qa: QA
+        qam1: QA
+        qap1: QA
+      ops:
+        - tokenValue: URL
+          at:
+            - opsResolved
+            - "0"
+          target: qa
+        - tokenValue: URL
+          at:
+            - opsResolved
+            - "1"
+          target: qam1
+        - tokenValue: URL
+          at:
+            - opsResolved
+            - "2"
+          target: qap1
+        - tokenValue: CFG
+          at:
+            - opsResolved
+            - "3"
+          target: qam1
+        - tokenValue: CFG
+          at:
+            - opsResolved
+            - "4"
+          target: qap1
+    asserts:
+      - equal:
+          path: opsResolved["0"]
+          value: x-a
+      - equal:
+          path: opsResolved["1"]
+          value: x-b
+      - equal:
+          path: opsResolved["2"]
+          value: x-c
+      - equal:
+          path: opsResolved["4"]
+          value:
+            url: y-c
+            port: 8080
+  - it: 'C-12: a marker-free entry above the target is cached at every rung walked; a later target reaching that rung gets the same value'
+    set:
+      target: prod-01
+      tokens:
+        X:
+          PROD:
+            host: h
+            port: 443
+      ladder:
+        prod-01: prod
+        prod: PROD
+        prodp: PROD
+      ops:
+        - tokenValue: X
+          at:
+            - opsResolved
+            - "0"
+          target: prod-01
+        - tokenValue: X
+          at:
+            - opsResolved
+            - "1"
+          target: prodp
+    asserts:
+      - equal:
+          path: opsResolved["1"]
+          value:
+            host: h
+            port: 443
+  - it: 'C-8: a user declaration with ''_generated'' loses the key, warns, and still resolves'
+    set:
+      target: prod-01
+      tokens:
+        X:
+          default: d
+          _generated:
+            prod-01: injected
+      ops:
+        - put:
+            - structure
+          value:
+            v: '@X@'
+    asserts:
+      - exists:
+          path: diagnostics.warning[?(@ =~ /token\ 'X'\ declares\ crdkit\-internal\ key\ '_generated';\ it\ was\ removed/)]
+      - equal:
+          path: structure.v
+          value: d
+  - it: 'C-9: a defaults declaration with ''_value'' loses the key, warns, and the poisoned cache is never served'
+    set:
+      target: prod-01
+      defaults:
+        X:
+          default: d
+          _value:
+            prod-01: poisoned
+      ops:
+        - put:
+            - structure
+          value:
+            v: '@X@'
+    asserts:
+      - exists:
+          path: diagnostics.warning[?(@ =~ /token\ 'X'\ declares\ crdkit\-internal\ key\ '_value';\ it\ was\ removed/)]
+      - equal:
+          path: structure.v
+          value: d
+  - it: 'C-9: a system declaration with ''_gen'' loses the key, warns, and still resolves'
+    set:
+      target: prod-01
+      system:
+        X:
+          default: locked
+          _gen: 99
+      ops:
+        - put:
+            - structure
+          value:
+            v: '@X@'
+    asserts:
+      - exists:
+          path: diagnostics.warning[?(@ =~ /token\ 'X'\ declares\ crdkit\-internal\ key\ '_gen';\ it\ was\ removed/)]
+      - equal:
+          path: structure.v
+          value: locked
+  - it: 'C-8: every internal key present is reported separately, and the declaration keeps its other keys'
+    set:
+      target: prod-01
+      tokens:
+        X:
+          default: d
+          _value: {}
+          _gen: 5
+          _generated: {}
+          exposure: e
+      annotations:
+        - exposure
+      ops:
+        - info: X
+          at:
+            - info
+            - X
+    asserts:
+      - lengthEqual:
+          path: diagnostics.warning
+          count: 3
+      - equal:
+          path: info["X"].annotations["exposure"]
+          value: e
+  - it: 'C-15: underlay on a missing token creates it with ''_generated'' for the target plus the annotations, and it resolves'
+    set:
+      target: prod-01
+      annotations:
+        - owner
+      ops:
+        - underlay: X
+          value: v
+          annotations:
+            owner: svc
+        - put:
+            - structure
+          value:
+            v: '@X@'
+        - info: X
+          at:
+            - info
+            - X
+    asserts:
+      - equal:
+          path: structure.v
+          value: v
+      - notExists:
+          path: diagnostics.error
+      - equal:
+          path: info["X"].annotations["owner"]
+          value: svc
+  - it: 'C-11: a consumer ''default'' wins over a generated value'
+    set:
+      target: prod-01
+      tokens:
+        X:
+          default: d
+      ops:
+        - underlay: X
+          value: g
+        - put:
+            - structure
+          value:
+            v: '@X@'
+    asserts:
+      - equal:
+          path: structure.v
+          value: d
+  - it: 'C-12: a consumer entry reached through the parent walk wins over a generated value'
+    set:
+      target: prod-01
+      tokens:
+        X:
+          prod: p
+      ladder:
+        prod-01: prod
+      ops:
+        - underlay: X
+          value: g
+        - put:
+            - structure
+          value:
+            v: '@X@'
+    asserts:
+      - equal:
+          path: structure.v
+          value: p
+  - it: 'C-8: a generated value is used when the consumer declaration has no entry reachable from the target'
+    set:
+      target: dev-01
+      tokens:
+        X:
+          prod: p
+      ops:
+        - underlay: X
+          value: g
+        - put:
+            - structure
+          value:
+            v: '@X@'
+    asserts:
+      - equal:
+          path: structure.v
+          value: g
+      - notExists:
+          path: diagnostics.error
+  - it: 'C-11: a generated value for one target is not visible to another target'
+    set:
+      target: prod-01
+      ops:
+        - underlay: X
+          value: g
+          target: prod-01
+        - tokenValue: X
+          at:
+            - opsResolved
+            - "0"
+          target: qa
+    asserts:
+      - lengthEqual:
+          path: diagnostics.error
+          count: 1
+      - exists:
+          path: diagnostics.error[?(@ =~ /no value found for 'X'/)]
+  - it: 'C-12: a value resolved from ''_generated'' is cached under the exact target only, never under walked rungs'
+    set:
+      target: prod-01
+      ladder:
+        prod-01: prod
+        prod: PROD
+      ops:
+        - underlay: X
+          value: g
+        - tokenValue: X
+          at:
+            - opsResolved
+            - "0"
+        - tokenValue: X
+          target: prod-01
+          at:
+            - tv
+            - X
+            - prod-01
+    asserts:
+      - equal:
+          path: opsResolved["0"]
+          value: g
+      - exists:
+          path: tv["X"]["prod-01"]
+  - it: 'C-12: a generated value does not leak through a shared rung to a sibling target'
+    set:
+      target: prod-01
+      ladder:
+        prod-01: prod
+        prod-02: prod
+      ops:
+        - underlay: X
+          value: g
+          target: prod-01
+        - tokenValue: X
+          at:
+            - opsResolved
+            - "0"
+          target: prod-01
+        - tokenValue: X
+          at:
+            - opsResolved
+            - "1"
+          target: prod-02
+    asserts:
+      - equal:
+          path: opsResolved["0"]
+          value: g
+      - lengthEqual:
+          path: diagnostics.error
+          count: 1
+  - it: 'C-15: underlay annotations never overwrite existing ones and fill missing ones'
+    set:
+      target: prod-01
+      tokens:
+        X:
+          default: d
+          owner: consumer
+      annotations:
+        - owner
+        - exposure
+      ops:
+        - underlay: X
+          value: g
+          annotations:
+            owner: generated
+            exposure: main
+        - info: X
+          at:
+            - info
+            - X
+        - info: X
+          at:
+            - info
+            - X
+    asserts:
+      - equal:
+          path: info["X"].annotations["owner"]
+          value: consumer
+      - equal:
+          path: info["X"].annotations["exposure"]
+          value: main
+  - it: 'C-15: a second underlay for the same target overwrites the first generated value'
+    set:
+      target: prod-01
+      ops:
+        - underlay: X
+          value: first
+        - underlay: X
+          value: second
+        - put:
+            - structure
+          value:
+            v: '@X@'
+    asserts:
+      - equal:
+          path: structure.v
+          value: second
+  - it: 'C-15: underlay bumps the generation — a dependent token resolved earlier is re-resolved'
+    set:
+      target: prod-01
+      tokens:
+        A: pre-@B@
+        B:
+          dev-01: x
+      ops:
+        - tokenValue: A
+          at:
+            - opsResolved
+            - "0"
+        - underlay: B
+          value: g
+        - tokenValue: A
+          at:
+            - opsResolved
+            - "1"
+    asserts:
+      - equal:
+          path: opsResolved["1"]
+          value: pre-g
+      - lengthEqual:
+          path: diagnostics.error
+          count: 1
+  - it: 'C-15: underlay accepts any token name without a diagnostic'
+    set:
+      target: prod-01
+      ops:
+        - underlay: lowerName
+          value: v
+    asserts:
+      - notExists:
+          path: diagnostics.warning
+  - it: 'C-15: underlay with non-dict annotations records an ERROR and still stores the generated value'
+    set:
+      target: prod-01
+      ops:
+        - underlay: X
+          value: v
+          annotations: main
+    asserts:
+      - exists:
+          path: diagnostics.error[?(@ =~ /annotations\ must\ be\ a\ dict\ —\ ignored/)]
+  - it: 'C-14: crdkit.token.add on a token with generated values keeps ''_generated''; an added entry beats it'
+    set:
+      target: prod-01
+      ops:
+        - underlay: X
+          value: g
+        - add: X
+          value: added
+          target: prod-02
+        - tokenValue: X
+          at:
+            - opsResolved
+            - "0"
+          target: prod-01
+        - tokenValue: X
+          at:
+            - opsResolved
+            - "1"
+          target: prod-02
+    asserts:
+      - equal:
+          path: opsResolved["0"]
+          value: g
+      - equal:
+          path: opsResolved["1"]
+          value: added
+  - it: 'C-11: a generated value may itself reference other tokens'
+    set:
+      target: prod-01
+      tokens:
+        B: bee
+      ops:
+        - underlay: X
+          value: x-@B@
+        - put:
+            - structure
+          value:
+            v: '@X@'
+    asserts:
+      - equal:
+          path: structure.v
+          value: x-bee
+  - it: 'C-8: a bare scalar declaration resolves as a default entry'
+    set:
+      target: prod-01
+      tokens:
+        GREETING: hello
+      ops:
+        - tokenValue: GREETING
+          at:
+            - tv
+    asserts:
+      - equal:
+          path: tv
+          value: hello
+  - it: 'C-9: a system declaration replaces the consumer''s wholesale'
+    set:
+      target: prod
+      system:
+        X:
+          default: locked
+          PROD: p
+      tokens:
+        X:
+          default: u
+      ops:
+        - tokenValue: X
+          at:
+            - tv
+    asserts:
+      - equal:
+          path: tv
+          value: locked
+  - it: 'C-15: underlays for different targets accumulate'
+    set:
+      target: prod-01
+      ops:
+        - underlay: X
+          value: a
+        - underlay: X
+          value: b
+          target: prod-02
+        - tokenValue: X
+          target: prod-01
+          at:
+            - one
+        - tokenValue: X
+          target: prod-02
+          at:
+            - two
+    asserts:
+      - equal:
+          path: one
+          value: a
+      - equal:
+          path: two
+          value: b
+  - it: 'C-18: matchRules is full-string anchored; first match wins'
+    set:
+      ops:
+        - matchRules:
+            - qa-.*: first
+            - qa-01: second
+          subject: qa-01
+          at:
+            - a
+        - matchRules:
+            - qa: x
+          subject: qa-01
+          at:
+            - b
+    asserts:
+      - equal:
+          path: a.matched
+          value: true
+      - equal:
+          path: a.value
+          value: first
+      - equal:
+          path: b.matched
+          value: false
+      - equal:
+          path: b.value
+          value: ""
+  - it: 'C-18 Q-5: an invalid consumer match regex is an ERROR; the default still resolves'
+    set:
+      tokens:
+        T:
+          match:
+            - qa[: v
+          default: d
+      ops:
+        - put:
+            - v
+          value: '@T@'
+    asserts:
+      - equal:
+          path: v
+          value: d
+      - exists:
+          path: diagnostics.error[?(@ =~ /'T'.*'qa\['/)]
+  - it: 'C-18 Q-5: an invalid library-owned regex aborts'
+    set:
+      ops:
+        - matchRules:
+            - qa[: v
+          subject: qa-01
+          at:
+            - m
+    asserts:
+      - failedTemplate:
+          errorPattern: error parsing regexp

@@ -1,16 +1,15 @@
 # Patterns to ignore when building packages (helm package / helm
 # dependency update). Unlike .gitignore, this controls what gets bundled
 # into the .tgz a downstream library (e.g. mdeploy) pulls in via file:// — so
-# it matters for more than repo hygiene: without excluding harness/ here,
+# it matters for more than repo hygiene: without excluding tests/ here,
 # every downstream `helm dependency update` repackages crdkit's ENTIRE
-# directory tree, including harness/'s own charts/crdkit-0.0.0.tgz (its
-# bundled copy of crdkit, from testing the harness locally) — which
-# itself may contain a stale, even-earlier-nested copy, growing with
-# every local test cycle. This exact recursive bloat once pushed a
-# packaged crdkit past 5MB and broke helm-unittest's file-size limit in
-# a downstream test chart. harness/, tests/ and scripts/ are crdkit's own
-# local dev/test scaffolding — a downstream consumer never needs them.
-harness/
+# directory tree, including tests/stub's own charts/crdkit-*.tgz (its
+# bundled copy of crdkit, from testing locally) — which itself may
+# contain a stale, even-earlier-nested copy, growing with every local
+# test cycle. This exact recursive bloat once pushed a packaged crdkit
+# past 5MB and broke helm-unittest's file-size limit in a downstream test
+# chart. tests/ and scripts/ are crdkit's own local dev/test scaffolding
+# — a downstream consumer never needs them.
 tests/
 scripts/
 # helm-unittest output; a pattern without "/" matches at any depth (Helm
