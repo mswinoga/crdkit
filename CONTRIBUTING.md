@@ -9,8 +9,13 @@ Libraries built on crdkit (e.g. mdeploy) depend on it via `file://`.
 - `templates/` — the engine.
 - `tests/` — the test framework (`tests/stub`, `tests/suites`,
   `tests/fixtures`). See "Testing".
-- `scripts/lint.sh` — text lint for library templates, also run by
-  mdeploy.
+- `scripts/lint.sh` — template lint (text, boundary and extractor
+  rules) for library templates, also run by mdeploy.
+- `scripts/extract.py` — the call-graph extractor: `graph` (the
+  workspace viewers), `lint` (the rules `lint.sh` forwards to) and
+  `reference` (the committed `docs/defines.md`).
+- `docs/defines.md` — the generated define reference; `make docs`
+  rewrites it, `make test` diffs a fresh copy.
 
 **Release tags**: `v<chart version>` (e.g. `v0.0.7`). Release order:
 bump `version` in `Chart.yaml` → commit → tag `v<version>`.
@@ -41,6 +46,9 @@ Applies to CONTRIBUTING.md/README.md files and every template's doc comment.
 - Never label a template or file as "new" (e.g. "(public, new)",
   "new `templates/_paths.tpl`") — in docs, specs, plans or doc comments.
   Name it plainly; specs and plans describe the target state.
+- A doc comment names no define that calls it — `docs/defines.md` lists
+  callers, calls and ctx effects. A ctx path is written with its `ctx.`
+  root, and a slot's shape is stated only in `crdkit.render`'s comment.
 
 **Per-template doc comments** — structure every `define`'s comment as:
 1. **Header line**: `<template name> (<scope>)` — long comments push the
@@ -496,7 +504,8 @@ title?, htmlLink?, id?, diag}`) is the one entry point: it makes one
 ## Testing
 
 `command make test` runs `deps` (dependency update of `tests/stub`,
-not transitive), the framework suites and the lint.
+not transitive), the framework suites, the lint and the
+`docs/defines.md` freshness diff (`make docs` rewrites the file).
 
 ### Framework
 
@@ -551,10 +560,13 @@ Assert rules:
   a string); Helm reads values files as YAML 1.1.
 
 Lint `scripts/lint.sh [--fail-define <define>] [--pending <file>]
-[--regex-check-define <define>] <templates dir>` (POSIX sh + awk;
-`{{/* … */}}` comments skipped; every file under the dir):
-- Rules: `accumulator-default-dict` (`.diag`/`.seen`/`.acc`/`.out`/
-  `.memo` piped to `default dict`), `fail-outside-render` (`fail`
+[--regex-check-define <define>] [--library] [--scopes <list>]
+[--internal-suffix] [--peer <templates dir>]... <templates dir>`
+(POSIX sh + awk + `python3`; `{{/* … */}}` comments skipped; every
+file under the dir; `--scopes`, `--internal-suffix` and `--peer` are
+forwarded to the extractor):
+- Text rules: `accumulator-default-dict` (`.diag`/`.seen`/`.acc`/
+  `.out`/`.memo` piped to `default dict`), `fail-outside-render` (`fail`
   outside `--fail-define`; crdkit allows none),
   `unguarded-trailing-index` (a line that is only `{{- index A K -}}`
   without a preceding `if hasKey A K`), `non-must-regex-user-pattern`
@@ -562,11 +574,23 @@ Lint `scripts/lint.sh [--fail-define <define>] [--pending <file>]
   or `crdkit.markerPattern`). `--regex-check-define` allows a variable
   pattern inside that define — crdkit passes
   `crdkit.regexValid.internal`, the one validity probe.
+- Boundary rules (`--library`; crdkit owns these internals and never
+  passes it): `boundary-ctx-tokens` (`ctx.tokens`),
+  `boundary-token-keys` (`"_value"`, `"_gen"`, `"_generated"`),
+  `boundary-diag-lists` (`diag.errors|warnings|infos`),
+  `boundary-marker-regex` (the marker character class) and
+  `boundary-internal-call` (include/template of a `crdkit.*.internal`).
+- Extractor rules (`scripts/extract.py lint`; `--scopes` lists the
+  chart's scopes, `--internal-suffix` ties `.internal` to the
+  `internal` scope, `--peer` names another chart's defines for the doc
+  rules): `define-naming`, `output-writes-ctx`,
+  `mutator-undeclared-write`, `dead-define`, `doc-unknown-define`,
+  `doc-names-caller`.
 - Output: `FAIL <rule> <file>:<line>: <text>`, `PENDING (<reason>) …`,
   `FIXED? (<reason>) <rule> <file>` (a pending entry without a hit),
-  then `lint.sh: <n> hits, <f> failed, <p> pending`. Exit 0 clean, 1 on
-  FAIL or `FIXED?`, 2 usage. Paths print as given: run from the repo
-  root.
+  then one `lint.sh: <n> hits, <f> failed, <p> pending` summary counting
+  both groups. Exit 0 clean, 1 on FAIL or `FIXED?`, 2 usage or a missing
+  `python3`. Paths print as given: run from the repo root.
 - `tests/lint.pending`: lines `<rule> <file> <F-id> (<feature>)` (`#`
   comments); a matching hit is PENDING; a fix deletes its line.
 - A rule must have zero false positives on current code; a rule that

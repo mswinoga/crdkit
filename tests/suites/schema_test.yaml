@@ -448,6 +448,39 @@ tests:
           path: diagnostics.error[?(@ =~ /'kind'\ is\ static\ —\ a\ token\ declaration\ is\ not\ allowed\ —\ ignored/)]
       - notExists:
           path: diagnostics.warning
+  - it: 'C-22: with target keys in effect, a map on a static scalar without a declaration key is an ERROR "must be a scalar"'
+    set:
+      ops:
+        - validate: {}
+          at:
+            - r0
+          schema:
+            type: map
+            targetKeys:
+              - ALL
+            properties:
+              declared:
+                type: string
+                static: true
+              other:
+                type: string
+                static: true
+          values:
+            declared:
+              ALL: x
+            other:
+              a: 1
+    asserts:
+      - equal:
+          path: r0
+          value: {}
+      - lengthEqual:
+          path: diagnostics.error
+          count: 2
+      - exists:
+          path: diagnostics.error[?(@ =~ /'declared'\ is\ static\ —\ a\ token\ declaration\ is\ not\ allowed/)]
+      - exists:
+          path: diagnostics.error[?(@ =~ /'other'\ must\ be\ a\ scalar\ —\ ignored/)]
   - it: 'C-22: a root value of the wrong shape comes back as an empty map'
     set:
       ops:
@@ -2780,7 +2813,7 @@ tests:
       - equal:
           path: leaf
           value: two
-  - it: 'C-24 F-3: no value for the target is the resolution ERROR; no check ERROR on top'
+  - it: 'C-24 F-3: no value for the target is the resolution ERROR naming the path; no check ERROR on top'
     set:
       target: b-01
       tokens:
@@ -2803,7 +2836,7 @@ tests:
           path: diagnostics.error
           count: 1
       - exists:
-          path: diagnostics.error[?(@ =~ /no value found for 'P.port'/)]
+          path: diagnostics.error[?(@ =~ /no value found for 'svc.port'/)]
   - it: 'C-24 F-4: an unknown token is the resolution ERROR'
     set:
       ops:

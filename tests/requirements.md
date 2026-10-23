@@ -100,9 +100,9 @@ Test names cite these ids: every `it:` starts with the ids it covers
   an ERROR.
 - **C-24** · contract — `crdkit.schema.value {ctx, node, def | token,
   path, target?, seen?}`: one field resolved + checked, `int|number|bool`
-  converted on every call; `token` is always resolved via
-  `crdkit.token.value`, then the same conversion and once-per-`seen`
-  check.
+  converted on every call; `token` is always resolved as
+  `crdkit.token.value` does, diagnostics naming `path`, then the same
+  conversion; diagnostics (resolution and check) once per `seen` entry.
 - **C-25** · contract — `crdkit.schema.resolve {ctx, schema, values,
   keys?, target?, seen?}`: subtree with per-target values resolved; no
   value → key omitted; unknown-token markers left.

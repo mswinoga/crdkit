@@ -12,6 +12,8 @@
 # — a downstream consumer never needs them.
 tests/
 scripts/
+# Generated define reference; maintainer-facing only.
+docs/
 # helm-unittest output; a pattern without "/" matches at any depth (Helm
 # rejects "**").
 __snapshot__/

@@ -12,3 +12,4 @@ tests/stub/Chart.lock
 
 # helm-unittest creates an empty one beside every suite.
 __snapshot__/
+__pycache__/

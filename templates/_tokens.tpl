@@ -73,42 +73,6 @@ only walks it, never defines the taxonomy. crdkit.matchRules is
 available for such a template to build pattern-based hops on. No
 proactive "target is required" check — an unset target is only
 diagnosed if something actually tries to resolve against it.
-
-Dependency graph (who calls whom):
-
-  crdkit.render (public) -> crdkit.reservedKeys.internal -> ctx.reservedKeys
-                         -> crdkit.tokens.merge.internal -> ctx.tokens
-
-  crdkit.tokens.substitute (public)
-    -> crdkit.tokens.substituteMarkers.internal      (also called by crdkit.render)
-         -> crdkit.token.value (public)
-              -> crdkit.resolveEntry.internal
-                   -> crdkit.matchRules
-                   -> <parentTargetTemplate>       (caller-supplied hook)
-                   -> crdkit.substituteStructure.internal
-                        -> crdkit.substituteText.internal
-                             -> crdkit.resolveEntry.internal   (cycle, per "@ref@" —
-                                                                 bounded by "resolving")
-                        -> (self, recursing into nested map/list values)
-         -> crdkit.stringify.internal                (coerce for splicing into text)
-
-  Every marker match uses crdkit.markerPattern.
-
-  crdkit.token.string / crdkit.tokenDef.string (public)
-    -> crdkit.token.value / crdkit.tokenDef.value (public)
-         -> crdkit.resolveEntry.internal (as above)
-    -> crdkit.stringify.internal
-
-  crdkit.token.add / crdkit.token.underlay (public) -- store raw
-    declarations only, no engine dependency; bump ctx.gen
-
-Three public "shapes": crdkit.token.* resolves a REAL, named token;
-crdkit.tokenDef.* resolves an arbitrary structure (e.g. sourced from
-consumer Values) using the same rules WITHOUT registering it in
-ctx.tokens; crdkit.tokens.* operates on the whole registry (building it,
-or substituting across an entire text blob). crdkit.resolveEntry.internal
-is shared engine code used directly by BOTH crdkit.token.value and
-crdkit.tokenDef.value — it deliberately isn't namespaced under either.
 */}}
 
 {{/*
@@ -354,12 +318,10 @@ Implementation notes:
   crdkit.resolveEntry.internal — this is the one caller that does a
   name-based lookup, so it's the one that can tell "unknown" apart from
   "declared but unresolvable."
-- Always needs `| fromYaml` then `.value` on the caller's side — unlike
-  crdkit.token.string, which needs neither. The wrapper is required
-  HERE because the resolved value can be any kind (string/dict/list/
-  bool/...), and Helm's `fromYaml` can only decode a top-level map;
-  crdkit.token.string skips it entirely because a plain string needs no
-  decoding at all.
+- Always needs `| fromYaml` then `.value` on the caller's side: the
+  resolved value can be any kind (string/dict/list/bool/...), and
+  Helm's `fromYaml` can only decode a top-level map. A text-only caller
+  skips the wrapper, because a plain string needs no decoding.
 */}}
 {{- define "crdkit.token.value" -}}
 {{- $ctx := index . 0 -}}

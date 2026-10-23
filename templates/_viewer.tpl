@@ -5,10 +5,6 @@ The viewer is a fixed shell (CSS + JS) that reads the schema embedded in
 the page, so a schema or example change changes only the embedded JSON.
 One file, system fonts, no external request; light and dark follow
 prefers-color-scheme.
-
-Dependency graph:
-  crdkit.schema.html (public)
-    -> crdkit.schema.viewer.internal
 */}}
 
 {{/*
