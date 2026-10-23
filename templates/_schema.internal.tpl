@@ -346,6 +346,128 @@ Implementation notes:
 {{- end -}}
 
 {{/*
+crdkit.schema.checkMemo.internal (internal)
+
+Self-checks a schema once per distinct schema and render.
+
+Interface:
+- Params (dict): { "ctx": <ctx>, "schema": <root node> }
+- Returns: `true` or "" like crdkit.schema.check.
+
+Implementation notes:
+- Keyed by `sha256sum (toJson schema)` in `ctx.schemaChecks`, created by
+  crdkit.render; a caller ctx without it falls back to a plain check.
+- Only the ctx-taking passes memoize; `crdkit.schema.check` itself stays
+  unmemoized (no ctx).
+*/}}
+{{- define "crdkit.schema.checkMemo.internal" -}}
+{{- $ctx := .ctx -}}
+{{- if hasKey $ctx "schemaChecks" -}}
+  {{- $key := sha256sum (toJson .schema) -}}
+  {{- $checks := $ctx.schemaChecks -}}
+  {{- if not (hasKey $checks $key) -}}
+    {{- $_ := set $checks $key (include "crdkit.schema.check" (dict "schema" .schema "diag" $ctx.diag)) -}}
+  {{- end -}}
+  {{- get $checks $key -}}
+{{- else -}}
+  {{- include "crdkit.schema.check" (dict "schema" .schema "diag" $ctx.diag) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+crdkit.schema.locate.internal (internal)
+
+Walks the schema and the values one key at a time, following switches
+and tracking the values path and the per-target state. Shared by
+crdkit.schema.node and crdkit.schema.resolve.
+
+Interface:
+- Params (dict): { "node": <starting node>, "value": <starting value>,
+  "keys": <list of keys>, "path": <starting values path>, "mode":
+  "node" | "resolve", "finalSwitch": <bool, also follow a switch after
+  the last key>, "out": <dict, written in place> }
+- Returns: nothing; sets out.found, out.node, out.value, out.inTokens,
+  out.path.
+
+Implementation notes:
+- "node" mode tolerates a missing map/list value (a sentinel
+  "none" value); "resolve" mode stops unless the value is a map (for
+  "map") or a list with the index in range.
+- `crdkit.schema.perTarget.internal` state is threaded, so a returned
+  node knows its ancestors.
+*/}}
+{{- define "crdkit.schema.locate.internal" -}}
+{{- $node := .node -}}
+{{- $value := .value -}}
+{{- $none := index (dict) "none" -}}
+{{- $found := true -}}
+{{- $inTokens := false -}}
+{{- $path := .path | default "" -}}
+{{- $mode := .mode -}}
+{{- $keys := .keys | default (list) -}}
+{{- if .finalSwitch -}}{{- $keys = concat $keys (list "") -}}{{- end -}}
+{{- range $key := $keys -}}
+  {{- if and $found (kindIs "map" $node) (hasKey $node "switch") -}}
+    {{- $by := "" -}}
+    {{- if kindIs "map" $value -}}
+      {{- $by = index $value $node.switch.by -}}
+    {{- end -}}
+    {{- if and (not (kindIs "invalid" $by)) (ne (toString $by) "") (hasKey $node.switch.cases (toString $by)) -}}
+      {{- $node = index $node.switch.cases (toString $by) -}}
+    {{- else -}}
+      {{- $found = false -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if and $found (ne (toString $key) "") -}}
+    {{- $inTokens = or $inTokens (ne (include "crdkit.schema.perTarget.internal" (dict "node" $node "inTokens" $inTokens)) "") -}}
+    {{- $shape := include "crdkit.schema.shape.internal" (dict "node" $node) -}}
+    {{- if eq $shape "map" -}}
+      {{- if and (eq $mode "resolve") (not (kindIs "map" $value)) -}}
+        {{- $found = false -}}
+      {{- else -}}
+        {{- $properties := $node.properties | default dict -}}
+        {{- if hasKey $properties (toString $key) -}}
+          {{- $node = index $properties (toString $key) -}}
+        {{- else if hasKey $node "values" -}}
+          {{- $node = $node.values -}}
+        {{- else -}}
+          {{- $found = false -}}
+        {{- end -}}
+        {{- if $found -}}
+          {{- if kindIs "map" $value -}}
+            {{- $value = index $value (toString $key) -}}
+          {{- else -}}
+            {{- $value = $none -}}
+          {{- end -}}
+          {{- $path = include "crdkit.schema.path" (dict "keys" (list (toString $key)) "path" $path) -}}
+        {{- end -}}
+      {{- end -}}
+    {{- else if and (eq $shape "list") (regexMatch "^[0-9]+$" (toString $key)) -}}
+      {{- if and (eq $mode "resolve") (not (and (kindIs "slice" $value) (lt (int (toString $key)) (len $value)))) -}}
+        {{- $found = false -}}
+      {{- else -}}
+        {{- $node = $node.items | default (dict "type" "any") -}}
+        {{- $index := int (toString $key) -}}
+        {{- if and (kindIs "slice" $value) (lt $index (len $value)) -}}
+          {{- $value = index $value $index -}}
+        {{- else -}}
+          {{- $value = $none -}}
+        {{- end -}}
+        {{- $path = include "crdkit.schema.path" (dict "keys" (list $index) "path" $path) -}}
+      {{- end -}}
+    {{- else -}}
+      {{- $found = false -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- $_ := set .out "found" $found -}}
+{{- $_ := set .out "node" $node -}}
+{{- $_ := set .out "value" $value -}}
+{{- $_ := set .out "inTokens" $inTokens -}}
+{{- $_ := set .out "path" $path -}}
+{{- end -}}
+
+{{/*
 crdkit.schema.switchCase.internal
 
 The case a switch selects for a map value, reduced on an `unless` hit.

@@ -78,7 +78,7 @@ Implementation notes:
 {{- $tokens := $tokensYaml | fromYaml -}}
 
 {{- $model := dict -}}
-{{- $ctx := dict "root" $root "diag" $diag "model" $model "tokens" $tokens "target" $target "parentTargetTemplate" $parentTargetTemplate "reservedKeys" $reservedKeys "gen" 0 -}}
+{{- $ctx := dict "root" $root "diag" $diag "model" $model "tokens" $tokens "target" $target "parentTargetTemplate" $parentTargetTemplate "reservedKeys" $reservedKeys "gen" 0 "schemaChecks" (dict) -}}
 {{- range $key, $value := .state | default dict -}}
   {{- if hasKey $ctx $key -}}
     {{- include "crdkit.diag.error" (list $diag (printf "state key '%s' collides with a crdkit ctx key and was ignored" $key)) -}}

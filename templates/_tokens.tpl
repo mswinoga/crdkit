@@ -600,47 +600,25 @@ Implementation notes:
 */}}
 {{- define "crdkit.token.underlay" -}}
 {{- $ctx := index . 0 -}}
-{{- $name := index . 1 -}}
-{{- $value := index . 2 -}}
-{{- $rawAnnotations := "" -}}
-{{- if gt (len .) 3 -}}
-  {{- $rawAnnotations = index . 3 -}}
-{{- end -}}
-{{- $target := $ctx.target -}}
-{{- if and (gt (len .) 4) (index . 4) -}}
-  {{- $target = index . 4 -}}
-{{- end -}}
-{{- $tokens := $ctx.tokens -}}
-{{- $diag := $ctx.diag -}}
-
-{{- if and $rawAnnotations (not (kindIs "map" $rawAnnotations)) -}}
-  {{- include "crdkit.diag.error" (list $diag (printf "crdkit.token.underlay for '%s': annotations must be a dict — ignored" $name)) -}}
-{{- end -}}
-
-{{- $decl := dict -}}
-{{- if hasKey $tokens $name -}}
-  {{- $existing := index $tokens $name -}}
-  {{- if kindIs "map" $existing -}}
-    {{- $decl = omit $existing "_value" "_gen" -}}
-  {{- end -}}
-{{- end -}}
-
-{{- if and $rawAnnotations (kindIs "map" $rawAnnotations) -}}
-  {{- range $k, $v := $rawAnnotations -}}
+{{- $prologue := dict -}}
+{{- include "crdkit.tokenPrologue.internal" (dict "ctx" $ctx "args" . "verb" "crdkit.token.underlay" "holder" $prologue) -}}
+{{- $name := $prologue.name -}}
+{{- $decl := $prologue.declaration -}}
+{{- if and $prologue.rawAnnotations $prologue.annotationsValid -}}
+  {{- range $k, $v := $prologue.rawAnnotations -}}
     {{- if not (include "crdkit.annotationKey.internal" (dict "ctx" $ctx "key" $k)) -}}
-      {{- include "crdkit.diag.error" (list $diag (printf "crdkit.token.underlay for '%s': '%s' is not a token annotation — ignored" $name $k)) -}}
+      {{- include "crdkit.diag.error" (list $ctx.diag (printf "crdkit.token.underlay for '%s': '%s' is not a token annotation — ignored" $name $k)) -}}
     {{- else if not (hasKey $decl $k) -}}
       {{- $_ := set $decl $k $v -}}
     {{- end -}}
   {{- end -}}
 {{- end -}}
-
 {{- $generated := dict -}}
 {{- if and (hasKey $decl "_generated") (kindIs "map" (index $decl "_generated")) -}}
   {{- $generated = index $decl "_generated" -}}
 {{- end -}}
-{{- $_ := set $generated $target $value -}}
+{{- $_ := set $generated $prologue.target $prologue.value -}}
 {{- $_ := set $decl "_generated" $generated -}}
 {{- $_ := set $ctx "gen" (add1 $ctx.gen) -}}
-{{- $_ := set $tokens $name $decl -}}
+{{- $_ := set $ctx.tokens $name $decl -}}
 {{- end -}}

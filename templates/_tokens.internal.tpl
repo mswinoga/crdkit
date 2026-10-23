@@ -76,6 +76,50 @@ Implementation notes:
 {{- end -}}
 
 {{/*
+crdkit.tokenPrologue.internal (internal)
+
+Shared prologue of crdkit.token.add and crdkit.token.underlay.
+
+Interface:
+- Params (dict): { "ctx": <ctx>, "args": <the public call's list>,
+  "verb": "crdkit.token.add" | "crdkit.token.underlay", "holder":
+  <dict, written in place> }
+- Returns: ""; sets holder's name, value, target, rawAnnotations,
+  declaration (copy without `_value`/`_gen`) and annotationsValid.
+
+Implementation notes:
+- `target` defaults to ctx.target (an explicitly empty target counts as
+  absent, like the public defines always did).
+- Non-dict annotations → ERROR naming the token, "annotations must be a
+  dict"; the caller ignores them.
+*/}}
+{{- define "crdkit.tokenPrologue.internal" -}}
+{{- $ctx := .ctx -}}
+{{- $args := .args -}}
+{{- $name := index $args 1 -}}
+{{- $rawAnnotations := "" -}}
+{{- if gt (len $args) 3 -}}{{- $rawAnnotations = index $args 3 -}}{{- end -}}
+{{- $target := $ctx.target -}}
+{{- if and (gt (len $args) 4) (index $args 4) -}}{{- $target = index $args 4 -}}{{- end -}}
+{{- if and $rawAnnotations (not (kindIs "map" $rawAnnotations)) -}}
+  {{- include "crdkit.diag.error" (list $ctx.diag (printf "%s for '%s': annotations must be a dict — ignored" .verb $name)) -}}
+{{- end -}}
+{{- $decl := dict -}}
+{{- if hasKey $ctx.tokens $name -}}
+  {{- $existing := index $ctx.tokens $name -}}
+  {{- if kindIs "map" $existing -}}
+    {{- $decl = omit $existing "_value" "_gen" -}}
+  {{- end -}}
+{{- end -}}
+{{- $_ := set .holder "name" $name -}}
+{{- $_ := set .holder "value" (index $args 2) -}}
+{{- $_ := set .holder "target" $target -}}
+{{- $_ := set .holder "rawAnnotations" $rawAnnotations -}}
+{{- $_ := set .holder "declaration" $decl -}}
+{{- $_ := set .holder "annotationsValid" (or (not $rawAnnotations) (kindIs "map" $rawAnnotations)) -}}
+{{- end -}}
+
+{{/*
 crdkit.reservedKeys.internal (internal)
 
 Computes the complete list of reserved (non-entry) keys: built-in crdkit
