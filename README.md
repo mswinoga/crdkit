@@ -773,7 +773,7 @@ Layout and assert rules: `CONTRIBUTING.md` "Testing".
 - `scripts/extract.py` — the extractor behind the lint and the
   reference; `graph` writes the call-graph data the workspace viewers
   load.
-- `tests/requirements.md` — the requirement catalogue (C- ids) the
+- `docs/requirements.md` — the requirement catalogue (C- ids) the
   tests cite.
 - `scripts/trace.sh [<file>|-]` — human-readable diff of a `trace`
   (`helm template … --set trace=true | yq -o json '.trace' |

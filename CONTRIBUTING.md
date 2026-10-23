@@ -541,7 +541,7 @@ Layout:
 - `tests/suites/*_test.yaml` — `helm unittest tests/stub -f
   '../suites/*_test.yaml'`; `values: [../fixtures/base.yaml]` + `set:`
   per test.
-- `tests/requirements.md` — the C- requirement catalogue.
+- `docs/requirements.md` — the C- requirement catalogue.
 
 Assert rules:
 - `it:` starts with the C- ids it covers, then F-/TC- ids:
