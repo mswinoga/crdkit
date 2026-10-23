@@ -303,8 +303,9 @@ Interface:
 Implementation notes:
 - An unknown key → ERROR `'<path>.<key>' is not a target key — ignored;
   allowed: <keys>; an exact target goes in 'match'`, key dropped.
-- `match` that is not a list of single-key maps → ERROR, dropped; its
-  regexes are checked at resolution (crdkit.matchRules).
+- `match` that is not a list of single-key maps → ERROR, dropped; each
+  well-formed rule's regex is checked here (invalid → ERROR
+  `'<path>.match[<i>]'`, rule dropped).
 - Keys are visited in sorted order, so messages are stable.
 */}}
 {{- define "crdkit.schema.checkDeclaration.internal" -}}
@@ -324,7 +325,16 @@ Implementation notes:
       {{- end -}}
     {{- end -}}
     {{- if $valid -}}
-      {{- $_ := set $result $key $entry -}}
+      {{- $kept := list -}}
+      {{- range $i, $rule := $entry -}}
+        {{- $pattern := first (keys $rule) -}}
+        {{- if include "crdkit.regexValid.internal" (dict "pattern" $pattern) -}}
+          {{- $kept = append $kept $rule -}}
+        {{- else -}}
+          {{- include "crdkit.diag.error" (list $diag (printf "'%s[%d]': '%s' is not a valid regex — rule ignored" $keyPath $i $pattern)) -}}
+        {{- end -}}
+      {{- end -}}
+      {{- $_ := set $result $key $kept -}}
     {{- else -}}
       {{- include "crdkit.diag.error" (list $diag (printf "'%s' must be a list of single-key maps {<regex>: <value>} — ignored" $keyPath)) -}}
     {{- end -}}

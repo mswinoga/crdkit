@@ -59,6 +59,23 @@ Interface:
 {{- end -}}
 
 {{/*
+crdkit.regexValid.internal (internal)
+
+Validates a compiled-or-not regex without aborting.
+
+Interface:
+- Params (dict): { "pattern": <regex text> }
+- Returns: "true" when the regex compiles, "" otherwise.
+
+Implementation notes:
+- `(?:<re>)|` always matches "", so a match on "" succeeds exactly when
+  the regex compiles.
+*/}}
+{{- define "crdkit.regexValid.internal" -}}
+{{- if regexMatch (printf "(?:%s)|" .pattern) "" -}}true{{- end -}}
+{{- end -}}
+
+{{/*
 crdkit.reservedKeys.internal (internal)
 
 Computes the complete list of reserved (non-entry) keys: built-in crdkit
@@ -274,7 +291,7 @@ value: {{ index $cache $target | toYaml | nindent 2 }}
       {{- $found = true -}}
     {{- end -}}
     {{- if and (not $found) (hasKey $raw "match") -}}
-      {{- $matchResult := include "crdkit.matchRules" (dict "subject" $target "rules" $raw.match) | fromYaml -}}
+      {{- $matchResult := include "crdkit.matchRules" (dict "subject" $target "rules" $raw.match "diag" $diag "label" $fieldId) | fromYaml -}}
       {{- if $matchResult.matched -}}
         {{- $rawValue = $matchResult.value -}}
         {{- $found = true -}}

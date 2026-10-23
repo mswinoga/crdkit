@@ -125,23 +125,42 @@ Implementation notes:
 - Full-string anchored (`^(?:pattern)$`) — a rule matches the WHOLE
   subject, never a substring.
 - "replacement" may reference capture groups via $1/$2/...
-- Uses `must*` regex variants deliberately: a malformed pattern aborts
-  the render (a Helm template error), not a diagnostic — the one
-  scoped exception to "never fail()," since Go templates can't catch
-  and downgrade a `must*` error.
+- Optional "diag" + "label": with them (consumer rules), each regex is
+  validated first; an invalid rule records an ERROR naming the label and
+  the regex, is skipped, and later rules are still tried — never a
+  non-`must*` match on an unchecked pattern. Without "diag"
+  (library-owned rules) an invalid regex aborts via mustRegex*.
 */}}
 {{- define "crdkit.matchRules" -}}
 {{- $subject := .subject -}}
 {{- $rules := .rules | default (list) -}}
+{{- $diag := .diag -}}
+{{- $label := .label | default "" -}}
 {{- $result := "" -}}
 {{- $found := false -}}
 {{- range $rule := $rules -}}
   {{- if not $found -}}
     {{- range $pattern, $repl := $rule -}}
-      {{- $anchored := printf "^(?:%s)$" $pattern -}}
-      {{- if mustRegexMatch $anchored $subject -}}
-        {{- $result = mustRegexReplaceAll $anchored $subject $repl -}}
-        {{- $found = true -}}
+      {{- $valid := true -}}
+      {{- if $diag -}}
+        {{- if not (include "crdkit.regexValid.internal" (dict "pattern" $pattern)) -}}
+          {{- include "crdkit.diag.error" (list $diag (printf "'%s': match rule '%s' is not a valid regex — skipped" $label $pattern)) -}}
+          {{- $valid = false -}}
+        {{- end -}}
+      {{- end -}}
+      {{- if $valid -}}
+        {{- $anchoredRe := printf "^(?:%s)$" $pattern -}}
+        {{- if $diag -}}
+          {{- if regexMatch $anchoredRe $subject -}}
+            {{- $result = regexReplaceAll $anchoredRe $subject $repl -}}
+            {{- $found = true -}}
+          {{- end -}}
+        {{- else -}}
+          {{- if mustRegexMatch $anchoredRe $subject -}}
+            {{- $result = mustRegexReplaceAll $anchoredRe $subject $repl -}}
+            {{- $found = true -}}
+          {{- end -}}
+        {{- end -}}
       {{- end -}}
     {{- end -}}
   {{- end -}}

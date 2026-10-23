@@ -2714,8 +2714,7 @@ tests:
       - exists:
           path: diagnostics.error[?(@ =~ /'targetKeys'\ must\ be\ a\ list\ of\ strings/)]
   - it: 'C-24 F-1: a token-backed field resolves per target and converts on every call'
-    skip:
-      reason: C-24 token open (crdkit-0.2)
+    skip: {reason: "C-24 token open (crdkit-0.2)"}
     set:
       target: b-01
       tokens:
@@ -2763,8 +2762,7 @@ tests:
       - exists:
           path: diagnostics.error[?(@ =~ /'svc.port'.*'c-01'/)]
   - it: 'C-24 F-2: an any node takes the token''s shape, leaves substituted for the target'
-    skip:
-      reason: C-24 token open (crdkit-0.2)
+    skip: {reason: "C-24 token open (crdkit-0.2)"}
     set:
       target: b-01
       tokens:
@@ -2785,8 +2783,7 @@ tests:
           path: leaf
           value: two
   - it: 'C-24 F-3: no value for the target is the resolution ERROR; no check ERROR on top'
-    skip:
-      reason: C-24 token open (crdkit-0.2)
+    skip: {reason: "C-24 token open (crdkit-0.2)"}
     set:
       target: b-01
       tokens:
@@ -2811,8 +2808,7 @@ tests:
       - exists:
           path: diagnostics.error[?(@ =~ /no value found for 'P.port'/)]
   - it: 'C-24 F-4: an unknown token is the resolution ERROR'
-    skip:
-      reason: C-24 token open (crdkit-0.2)
+    skip: {reason: "C-24 token open (crdkit-0.2)"}
     set:
       ops:
         - schemaValue:
@@ -2826,13 +2822,13 @@ tests:
       - exists:
           path: diagnostics.error[?(@ =~ /unknown token 'NOPE'/)]
   - it: 'C-22 Q-5: a declaration match rule with an invalid regex is an ERROR naming the path'
-    skip:
-      reason: Q-5 open (crdkit-0.2)
     set:
       ops:
         - validate: {}
           schema:
             type: map
+            targetKeys:
+              - ALL
             properties:
               APP_X:
                 type: scalar
@@ -2845,15 +2841,17 @@ tests:
             - r
     asserts:
       - equal:
-          path: r.APP_X
+          path: r.APP_X.default
           value: d
+      - equal:
+          path: r.APP_X.match
+          value: []
       - exists:
           path: diagnostics.error[?(@ =~ /'APP_X\.match\[0\]'/)]
       - exists:
           path: diagnostics.error[?(@ =~ /'qa\['.*not a valid regex/)]
   - it: 'C-22 F-4: a boolean-word key in a keys map is an ERROR and dropped; a normal key is kept'
-    skip:
-      reason: F-4 open (crdkit-0.2)
+    skip: {reason: "F-4 open (crdkit-0.2)"}
     set:
       ops:
         - validate: {}

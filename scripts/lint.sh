@@ -20,7 +20,8 @@
 #                                regexReplaceAll|regexReplaceAllLiteral|
 #                                regexSplit whose pattern is not a string
 #                                literal, a `$<name>Re` local or
-#                                crdkit.markerPattern
+#                                crdkit.markerPattern; allowed inside
+#                                --regex-check-define (the validity probe)
 #
 # Output: `FAIL <rule> <file>:<line>: <text>`,
 # `PENDING (<reason>) <rule> <file>:<line>: <text>`,
@@ -29,16 +30,18 @@
 # Exit: 0 iff nothing failed; 1 on a failure; 2 on a usage error.
 
 usage() {
-  echo "usage: lint.sh [--fail-define <define>] [--pending <file>] <templates dir>" >&2
+  echo "usage: lint.sh [--fail-define <define>] [--pending <file>] [--regex-check-define <define>] <templates dir>" >&2
   exit 2
 }
 
 fail_define=
 pending=
+regex_define=
 while [ $# -gt 0 ]; do
   case $1 in
     --fail-define) [ $# -ge 2 ] || usage; fail_define=$2; shift 2 ;;
     --pending) [ $# -ge 2 ] || usage; pending=$2; shift 2 ;;
+    --regex-check-define) [ $# -ge 2 ] || usage; regex_define=$2; shift 2 ;;
     -*) usage ;;
     *) break ;;
   esac
@@ -55,7 +58,7 @@ fi
 find "$dir" -type f | LC_ALL=C sort | {
   set --
   while IFS= read -r f; do set -- "$@" "$f"; done
-  awk -v failDefine="$fail_define" -v pendingFile="$pending" '
+  awk -v failDefine="$fail_define" -v pendingFile="$pending" -v regexDefine="$regex_define" '
   BEGIN {
     if (pendingFile != "") {
       while ((getline l < pendingFile) > 0) {
@@ -110,6 +113,7 @@ find "$dir" -type f | LC_ALL=C sort | {
     if (s ~ /^"/ || s ~ /^`/) return 1
     if (s ~ /^\$[A-Za-z0-9_]*Re([^A-Za-z0-9_]|$)/) return 1
     if (s ~ /^\([[:space:]]*include[[:space:]]+"crdkit\.markerPattern"/) return 1
+    if (regexDefine != "" && define == regexDefine) return 1
     return 0
   }
 

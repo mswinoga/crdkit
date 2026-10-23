@@ -2282,8 +2282,6 @@ tests:
           path: b.value
           value: ""
   - it: 'C-18 Q-5: an invalid consumer match regex is an ERROR; the default still resolves'
-    skip:
-      reason: Q-5 open (crdkit-0.2)
     set:
       tokens:
         T:
@@ -2301,8 +2299,6 @@ tests:
       - exists:
           path: diagnostics.error[?(@ =~ /'T'.*'qa\['/)]
   - it: 'C-18 Q-5: an invalid library-owned regex aborts'
-    skip:
-      reason: Q-5 open (crdkit-0.2)
     set:
       ops:
         - matchRules:
