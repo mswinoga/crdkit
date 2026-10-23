@@ -254,13 +254,15 @@ Interface:
 - Returns YAML: { "value": <resolved value> }
 
 Implementation notes:
-- A "token" is always resolved through crdkit.token.value for the
-  target, whatever the node's per-target state, then checked like any
-  resolved value; no value → the resolution ERROR, "" and no check
+- A "token" is always resolved like crdkit.token.value for the target,
+  whatever the node's per-target state, then checked like any resolved
+  value; no value → the resolution ERROR naming "path", "" and no check
   ERROR; an unknown token → its ERROR, "".
 - Otherwise a per-target node or a string with markers is resolved and
-  checked (once per path and target, see "seen"); any other value is
+  checked; any other value is
   returned as written — the structural pass already checked it.
+- Diagnostics at most once per path and target (see "seen"): a repeat
+  resolves silently.
 - A resolved string of an `int` / `number` / `bool` node is returned
   converted to that type when it passes the check (see
   crdkit.schema.resolveAndCheck.internal), on every call.

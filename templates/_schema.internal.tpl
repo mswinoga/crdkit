@@ -520,7 +520,9 @@ Implementation notes:
   written, so the drop would pass silently); unknown key → WARNING;
   required / type / enum / pattern / markers / keys.pattern → ERROR; a
   map on a static scalar node → ERROR, whatever `required` says (a
-  fallback to the default would invert e.g. `enabled: {PROD: false}`);
+  fallback to the default would invert e.g. `enabled: {PROD: false}`),
+  worded as a token declaration unless target keys are in effect and
+  none of its keys is a declaration key;
   a node that fails is dropped (its parent's default then
   applies), a key failing "keys.pattern" with its value, and a YAML 1.1
   boolean word (y/n/yes/no/on/off/true/false, any case) as a `keys` map
@@ -580,7 +582,18 @@ Implementation notes:
   {{/* kept as written */}}
 {{- else if eq $shape "scalar" -}}
   {{- if and (not $resolved) (kindIs "map" $value) (eq (toString $node.static) "true") -}}
-    {{- include "crdkit.diag.error" (list $diag (printf "'%s' is static — a token declaration is not allowed — ignored" $path)) -}}
+    {{- $declared := not (kindIs "slice" $targetKeys) -}}
+    {{- if not $declared -}}
+      {{- $allowed := (include "crdkit.schema.declarationKeys.internal" (dict "node" $node "targetKeys" $targetKeys) | fromYaml).value -}}
+      {{- range $key, $_ := $value -}}
+        {{- if has $key $allowed -}}{{- $declared = true -}}{{- end -}}
+      {{- end -}}
+    {{- end -}}
+    {{- if $declared -}}
+      {{- include "crdkit.diag.error" (list $diag (printf "'%s' is static — a token declaration is not allowed — ignored" $path)) -}}
+    {{- else -}}
+      {{- include "crdkit.diag.error" (list $diag (printf "'%s' must be a scalar — ignored" $path)) -}}
+    {{- end -}}
     {{- $_ := set $out "keep" false -}}
   {{- else if or (kindIs "map" $value) (kindIs "slice" $value) -}}
     {{- include $shapeDiag (list $diag (printf "'%s'%s must be a scalar%s" $path $suffix $tail)) -}}
@@ -699,10 +712,12 @@ Implementation notes:
 - A value that fails the check, or still holds an unresolved marker
   (e.g. one left for a later substitution pass), is returned
   unconverted. `string` / `scalar` nodes are returned as resolved.
-- A "token" param resolves through crdkit.token.value; a per-target
-  node otherwise through crdkit.tokenDef.value (field id = the values
-  path); any other value through crdkit.tokens.substitute.
-- Checked at most once per `<path>|<target>` (recorded in "seen").
+- A "token" param resolves like crdkit.token.value, its diagnostics
+  naming "path"; a per-target node otherwise through
+  crdkit.tokenDef.value (field id = the values path); any other value
+  through crdkit.tokens.substitute.
+- Resolved and checked with diagnostics at most once per
+  `<path>|<target>` (recorded in "seen"); a repeat resolves silently.
 - Not checked when resolution itself recorded an ERROR (e.g. "no value
   found") or left a marker unresolved — that diagnostic already names
   the problem.
@@ -711,10 +726,17 @@ Implementation notes:
 {{- $ctx := .ctx -}}
 {{- $node := .node -}}
 {{- $target := .target -}}
-{{- $errorsBefore := len $ctx.diag.errors -}}
+{{- $seenKey := printf "%s|%s" .path $target -}}
+{{/* a repeated (path, target) resolves silently: its first resolution already reported. */}}
+{{- if and .path (hasKey .seen $seenKey) -}}
+  {{- $ctx = merge (dict "diag" (dict)) $ctx -}}
+{{- end -}}
+{{- $errorsBefore := len ($ctx.diag.errors | default list) -}}
 {{- $value := "" -}}
-{{- if .token -}}
-  {{- $value = (include "crdkit.token.value" (list $ctx .token $target) | fromYaml).value -}}
+{{- if and .token (not (hasKey $ctx.tokens .token)) -}}
+  {{- include "crdkit.diag.error" (list $ctx.diag (printf "unknown token '%s' referenced" .token)) -}}
+{{- else if .token -}}
+  {{- $value = (include "crdkit.resolveEntry.internal" (dict "fieldId" .token "label" (.path | default .token) "def" (index $ctx.tokens .token) "tokens" $ctx.tokens "target" $target "diag" $ctx.diag "parentTargetTemplate" $ctx.parentTargetTemplate "root" $ctx.root "reservedKeys" $ctx.reservedKeys "gen" $ctx.gen) | fromYaml).value -}}
 {{- else if .tokens -}}
   {{- $value = (include "crdkit.tokenDef.value" (list $ctx .path .def $target) | fromYaml).value -}}
 {{- else -}}
@@ -735,10 +757,9 @@ Implementation notes:
     {{- end -}}
   {{- end -}}
 {{- end -}}
-{{- $seenKey := printf "%s|%s" .path $target -}}
 {{- if not (hasKey .seen $seenKey) -}}
   {{- $_ := set .seen $seenKey true -}}
-  {{- if and (eq (len $ctx.diag.errors) $errorsBefore) (not $unresolved) (not (kindIs "invalid" $value)) -}}
+  {{- if and (eq (len ($ctx.diag.errors | default list)) $errorsBefore) (not $unresolved) (not (kindIs "invalid" $value)) -}}
     {{- include "crdkit.schema.walk.internal" (dict "node" $node "value" $value "path" .path "diag" $ctx.diag "mode" "resolved" "suffix" (printf " for target '%s'" $target) "out" (dict)) -}}
   {{- end -}}
 {{- end -}}

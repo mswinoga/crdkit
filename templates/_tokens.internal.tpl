@@ -229,12 +229,13 @@ crdkit.resolveEntry.internal (internal)
 Runs the target-escalation ladder against "def", selects one entry, then
 recursively substitutes "@ref@" markers throughout it. The engine
 behind both a real, named token and an arbitrary structure (resolved by
-the same rules without being registered in ctx.tokens). "fieldId" labels diagnostics only. Memoized onto "def"
+the same rules without being registered in ctx.tokens). "fieldId" names the entry in cycle detection; diagnostics name "label". Memoized onto "def"
 itself under "_value", keyed by target, valid for one generation
 ("_gen").
 
 Interface:
-- Params (dict): { "fieldId": <string>, "def": <declaration or scalar>,
+- Params (dict): { "fieldId": <string>, "label": <string in
+  diagnostics, optional — defaults to "fieldId">, "def": <declaration or scalar>,
   "tokens": <live tokens map, for resolving @ref@ markers inside the
   resolved value>, "target": <string>, "diag": <dict>,
   "parentTargetTemplate": <fully-qualified template name>, "root":
@@ -287,6 +288,7 @@ Implementation notes:
 */}}
 {{- define "crdkit.resolveEntry.internal" -}}
 {{- $fieldId := .fieldId -}}
+{{- $label := .label | default .fieldId -}}
 {{- $raw := .def -}}
 {{- $tokens := .tokens -}}
 {{- $target := .target -}}
@@ -333,7 +335,7 @@ value: {{ index $cache $target | toYaml | nindent 2 }}
       {{- $found = true -}}
     {{- end -}}
     {{- if and (not $found) (hasKey $raw "match") -}}
-      {{- $matchResult := include "crdkit.matchRules" (dict "subject" $target "rules" $raw.match "diag" $diag "label" $fieldId) | fromYaml -}}
+      {{- $matchResult := include "crdkit.matchRules" (dict "subject" $target "rules" $raw.match "diag" $diag "label" $label) | fromYaml -}}
       {{- if $matchResult.matched -}}
         {{- $rawValue = $matchResult.value -}}
         {{- $found = true -}}
@@ -352,7 +354,7 @@ value: {{ index $cache $target | toYaml | nindent 2 }}
           {{- if not $next -}}
             {{- $stop = true -}}
           {{- else if has $next $visited -}}
-            {{- include "crdkit.diag.error" (list $diag (printf "target escalation chain for '%s' cycles back to '%s' while resolving from '%s'" $fieldId $next $target)) -}}
+            {{- include "crdkit.diag.error" (list $diag (printf "target escalation chain for '%s' cycles back to '%s' while resolving from '%s'" $label $next $target)) -}}
             {{- $stop = true -}}
             {{- $cycleDetected = true -}}
           {{- else -}}
@@ -387,7 +389,7 @@ value: {{ index $cache $target | toYaml | nindent 2 }}
         {{- end -}}
       {{- end -}}
       {{- if and (not $found) (not $cycleDetected) -}}
-        {{- include "crdkit.diag.error" (list $diag (printf "no value found for '%s' — target chain exhausted at '%s' starting from '%s'" $fieldId $current $target)) -}}
+        {{- include "crdkit.diag.error" (list $diag (printf "no value found for '%s' — target chain exhausted at '%s' starting from '%s'" $label $current $target)) -}}
       {{- end -}}
     {{- end -}}
   {{- end -}}

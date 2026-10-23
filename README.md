@@ -554,7 +554,7 @@ list elements are indexed: `services["a.b"].ports[0]`.
 | required | ERROR | `'<path>' is required` |
 | type / enum / pattern | ERROR | `'<path>' must be of type 'int' — ignored` |
 | markers in a static value | ERROR | `'<path>' must not contain '@NAME@' markers — ignored` |
-| map in a static scalar | ERROR | `'<path>' is static — a token declaration is not allowed — ignored` |
+| map in a static scalar | ERROR | `'<path>' is static — a token declaration is not allowed — ignored`; with target keys in effect and no declaration key in the map: `'<path>' must be a scalar — ignored` |
 | declaration key | ERROR | `'<path>.<key>' is not a target key — ignored; allowed: <keys>; an exact target goes in 'match'` |
 | declaration `match` | ERROR | `'<path>.match' must be a list of single-key maps {<regex>: <value>} — ignored` |
 | value pass | ERROR | `'<path>' for target '<t>' must be of type 'int' — got '<v>'` |
