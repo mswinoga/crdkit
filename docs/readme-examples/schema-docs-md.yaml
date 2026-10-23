@@ -1,0 +1,9 @@
+target: prod-01
+state:
+  schemaText: |
+    type: map
+    doc: Example values.
+    properties:
+      target:     {type: string, static: true, required: true, doc: "Render target."}
+      renderMode: {type: string, static: true, enum: [validate, deploy], default: deploy}
+      replicas:   {type: int, doc: "Instances per target."}

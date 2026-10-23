@@ -533,15 +533,28 @@ def slug(heading):
     return text.replace(" ", "-")
 
 
+FENCE = re.compile(r'^\s*(`{3,}|~{3,})(.*)$')
+
+
+def fence_step(fence, line):
+    """(fence after the line, whether the line opens or closes a fence); a closing run is as long or longer."""
+    f = FENCE.match(line)
+    if not f:
+        return fence, False
+    run, rest = f.groups()
+    if fence is None:
+        return run, True
+    if run[0] == fence[0] and len(run) >= len(fence) and not rest.strip():
+        return None, True
+    return fence, False
+
+
 def md_headings(text):
     """(heading texts, anchors) of a Markdown file; fenced blocks skipped, `<a id|name>` anchors included."""
     texts, anchors, seen, fence = set(), set(), {}, None
     for line in text.splitlines():
-        f = re.match(r'^\s*(```|~~~)', line)
-        if f:
-            fence = None if fence == f.group(1) else (fence or f.group(1))
-            continue
-        if fence:
+        fence, edge = fence_step(fence, line)
+        if edge or fence:
             continue
         h = re.match(r'^#{1,6}\s+(.*?)\s*#*\s*$', line)
         if h:
@@ -603,11 +616,8 @@ def reference_hits(text, src, root, peers, md_cache):
 
     fence = None
     for i, line in enumerate(text.splitlines()):
-        f = re.match(r'^\s*(```|~~~)', line)
-        if f:
-            fence = None if fence == f.group(1) else (fence or f.group(1))
-            continue
-        if fence:
+        fence, edge = fence_step(fence, line)
+        if edge or fence:
             continue
         for m in re.finditer(r'\[[^\]]*\]\(([^)\s]+)\)', line):
             check_path(m.group(1), src.parent, i, True)
@@ -630,13 +640,10 @@ def unmarked_blocks(text):
             inside = True
         elif re.match(r'^\s*<!--\s*/example\s*-->', line):
             inside = False
-        f = re.match(r'^\s*(```|~~~)', line)
-        if not f:
+        was = fence
+        fence, edge = fence_step(fence, line)
+        if not edge or was is not None:
             continue
-        if fence:
-            fence = None if f.group(1) == fence else fence
-            continue
-        fence = f.group(1)
         if not inside and not (i and lines[i - 1].strip() == "<!-- sketch -->"):
             out.append(i)
     return out

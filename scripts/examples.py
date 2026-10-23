@@ -11,14 +11,15 @@ Usage:
       This text.
 
 Markers (each pair on its own lines, content between them generated):
-  <!-- example: docs/readme-examples/<stem> [target=a,b] [show=p1,p2] [render=none] -->
+  <!-- example: docs/readme-examples/<stem> [target=a,b] [show=p1,p2] [render=none] [lang=<l>] -->
   <!-- /example -->
   Paths are relative to the README's directory.
 
 Generated blocks:
 - input: `<stem>.yaml` verbatim, first line `# <stem>.yaml`;
 - `--kind stub`: `<stem>.tpl` verbatim, then the snippet's result: one
-  block per target (headed `# <target>` when `target=` is given);
+  block per target (headed `# <target>` when `target=` is given; fence
+  language `lang`, default yaml);
 - `--kind consumer`: one block per target, per `show` path a line
   `# <target>: spec.<path>` and that path's YAML;
 - `render=none`: the input only, unlabelled, `@CHART_VERSION@` replaced
@@ -85,7 +86,10 @@ def top_key(text, key):
 
 
 def fence(lang, text):
-    return [f"```{lang}"] + text.rstrip("\n").splitlines() + ["```"]
+    """A fenced block, its fence longer than any backtick run the text starts a line with."""
+    runs = [len(m.group(0)) for m in re.finditer(r'^[ \t]*`{3,}', text, re.M)]
+    tick = "`" * max([3] + [r + 1 for r in runs])
+    return [f"{tick}{lang}"] + text.rstrip("\n").splitlines() + [tick]
 
 
 def generate(root, stem, attrs, opts):
@@ -110,7 +114,7 @@ def generate(root, stem, attrs, opts):
             if t:
                 args += ["--set", f"target={t}"]
             result = top_key(helm(args), "result")
-            out += fence("yaml", (f"# {t}\n" if t else "") + result)
+            out += fence(attrs.get("lang", "yaml"), (f"# {t}\n" if t else "") + result)
     else:
         show = [p for p in attrs.get("show", "").split(",") if p]
         if not show:
