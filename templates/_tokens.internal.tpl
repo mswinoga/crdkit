@@ -539,3 +539,51 @@ Implementation notes:
 {{- end -}}
 {{- $text -}}
 {{- end -}}
+
+{{/*
+crdkit.substituteValue.internal (internal)
+
+Builds a copy of a value with every string leaf substituted; map keys
+are data. Invoked by crdkit.render's final pass.
+
+Interface:
+- Params (dict): { "ctx": <ctx>, "value": <any>, "holder": <dict>,
+  "unresolved": <dict marker -> true> }
+- Returns: ""; writes the substituted copy to `holder.value`.
+
+Implementation notes:
+- Builds new maps/lists instead of mutating: a subtree may alias `state`
+  data or another subtree and a second visit would re-read an
+  `@AT@`-escaped leaf as a marker.
+- Each leaf's leftover markers (before `@AT@` becomes "@") are collected
+  into `unresolved` for the typo scan.
+*/}}
+{{- define "crdkit.substituteValue.internal" -}}
+{{- $holder := .holder -}}
+{{- $v := .value -}}
+{{- if kindIs "string" $v -}}
+  {{- $text := include "crdkit.tokens.substituteMarkers.internal" (list .ctx $v) -}}
+  {{- range $m := regexFindAll (include "crdkit.markerPattern" (dict)) $text -1 -}}
+    {{- $_ := set $.unresolved $m true -}}
+  {{- end -}}
+  {{- $_ := set $holder "value" ($text | replace "@AT@" "@") -}}
+{{- else if kindIs "map" $v -}}
+  {{- $out := dict -}}
+  {{- range $k, $e := $v -}}
+    {{- $h := dict -}}
+    {{- include "crdkit.substituteValue.internal" (dict "ctx" $.ctx "value" $e "holder" $h "unresolved" $.unresolved) -}}
+    {{- $_ := set $out $k $h.value -}}
+  {{- end -}}
+  {{- $_ := set $holder "value" $out -}}
+{{- else if kindIs "slice" $v -}}
+  {{- $out := list -}}
+  {{- range $e := $v -}}
+    {{- $h := dict -}}
+    {{- include "crdkit.substituteValue.internal" (dict "ctx" $.ctx "value" $e "holder" $h "unresolved" $.unresolved) -}}
+    {{- $out = append $out $h.value -}}
+  {{- end -}}
+  {{- $_ := set $holder "value" $out -}}
+{{- else -}}
+  {{- $_ := set $holder "value" $v -}}
+{{- end -}}
+{{- end -}}

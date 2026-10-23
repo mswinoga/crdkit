@@ -167,7 +167,6 @@ tests:
       - equal: {path: diagnostics.warning, value: [a warning]}
       - notExists: {path: diagnostics.error}
   - it: "C-6 Q-6: a seed missing a level's list still receives that level"
-    skip: {reason: "Q-6 open (crdkit-0.2)"}
     set:
       diag: {errors: []}
       ops: [{diag: warning, msg: seeded-warning}]

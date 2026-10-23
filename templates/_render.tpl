@@ -89,12 +89,14 @@ Implementation notes:
 
 {{- include "crdkit.integrations.chain" (dict "chain" .chain "ctx" $ctx) -}}
 
-{{- $substitutedText := include "crdkit.tokens.substituteMarkers.internal" (list $ctx ($model | toYaml) $target) -}}
+{{/* One pass over the model: every string leaf substituted, map keys left as data. */}}
+{{- $substituted := dict -}}
+{{- $unresolved := dict -}}
+{{- include "crdkit.substituteValue.internal" (dict "ctx" $ctx "value" $model "holder" $substituted "unresolved" $unresolved) -}}
+{{- $substitutedModel := $substituted.value -}}
 
 {{/* leftover "@word@" after substitution = possible typo; a genuine cycle is already reported elsewhere with a more specific message. Scanned before "@AT@" becomes "@", so an escaped marker is never reported. */}}
-{{- $unresolvedMarkers := regexFindAll (include "crdkit.markerPattern" (dict)) $substitutedText -1 -}}
-{{- $substitutedModel := $substitutedText | replace "@AT@" "@" | fromYaml -}}
-{{- range $marker := $unresolvedMarkers -}}
+{{- range $marker := keys $unresolved | sortAlpha -}}
   {{- $name := trimSuffix "@" (trimPrefix "@" $marker) -}}
   {{- if and (ne $name "AT") (not (hasKey $tokens $name)) -}}
     {{- include "crdkit.diag.warning" (list $diag (printf "'%s' in the rendered model does not match any known token after resolution — possible typo" $marker)) -}}

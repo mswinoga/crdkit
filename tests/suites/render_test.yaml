@@ -68,7 +68,6 @@ tests:
     asserts:
       - notExists: {path: diagnostics}
   - it: "C-3 F-12: the caller's empty seed receives the diagnostics"
-    skip: {reason: "F-12 open (crdkit-0.2)"}
     set:
       diag: {}
       reportSeed: true
@@ -118,7 +117,6 @@ tests:
       - equal: {path: v.f, value: 1.5}
       - equal: {path: v.b, value: true}
   - it: "C-7 F-1: a value with a quote and a newline renders as written"
-    skip: {reason: "F-1 open (crdkit-0.2)"}
     set:
       tokens: {Q: "it's\nline2"}
       ops: [{put: [v], value: {x: "@Q@"}}]
