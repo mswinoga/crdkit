@@ -1,0 +1,34 @@
+{{/*
+stub.docs (test)
+
+Renders `crdkit.schema.document` for the docs suites. Invoked by
+`docs.yaml` (through `test.withDiagnostics`).
+
+Interface:
+- Param: the chart root `$`.
+- Values read: `docs` → `{format, schemaText, example?, sections?,
+  title?, htmlLink?, id?}`; no `docs` key → no output.
+- Returns: YAML `text` (the document), `json` (the decoded document
+  for `format: json`), then the diagnostics lines.
+
+Implementation notes:
+- The document is a block scalar: it is not YAML itself (md/html/json).
+*/}}
+{{- define "stub.docs" -}}
+{{- $d := .Values.docs | default dict -}}
+{{- if $d -}}
+{{- $diag := dict "errors" (list) "warnings" (list) "infos" (list) -}}
+{{- $text := include "crdkit.schema.document" (dict "format" $d.format "schemaText" $d.schemaText "example" $d.example "sections" $d.sections "title" ($d.title | default "") "htmlLink" ($d.htmlLink | default "") "id" $d.id "diag" $diag) -}}
+text: |
+{{ $text | indent 2 }}
+{{- if eq $d.format "json" }}
+json: {{ $text | fromJson | toJson }}
+{{- end }}
+{{- range $level := list "error" "warning" "info" }}
+{{- range index $diag (printf "%ss" $level) }}
+# {{ upper $level }}: {{ . }}
+{{- end }}
+{{- end }}
+{{- end -}}
+{{- end -}}
+{{ include "test.withDiagnostics" (include "stub.docs" .) }}
