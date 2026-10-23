@@ -7,3 +7,10 @@ Chart.lock
 # (see Makefile); don't commit the packaged copy of crdkit it depends on.
 harness/charts/*.tgz
 harness/Chart.lock
+
+# Same for the framework's test chart tests/stub (see Makefile `deps`).
+tests/stub/charts/*.tgz
+tests/stub/Chart.lock
+
+# helm-unittest creates an empty one beside every suite.
+__snapshot__/

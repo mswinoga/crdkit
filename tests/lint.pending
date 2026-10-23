@@ -1,0 +1,2 @@
+# <rule> <file> <F-id> (<feature>): a matching lint hit is PENDING.
+accumulator-default-dict templates/_render.tpl F-12 (crdkit-0.2)

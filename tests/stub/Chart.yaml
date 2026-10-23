@@ -1,0 +1,9 @@
+apiVersion: v2
+name: stub
+description: Test-only library stand-in calling crdkit's public API (not published)
+type: application
+version: 1.0.0
+dependencies:
+  - name: crdkit
+    version: 0.1.0
+    repository: file://../..

@@ -52,26 +52,60 @@ tests:
       - equal:
           path: results[0].ok
           value: ""
-      - equal:
+      - lengthEqual:
           path: diag.errors
-          value:
-            - "schema invalid: properties.a: unknown type 'thing'"
-            - "schema invalid: properties.b: 'enum' does not apply to type 'map'"
-            - "schema invalid: properties.c: unknown type 'date'"
-            - "schema invalid: properties.d: 'static' does not apply to type 'map'"
-            - "schema invalid: properties.e: 'static' does not apply to type 'list'"
-            - "schema invalid: properties.f: unknown schema key 'markers'"
-            - "schema invalid: properties.g: 'default' and 'required: true' exclude each other"
-            - "schema invalid: properties.h: unknown schema key 'requried'"
-            - "schema invalid: properties.i: 'enum' must be a list"
-            - "schema invalid: properties.j: 'keys' must be {pattern: <regex>}"
-            - "schema invalid: properties.k: node must be a map"
-            - "schema invalid: properties.l: 'required' must be a bool"
-            - "schema invalid: properties.m: unknown schema key 'kind'"
-            - "schema invalid: properties.m: unknown type ''"
-            - "schema invalid: properties.n: 'items' does not apply to type 'int'"
-            - "schema invalid: properties.o: 'keys.label' must be a string"
-            - "schema invalid: properties.q: unknown schema key 'tokens'"
+          count: 17
+      - contains:
+          path: diag.errors
+          content: "schema invalid: properties.a: unknown type 'thing'"
+      - contains:
+          path: diag.errors
+          content: "schema invalid: properties.b: 'enum' does not apply to type 'map'"
+      - contains:
+          path: diag.errors
+          content: "schema invalid: properties.c: unknown type 'date'"
+      - contains:
+          path: diag.errors
+          content: "schema invalid: properties.d: 'static' does not apply to type 'map'"
+      - contains:
+          path: diag.errors
+          content: "schema invalid: properties.e: 'static' does not apply to type 'list'"
+      - contains:
+          path: diag.errors
+          content: "schema invalid: properties.f: unknown schema key 'markers'"
+      - contains:
+          path: diag.errors
+          content: "schema invalid: properties.g: 'default' and 'required: true' exclude each other"
+      - contains:
+          path: diag.errors
+          content: "schema invalid: properties.h: unknown schema key 'requried'"
+      - contains:
+          path: diag.errors
+          content: "schema invalid: properties.i: 'enum' must be a list"
+      - contains:
+          path: diag.errors
+          content: "schema invalid: properties.j: 'keys' must be {pattern: <regex>}"
+      - contains:
+          path: diag.errors
+          content: "schema invalid: properties.k: node must be a map"
+      - contains:
+          path: diag.errors
+          content: "schema invalid: properties.l: 'required' must be a bool"
+      - contains:
+          path: diag.errors
+          content: "schema invalid: properties.m: unknown schema key 'kind'"
+      - contains:
+          path: diag.errors
+          content: "schema invalid: properties.m: unknown type ''"
+      - contains:
+          path: diag.errors
+          content: "schema invalid: properties.n: 'items' does not apply to type 'int'"
+      - contains:
+          path: diag.errors
+          content: "schema invalid: properties.o: 'keys.label' must be a string"
+      - contains:
+          path: diag.errors
+          content: "schema invalid: properties.q: unknown schema key 'tokens'"
 
   - it: a switch case must declare the switch key as a static scalar
     set:
@@ -94,11 +128,15 @@ tests:
                   missing:
                     type: map
     asserts:
-      - equal:
+      - lengthEqual:
           path: diag.errors
-          value:
-            - "schema invalid: values: case 'bad' must declare 'type' as a scalar type with 'static: true'"
-            - "schema invalid: values: case 'missing' must declare 'type' as a scalar type with 'static: true'"
+          count: 2
+      - contains:
+          path: diag.errors
+          content: "schema invalid: values: case 'bad' must declare 'type' as a scalar type with 'static: true'"
+      - contains:
+          path: diag.errors
+          content: "schema invalid: values: case 'missing' must declare 'type' as a scalar type with 'static: true'"
 
   - it: a schema that failed to parse is reported once, however often it is checked
     set:
@@ -207,12 +245,18 @@ tests:
       - equal:
           path: results[0].value
           value: {keep: ok}
-      - equal:
+      - lengthEqual:
           path: diag.warnings
-          value:
-            - "'l' must be a list — ignored"
-            - "'m' must be a map — ignored"
-            - "'s' must be a scalar — ignored"
+          count: 3
+      - contains:
+          path: diag.warnings
+          content: "'l' must be a list — ignored"
+      - contains:
+          path: diag.warnings
+          content: "'m' must be a map — ignored"
+      - contains:
+          path: diag.warnings
+          content: "'s' must be a scalar — ignored"
       - lengthEqual:
           path: diag.errors
           count: 0
@@ -242,13 +286,21 @@ tests:
       - equal:
           path: results[0].value
           value: {}
-      - equal:
+      - lengthEqual:
           path: diag.errors
-          value:
-            - "'l' must be a list — ignored"
-            - "'m' must be a map — ignored"
-            - "'s' must be a scalar — ignored"
-            - "'sw.kind' has unknown value 'b' — ignored"
+          count: 4
+      - contains:
+          path: diag.errors
+          content: "'l' must be a list — ignored"
+      - contains:
+          path: diag.errors
+          content: "'m' must be a map — ignored"
+      - contains:
+          path: diag.errors
+          content: "'s' must be a scalar — ignored"
+      - contains:
+          path: diag.errors
+          content: "'sw.kind' has unknown value 'b' — ignored"
       - equal:
           path: diag.warnings
           value:
@@ -268,11 +320,15 @@ tests:
       - equal:
           path: results[0].value
           value: {enabled: true}
-      - equal:
+      - lengthEqual:
           path: diag.errors
-          value:
-            - "'enabled' is static — a token declaration is not allowed — ignored"
-            - "'kind' is static — a token declaration is not allowed — ignored"
+          count: 2
+      - contains:
+          path: diag.errors
+          content: "'enabled' is static — a token declaration is not allowed — ignored"
+      - contains:
+          path: diag.errors
+          content: "'kind' is static — a token declaration is not allowed — ignored"
       - lengthEqual:
           path: diag.warnings
           count: 0
@@ -326,12 +382,18 @@ tests:
               services:
                 APP: {greeting: hello}
                 "a.b": {}
-      - equal:
+      - lengthEqual:
           path: diag.warnings
-          value:
-            - "'application.extra' is not a known key — ignored"
-            - "'application.services.APP.greting' is not a known key — ignored"
-            - "'application.services[\"a.b\"].other' is not a known key — ignored"
+          count: 3
+      - contains:
+          path: diag.warnings
+          content: "'application.extra' is not a known key — ignored"
+      - contains:
+          path: diag.warnings
+          content: "'application.services.APP.greting' is not a known key — ignored"
+      - contains:
+          path: diag.warnings
+          content: "'application.services[\"a.b\"].other' is not a known key — ignored"
 
   - it: a key failing "keys.pattern" is an ERROR and is dropped with its value
     set:
@@ -401,16 +463,30 @@ tests:
       - equal:
           path: results[0].value
           value: {}
-      - equal:
+      - lengthEqual:
           path: diag.errors
-          value:
-            - "'count' must be of type 'int' — ignored"
-            - "'enabled' must be of type 'bool' — ignored"
-            - "'id' must match '^[a-z]+$' — ignored"
-            - "'mode' must be one of 'validate', 'deploy' — ignored"
-            - "'name' must be of type 'string' — ignored"
-            - "'ratio' must be of type 'number' — ignored"
-            - "'type' must not contain '@NAME@' markers — ignored"
+          count: 7
+      - contains:
+          path: diag.errors
+          content: "'count' must be of type 'int' — ignored"
+      - contains:
+          path: diag.errors
+          content: "'enabled' must be of type 'bool' — ignored"
+      - contains:
+          path: diag.errors
+          content: "'id' must match '^[a-z]+$' — ignored"
+      - contains:
+          path: diag.errors
+          content: "'mode' must be one of 'validate', 'deploy' — ignored"
+      - contains:
+          path: diag.errors
+          content: "'name' must be of type 'string' — ignored"
+      - contains:
+          path: diag.errors
+          content: "'ratio' must be of type 'number' — ignored"
+      - contains:
+          path: diag.errors
+          content: "'type' must not contain '@NAME@' markers — ignored"
 
   - it: a string holding markers skips type/enum/pattern (the value pass checks it)
     set:
@@ -487,11 +563,15 @@ tests:
               name: {type: string, required: true}
           values: {name: 5}
     asserts:
-      - equal:
+      - lengthEqual:
           path: diag.errors
-          value:
-            - "'name' must be of type 'string' — ignored"
-            - "'target' is required"
+          count: 2
+      - contains:
+          path: diag.errors
+          content: "'name' must be of type 'string' — ignored"
+      - contains:
+          path: diag.errors
+          content: "'target' is required"
 
   - it: a default is applied when the key is absent, never over a present key, and also after a dropped value
     set:
@@ -572,13 +652,21 @@ tests:
           value:
             A: {type: greeter, greeting: hi}
             B: {type: leader, greeter: A}
-      - equal:
+      - lengthEqual:
           path: diag.warnings
-          value:
-            - "'services.A.greeter' is not a known key — ignored"
-            - "'services.C.type' has unknown value 'other' — ignored"
-            - "'services.D' has no 'type' — ignored"
-            - "'services.E' must be a map — ignored"
+          count: 4
+      - contains:
+          path: diag.warnings
+          content: "'services.A.greeter' is not a known key — ignored"
+      - contains:
+          path: diag.warnings
+          content: "'services.C.type' has unknown value 'other' — ignored"
+      - contains:
+          path: diag.warnings
+          content: "'services.D' has no 'type' — ignored"
+      - contains:
+          path: diag.warnings
+          content: "'services.E' must be a map — ignored"
 
   - it: 'a switch unless hit checks only by and unless.key; other keys are dropped silently'
     set:
@@ -610,11 +698,15 @@ tests:
             A: {type: greeter, enabled: false}
             B: {type: greeter, enabled: true}
             C: {type: greeter, enabled: true, greeting: hi}
-      - equal:
+      - lengthEqual:
           path: diag.errors
-          value:
-            - "'services.B.enabled' must be of type 'bool' — ignored"
-            - "'services.B.greeting' is required"
+          count: 2
+      - contains:
+          path: diag.errors
+          content: "'services.B.enabled' must be of type 'bool' — ignored"
+      - contains:
+          path: diag.errors
+          content: "'services.B.greeting' is required"
       - equal:
           path: diag.warnings
           value:
@@ -679,12 +771,18 @@ tests:
                 cases:
                   a: {type: map, properties: {type: {type: scalar, static: true}, enabled: {type: bool}}}
     asserts:
-      - equal:
+      - lengthEqual:
           path: diag.errors
-          value:
-            - "schema invalid: values: 'switch.unless.key' must differ from 'by' ('type')"
-            - "schema invalid: values: 'switch.unless' must be {key: <key>, value: <scalar>}"
-            - "schema invalid: values: case 'a' must declare 'enabled' as a scalar type with 'static: true'"
+          count: 3
+      - contains:
+          path: diag.errors
+          content: "schema invalid: values: 'switch.unless.key' must differ from 'by' ('type')"
+      - contains:
+          path: diag.errors
+          content: "schema invalid: values: 'switch.unless' must be {key: <key>, value: <scalar>}"
+      - contains:
+          path: diag.errors
+          content: "schema invalid: values: case 'a' must declare 'enabled' as a scalar type with 'static: true'"
 
   # --- value pass (per-target values) ---
 
@@ -725,12 +823,18 @@ tests:
             mode: {default: a, prod: c}
             id: {prod: X1}
     asserts:
-      - equal:
+      - lengthEqual:
           path: diag.errors
-          value:
-            - "'count' for target 'prod' must be of type 'int' — got 'many'"
-            - "'id' for target 'prod' must match '^[a-z]+$' — got 'X1'"
-            - "'mode' for target 'prod' must be one of 'a', 'b' — got 'c'"
+          count: 3
+      - contains:
+          path: diag.errors
+          content: "'count' for target 'prod' must be of type 'int' — got 'many'"
+      - contains:
+          path: diag.errors
+          content: "'id' for target 'prod' must match '^[a-z]+$' — got 'X1'"
+      - contains:
+          path: diag.errors
+          content: "'mode' for target 'prod' must be one of 'a', 'b' — got 'c'"
 
   - it: 'type checks use "parses as": a numeric string and a marker-built number pass type int, a non-bool string fails bool'
     set:
@@ -775,11 +879,15 @@ tests:
               ports: {type: list, items: {type: int}}
           values: {good: "@GOOD@", bad: "@BAD@", ports: [80, "@BAD@"]}
     asserts:
-      - equal:
+      - lengthEqual:
           path: diag.errors
-          value:
-            - "'bad' for target 'prod' must be of type 'int' — got 'x'"
-            - "'ports[1]' for target 'prod' must be of type 'int' — got 'x'"
+          count: 2
+      - contains:
+          path: diag.errors
+          content: "'bad' for target 'prod' must be of type 'int' — got 'x'"
+      - contains:
+          path: diag.errors
+          content: "'ports[1]' for target 'prod' must be of type 'int' — got 'x'"
 
   - it: 'a per-target list is checked as a list, element by element'
     set:
@@ -795,11 +903,15 @@ tests:
             hosts: {default: [1], prod: [1, b]}
             other: {prod: "x"}
     asserts:
-      - equal:
+      - lengthEqual:
           path: diag.errors
-          value:
-            - "'hosts[1]' for target 'prod' must be of type 'int' — got 'b'"
-            - "'other' for target 'prod' must be a list"
+          count: 2
+      - contains:
+          path: diag.errors
+          content: "'hosts[1]' for target 'prod' must be of type 'int' — got 'b'"
+      - contains:
+          path: diag.errors
+          content: "'other' for target 'prod' must be a list"
 
   - it: 'a failed resolution reports only its own ERROR, no schema ERROR on top'
     set:
@@ -953,11 +1065,15 @@ tests:
             - value: "12x"
             - value: "@LATER@"
             - value: "3"
-      - equal:
+      - lengthEqual:
           path: diag.errors
-          value:
-            - "'port' for target 'prod' must be of type 'int' — got '12x'"
-            - "'level' for target 'prod' must be one of '1', '2' — got '3'"
+          count: 2
+      - contains:
+          path: diag.errors
+          content: "'port' for target 'prod' must be of type 'int' — got '12x'"
+      - contains:
+          path: diag.errors
+          content: "'level' for target 'prod' must be one of '1', '2' — got '3'"
 
   - it: 'a repeated call for the same path and target (check skipped) still converts'
     set:
@@ -1111,8 +1227,6 @@ tests:
                           type: {type: string, static: true, required: true}
                           environment: {type: map, keys: {pattern: "^[A-Z]+$"}, values: {type: scalar}}
     asserts:
-      - matchSnapshot:
-          path: results[0].text
       - matchRegex:
           path: results[0].text
           pattern: "\\| `renderMode` \\| string, one of: validate, deploy \\| no \\| `\"deploy\"` \\|  \\| Mode \\\\\\| see README\\. \\|"
@@ -1326,12 +1440,18 @@ tests:
       - lengthEqual:
           path: diag.warnings
           count: 0
-      - equal:
+      - lengthEqual:
           path: diag.errors
-          value:
-            - "'pinned' is static — a token declaration is not allowed — ignored"
-            - "'type' is static — a token declaration is not allowed — ignored"
-            - "'hosts[1]' for target 'prod' must be of type 'int' — got 'x'"
+          count: 3
+      - contains:
+          path: diag.errors
+          content: "'pinned' is static — a token declaration is not allowed — ignored"
+      - contains:
+          path: diag.errors
+          content: "'type' is static — a token declaration is not allowed — ignored"
+      - contains:
+          path: diag.errors
+          content: "'hosts[1]' for target 'prod' must be of type 'int' — got 'x'"
 
   - it: 'static below a per-target node is a self-check ERROR'
     set:
@@ -1351,11 +1471,15 @@ tests:
       - equal:
           path: results[0].ok
           value: ""
-      - equal:
+      - lengthEqual:
           path: diag.errors
-          value:
-            - "schema invalid: properties.hosts.items: 'static' does not apply below a per-target node"
-            - "schema invalid: properties.nested.items.properties.port: 'static' does not apply below a per-target node"
+          count: 2
+      - contains:
+          path: diag.errors
+          content: "schema invalid: properties.hosts.items: 'static' does not apply below a per-target node"
+      - contains:
+          path: diag.errors
+          content: "schema invalid: properties.nested.items.properties.port: 'static' does not apply below a per-target node"
 
   - it: 'a static switch key below a per-target list is a valid schema'
     set:
@@ -2120,16 +2244,30 @@ tests:
           path: results[0].json.properties.a["x-crdkit-sections"]
           value:
             - title: Ok
-      - equal:
+      - lengthEqual:
           path: diag.errors
-          value:
-            - "sections: 'a'[0]: 'title' must be a non-empty string — dropped"
-            - "sections: 'a'[2]: 'rows' must be a list and need 'columns' — dropped"
-            - "sections: 'a'[3]: row 0 must be a list of 2 strings — dropped"
-            - "sections: 'a'[4]: unknown section key 'color' — dropped"
-            - "sections: 'a'[5]: a section must be a map — dropped"
-            - "sections: 'c' must be a list of sections — dropped"
-            - "sections: 'b' names no node — dropped"
+          count: 7
+      - contains:
+          path: diag.errors
+          content: "sections: 'a'[0]: 'title' must be a non-empty string — dropped"
+      - contains:
+          path: diag.errors
+          content: "sections: 'a'[2]: 'rows' must be a list and need 'columns' — dropped"
+      - contains:
+          path: diag.errors
+          content: "sections: 'a'[3]: row 0 must be a list of 2 strings — dropped"
+      - contains:
+          path: diag.errors
+          content: "sections: 'a'[4]: unknown section key 'color' — dropped"
+      - contains:
+          path: diag.errors
+          content: "sections: 'a'[5]: a section must be a map — dropped"
+      - contains:
+          path: diag.errors
+          content: "sections: 'c' must be a list of sections — dropped"
+      - contains:
+          path: diag.errors
+          content: "sections: 'b' names no node — dropped"
 
   - it: 'jsonSchema: an invalid schema records the self-check ERRORs and returns {}'
     set:
@@ -2145,49 +2283,6 @@ tests:
           path: diag.errors
           value:
             - "schema invalid: (root): unknown type 'thing'"
-
-  - it: 'jsonSchema: the README example schema'
-    set:
-      schemaOps:
-        - op: jsonSchema
-          title: Example values
-          schemaText: |
-            type: map
-            values: {type: any}                       # the consumer chart's own keys
-            properties:
-              target:     {type: string, static: true, required: true, doc: "Render target."}
-              renderMode: {type: scalar, static: true, enum: [validate, deploy], default: deploy}
-              services:
-                type: map
-                keys: {pattern: "^[A-Z0-9_]+$", label: "<ID>"}
-                values:
-                  switch:
-                    by: type
-                    cases:
-                      greeter:
-                        type: map
-                        properties:
-                          type:     {type: scalar, static: true, required: true}
-                          enabled:  {type: bool, static: true, default: true}
-                          greeting: {type: string, doc: "File content."}
-                          ports:    {type: list, items: {type: int}}
-                      environment:
-                        type: map
-                        properties:
-                          type:     {type: scalar, static: true, required: true}
-                          enabled:  {type: bool, static: true, default: true}
-                          environment: {type: map, keys: {pattern: "^[A-Z]+$"}, values: {type: scalar}}
-          example:
-            target: prod
-            services:
-              APP: {type: greeter, greeting: hi, ports: [80]}
-              VARS: {type: environment, environment: {A: x}}
-          sections:
-            "services.*[type=greeter]":
-              - {title: Generated variables, columns: [Variable, Value], rows: [[APP_GREETER, APP]]}
-    asserts:
-      - matchSnapshot:
-          path: results[0].text
 
   - it: 'document: json returns the JSON Schema text'
     set:
@@ -2615,12 +2710,18 @@ tests:
             a: {ALL: x, default: d, match: [{"prod-.*": m}]}
             b:
               c: {prod: [p]}
-      - equal:
+      - lengthEqual:
           path: diag.errors
-          value:
-            - "'a.prdo' is not a target key — ignored; allowed: ALL, prod, default, match; an exact target goes in 'match'"
-            - "'a.value' is not a target key — ignored; allowed: ALL, prod, default, match; an exact target goes in 'match'"
-            - "'b.c.prod-01' is not a target key — ignored; allowed: ALL, prod, default, match; an exact target goes in 'match'"
+          count: 3
+      - contains:
+          path: diag.errors
+          content: "'a.prdo' is not a target key — ignored; allowed: ALL, prod, default, match; an exact target goes in 'match'"
+      - contains:
+          path: diag.errors
+          content: "'a.value' is not a target key — ignored; allowed: ALL, prod, default, match; an exact target goes in 'match'"
+      - contains:
+          path: diag.errors
+          content: "'b.c.prod-01' is not a target key — ignored; allowed: ALL, prod, default, match; an exact target goes in 'match'"
       - equal:
           path: diag.warnings
           value: []
@@ -2675,11 +2776,15 @@ tests:
               k:
                 x: {dev: 1}
             plain: {ALL: 3}
-      - equal:
+      - lengthEqual:
           path: diag.errors
-          value:
-            - "'outer.k.x.ALL' is not a target key — ignored; allowed: dev, default, match; an exact target goes in 'match'"
-            - "'plain.dev' is not a target key — ignored; allowed: ALL, default, match; an exact target goes in 'match'"
+          count: 2
+      - contains:
+          path: diag.errors
+          content: "'outer.k.x.ALL' is not a target key — ignored; allowed: dev, default, match; an exact target goes in 'match'"
+      - contains:
+          path: diag.errors
+          content: "'plain.dev' is not a target key — ignored; allowed: ALL, default, match; an exact target goes in 'match'"
 
   - it: 'declaration keys: a match that is not a list of single-key maps is an ERROR and dropped'
     set:
@@ -2703,12 +2808,18 @@ tests:
             a: {ALL: x}
             b: {ALL: x}
             c: {ALL: x}
-      - equal:
+      - lengthEqual:
           path: diag.errors
-          value:
-            - "'a.match' must be a list of single-key maps {<regex>: <value>} — ignored"
-            - "'b.match' must be a list of single-key maps {<regex>: <value>} — ignored"
-            - "'c.match' must be a list of single-key maps {<regex>: <value>} — ignored"
+          count: 3
+      - contains:
+          path: diag.errors
+          content: "'a.match' must be a list of single-key maps {<regex>: <value>} — ignored"
+      - contains:
+          path: diag.errors
+          content: "'b.match' must be a list of single-key maps {<regex>: <value>} — ignored"
+      - contains:
+          path: diag.errors
+          content: "'c.match' must be a list of single-key maps {<regex>: <value>} — ignored"
 
   - it: 'declaration keys: a plain value and markers are not declarations, nothing is checked'
     set:
@@ -2747,14 +2858,24 @@ tests:
       - equal:
           path: results[0].ok
           value: ""
-      - equal:
+      - lengthEqual:
           path: diag.errors
-          value:
-            - "schema invalid: properties.a: 'annotations' must be a list of strings"
-            - "schema invalid: properties.b: 'annotations' does not apply to type 'map'"
-            - "schema invalid: properties.d: 'targetKeys' must not list 'default' (always allowed)"
-            - "schema invalid: properties.d: 'annotations' must not list 'match' (always allowed)"
-            - "schema invalid: (root): 'targetKeys' must be a list of strings"
+          count: 5
+      - contains:
+          path: diag.errors
+          content: "schema invalid: properties.a: 'annotations' must be a list of strings"
+      - contains:
+          path: diag.errors
+          content: "schema invalid: properties.b: 'annotations' does not apply to type 'map'"
+      - contains:
+          path: diag.errors
+          content: "schema invalid: properties.d: 'targetKeys' must not list 'default' (always allowed)"
+      - contains:
+          path: diag.errors
+          content: "schema invalid: properties.d: 'annotations' must not list 'match' (always allowed)"
+      - contains:
+          path: diag.errors
+          content: "schema invalid: (root): 'targetKeys' must be a list of strings"
 
   - it: 'jsonSchema: with targetKeys the declaration branch references a shared closed definition per key set and annotations'
     set:

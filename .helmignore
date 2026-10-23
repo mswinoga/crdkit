@@ -8,10 +8,14 @@
 # itself may contain a stale, even-earlier-nested copy, growing with
 # every local test cycle. This exact recursive bloat once pushed a
 # packaged crdkit past 5MB and broke helm-unittest's file-size limit in
-# a downstream test chart. harness/ and tests/ are crdkit's own local dev/test
-# scaffolding — a downstream consumer never needs either.
+# a downstream test chart. harness/, tests/ and scripts/ are crdkit's own
+# local dev/test scaffolding — a downstream consumer never needs them.
 harness/
 tests/
+scripts/
+# helm-unittest output; a pattern without "/" matches at any depth (Helm
+# rejects "**").
+__snapshot__/
 
 # Common VCS dirs
 .git/

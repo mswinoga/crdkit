@@ -1,0 +1,36 @@
+suite: crdkit.render contract — chain, diagnostics
+templates: [cr.yaml]
+values: [../fixtures/base.yaml]
+tests:
+  - it: "C-1: the chain alone builds the model"
+    set:
+      ops: [{put: [v], value: x}]
+    asserts:
+      - equal: {path: v, value: x}
+      - equal: {path: kind, value: Stub}
+      - notExists: {path: target}
+      - notExists: {path: ladder}
+      - notExists: {path: ops}
+  - it: "C-3: diagnostics print per level"
+    set:
+      ops:
+        - {diag: error, msg: chain-error}
+        - {diag: warning, msg: chain-warning}
+        - {diag: info, msg: chain-info}
+    asserts:
+      - exists: {path: "diagnostics.error[?(@ =~ /chain-error/)]"}
+      - exists: {path: "diagnostics.warning[?(@ =~ /chain-warning/)]"}
+      - exists: {path: "diagnostics.info[?(@ =~ /chain-info/)]"}
+  - it: "C-3: a clean render prints no diagnostics"
+    set:
+      ops: [{put: [v], value: x}]
+    asserts:
+      - notExists: {path: diagnostics}
+  - it: "C-3 F-12: the caller's empty seed receives the diagnostics"
+    skip: {reason: "F-12 open (crdkit-0.2)"}
+    set:
+      diag: {}
+      reportSeed: true
+      ops: [{diag: error, msg: boom}]
+    asserts:
+      - equal: {path: seed.errors, value: 1}

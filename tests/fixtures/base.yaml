@@ -1,0 +1,4 @@
+# Stub base values: target b-01 on the ladder b-01 → b → ALL. Each test
+# adds its tokens and `ops` with `set:`.
+target: b-01
+ladder: {b-01: b, b: ALL}
