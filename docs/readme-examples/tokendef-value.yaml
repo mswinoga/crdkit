@@ -1,0 +1,4 @@
+target: prod-01
+ladder: {qa-01: qa, prod-01: prod, qa: NONPROD, prod: ALL, NONPROD: ALL}
+tokens:
+  DB_HOST: {NONPROD: db.qa.acme.com, prod: db.acme.com}

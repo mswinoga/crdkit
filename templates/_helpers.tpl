@@ -19,9 +19,8 @@ Interface:
 {{/*
 crdkit.dependencyVersion (public)
 
-Looks up a named dependency's resolved version from the consuming
-chart's own declared `dependencies:` (Chart.yaml) — how a library
-reports its own version.
+A dependency's version from the consuming chart's `dependencies:`
+(Chart.yaml) — how a library reports its own version.
 
 Interface:
 - Params (dict): { "name": <dependency name to look up>, "context": <root $> }

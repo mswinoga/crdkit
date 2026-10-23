@@ -7,7 +7,8 @@
 # Usage: lint.sh [--fail-define <define>] [--pending <file>]
 #               [--regex-check-define <define>] [--library]
 #               [--scopes <list>] [--internal-suffix] [--peer <templates dir>]...
-#               <templates dir>
+#               [--doc-rules] [--md <file>]... [--requirements <file>]
+#               [--tests <dir>] [--readme <file>] <templates dir>
 #   --fail-define          the one define allowed to call `fail` (default: none)
 #   --pending              lines `<rule> <file> <reason>`: a hit of <rule> in
 #                          <file> is reported PENDING instead of FAIL; an entry
@@ -17,8 +18,8 @@
 #                          consumer-pattern validity probe)
 #   --library              turn on the boundary rules — for a library's
 #                          templates, which own no crdkit internals
-#   --scopes, --internal-suffix, --peer
-#                          forwarded to the extractor (see scripts/extract.py)
+#   --scopes, --internal-suffix, --peer, --doc-rules, --md, --requirements,
+#   --tests, --readme      forwarded to the extractor (see scripts/extract.py)
 #
 # Text rules (every regular file under the dir; `{{/* … */}}` comments
 # skipped):
@@ -46,9 +47,11 @@
 #   boundary-internal-call       include/template of a `crdkit.*.internal`
 #                                define
 #
-# Extractor rules (`<script dir>/extract.py lint`, spec §8.2): define
-# naming, ctx writes of text/mutating defines, dead defines, doc-comment
-# define names; needs `python3` (missing → exit 2).
+# Extractor rules (`<script dir>/extract.py lint`): define naming, ctx
+# writes of text/mutating defines, dead defines, doc-comment define names
+# and params, doc-comment shape, Markdown define names, requirement ids,
+# dead references, unmarked README blocks; needs `python3` (missing →
+# exit 2).
 #
 # Output: `FAIL <rule> <file>:<line>: <text>`,
 # `PENDING (<reason>) <rule> <file>:<line>: <text>`,
@@ -59,6 +62,7 @@
 usage() {
   echo "usage: lint.sh [--fail-define <define>] [--pending <file>] [--regex-check-define <define>]" >&2
   echo "               [--library] [--scopes <list>] [--internal-suffix] [--peer <templates dir>]..." >&2
+  echo "               [--doc-rules] [--md <file>]... [--requirements <file>] [--tests <dir>] [--readme <file>]" >&2
   echo "               <templates dir>" >&2
   exit 2
 }
@@ -75,8 +79,9 @@ while [ $# -gt 0 ]; do
     --regex-check-define) [ $# -ge 2 ] || usage; regex_define=$2; shift 2 ;;
     --library) library=1; shift ;;
     --scopes) [ $# -ge 2 ] || usage; extras="$extras --scopes $2"; shift 2 ;;
-    --internal-suffix) extras="$extras --internal-suffix"; shift ;;
-    --peer) [ $# -ge 2 ] || usage; extras="$extras --peer $2"; shift 2 ;;
+    --internal-suffix|--doc-rules) extras="$extras $1"; shift ;;
+    --peer|--md|--requirements|--tests|--readme)
+      [ $# -ge 2 ] || usage; extras="$extras $1 $2"; shift 2 ;;
     -*) usage ;;
     *) break ;;
   esac

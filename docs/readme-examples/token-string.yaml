@@ -1,0 +1,6 @@
+target: prod-01
+ladder: {qa-01: qa, prod-01: prod, qa: NONPROD, prod: ALL, NONPROD: ALL}
+tokens:
+  HOSTS:
+    default: [db-1.acme.com, db-2.acme.com]
+    qa: [db.qa.acme.com]

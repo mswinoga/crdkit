@@ -301,6 +301,23 @@ tests:
       - equal:
           path: structure.multi
           value: first-match
+  - it: 'C-18: match: a numeric rule value is used as its string form — no template error'
+    set:
+      target: prod-01
+      tokens:
+        COUNT:
+          ALL: 2
+          match:
+            - prod-01: 6
+      ops:
+        - put:
+            - structure
+          value:
+            count: '@COUNT@'
+    asserts:
+      - equal:
+          path: structure.count
+          value: "6"
   - it: 'C-33: a dedicated attribute wins over a match rule that would also fire — most specific always beats pattern-based'
     set:
       target: prod-01

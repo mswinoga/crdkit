@@ -148,9 +148,8 @@ Implementation notes:
 - Writes ctx: —
 - Reads ctx: —
 
-Looks up a named dependency's resolved version from the consuming
-chart's own declared `dependencies:` (Chart.yaml) — how a library
-reports its own version.
+A dependency's version from the consuming chart's `dependencies:`
+(Chart.yaml) — how a library reports its own version.
 
 Interface:
 - Params (dict): { "name": <dependency name to look up>, "context": <root $> }
@@ -271,8 +270,7 @@ Implementation notes:
 - Reads ctx: —
 
 Records a warning diagnostic: appends `message` to `diag.warnings` in
-place. Libraries and crdkit itself record every warning through this
-template.
+place; every warning goes through this define.
 
 Interface:
 - Params (list): [diag, message]
@@ -293,9 +291,8 @@ Interface:
 - Writes ctx: —
 - Reads ctx: —
 
-Walks a multi-level path from $model, creating an empty dict at each
-missing level, then merges "value" into the dict at the end of the path
-(incoming keys win on collision).
+Merges "value" into the dict at a path of $model, creating missing
+levels as empty dicts (incoming keys win on collision).
 
 Interface:
 - Params (list): [model, key1, ..., keyN, value] (N >= 0)
@@ -421,9 +418,8 @@ Implementation notes:
 - Writes ctx: —
 - Reads ctx: —
 
-The one definition of a "@NAME@" marker; every marker match in crdkit
-(substitution, unresolved-marker scan, schema checks, JSON Schema
-`markers` pattern) uses it.
+The one definition of a "@NAME@" marker; every marker match uses it.
+See CONTRIBUTING "Token model".
 
 Interface:
 - Params: an empty dict, or `{group: true}`.
@@ -496,13 +492,15 @@ string; first match wins.
 
 Interface:
 - Params (dict): { "subject": <string>, "rules": <list of single-key
-  {pattern: replacement} dicts, may be nil/empty> }
+  {pattern: replacement} dicts, may be nil/empty>, "diag": <dict,
+  optional>, "label": <string, optional> }
 - Returns YAML: { "matched": <bool>, "value": <string> }
 
 Implementation notes:
 - Full-string anchored (`^(?:pattern)$`) — a rule matches the WHOLE
   subject, never a substring.
-- "replacement" may reference capture groups via $1/$2/...
+- "replacement" may reference capture groups via $1/$2/...; a
+  non-string one (a YAML number or bool) is used as its string form.
 - Optional "diag" + "label": with them (consumer rules), each regex is
   validated first; an invalid rule records an ERROR naming the label and
   the regex, is skipped, and later rules are still tried — never a
@@ -575,8 +573,8 @@ Default "parentTarget" template when a caller supplies none — no
 escalation beyond the exact target.
 
 Interface:
-- Params (dict): { "target": <string>, "context": <root $> } — the
-  shape every "parentTarget" template receives.
+- Params (dict): the `{target, context}` shape every "parentTarget"
+  template receives; both unused.
 - Returns: nothing.
 
 <a id="crdkit.regexValid.internal"></a>
@@ -675,9 +673,8 @@ Implementation notes:
 - Writes ctx: —
 - Reads ctx: `ctx.diag`
 
-Computes the complete list of reserved (non-entry) keys: built-in crdkit
-keys (_value, _gen, _generated, match) plus every token annotation name
-that does NOT collide; colliding names are dropped with an ERROR.
+The reserved (non-entry) declaration keys: crdkit's own plus every
+non-colliding annotation name. See CONTRIBUTING "Token model".
 
 Interface:
 - Params (dict): { "tokenAnnotations": <list of strings>, "diag": <dict> }
@@ -701,12 +698,8 @@ Implementation notes:
 - Writes ctx: —
 - Reads ctx: `ctx.diag`
 
-Runs the target-escalation ladder against "def", selects one entry, then
-recursively substitutes "@ref@" markers throughout it. The engine
-behind both a real, named token and an arbitrary structure (resolved by
-the same rules without being registered in ctx.tokens). "fieldId" names the entry in cycle detection; diagnostics name "label". Memoized onto "def"
-itself under "_value", keyed by target, valid for one generation
-("_gen").
+Selects the entry of "def" for a target and substitutes its markers —
+for tokens and token-like structures. See CONTRIBUTING "Target escalation".
 
 Interface:
 - Params (dict): { "fieldId": <string>, "label": <string in
@@ -722,36 +715,11 @@ Interface:
   string leaf's markers resolved> }
 
 Implementation notes:
-- Resolution order:
-  1. exact-target `_value` cache hit — valid only when the declaration's
-     `_gen` equals "gen" (compared via `toString`, robust to int/int64/
-     float64 after a YAML round-trip); on a mismatch `_value` is reset
-     to an empty dict and `_gen` set to "gen" first.
-  2. dedicated attribute — a literal key (other than a reserved key)
-     equal to the target string exactly.
-  3. `match:` — regex rules tried once, against the exact target only
-     (never retried at an escalated rung).
-  4. walk `parentTargetTemplate` one rung at a time, checking a literal
-     key (or cache) at each rung. `match:` must be checked before any
-     cache-tier hit from the walk, or a broader cached rung could steal
-     precedence from a target-specific `match:` rule.
-  5. `default` fallback, checked directly, after the walk is
-     exhausted — regardless of taxonomy. Must run after the walk (not
-     before), since "def" can have both a `default` entry and a
-     taxonomy-reachable one, and the more specific value must win.
-  6. `_generated[<exact target>]` — values registered by
-     crdkit.token.underlay; lowest priority, so a consumer always wins,
-     even with its own `default`. Applies to the exact target only (never
-     to a rung) and is cached ONLY under `_value[<target>]`: rungs are
-     shared across targets, `_generated` is per target.
-  7. none of the above: the "no value found" ERROR.
-- Caching: the result is cached under the exact target always, and
-  under every rung walked only when the selected entry holds no marker
-  (a map/list: checked on its `toJson`) — a marker-free entry
-  substitutes to the same value for every target reaching that rung. A
-  marker-holding entry (`_generated` too) is cached under the exact
-  target only: its substitution depends on the target, so another
-  target re-walks the ladder.
+- Order, caching and generations: CONTRIBUTING "Target escalation",
+  "Resolution model". The result is memoized onto "def" itself
+  (`_value[<target>]`, stamped `_gen`).
+- "fieldId" names the entry in cycle detection; diagnostics name
+  "label".
 - A "def" that's a bare scalar (not a dict) has nowhere to attach a
   `_value` cache, so it's resolved fresh every call — cheap, since
   there's no ladder to walk.
@@ -805,8 +773,7 @@ Implementation notes:
 - Reads ctx: `ctx.diag`
 
 Checks the keys of one consumer token declaration against the keys in
-effect (crdkit.schema.declarationKeys.internal); part of the structural
-pass.
+effect (structural pass).
 
 Interface:
 - Params (dict): { "node": <checked node>, "value": <the declaration, a
@@ -982,9 +949,8 @@ Implementation notes:
 - Writes ctx: —
 - Reads ctx: `ctx.diag`
 
-Generates one rendering of a values schema's documentation: the JSON
-Schema, the HTML viewer or the Markdown reference. A library calls it
-once per format, from its own documentation templates.
+One format of a values schema's documentation: JSON Schema, HTML viewer
+or Markdown reference. See CONTRIBUTING "Schema documentation".
 
 Interface:
 - Params (dict): { "format": "json" | "html" | "md", "schemaText":
@@ -1102,9 +1068,8 @@ Implementation notes:
 - Writes ctx: —
 - Reads ctx: —
 
-Reads the closed declaration keys of a per-target JSON Schema node from
-the shared definition its declaration branch references (see
-crdkit.schema.declarationRef.internal).
+The closed declaration keys of a per-target JSON Schema node, read from
+the shared definition its declaration branch references.
 
 Interface:
 - Params (dict): { "node": <JSON Schema node>, "defs": <JSON Schema
@@ -1212,9 +1177,9 @@ values schema, for editors and the HTML viewer.
 
 Interface:
 - Params (dict): { "schemaText": <schema as YAML text>, "example":
-  <example values, optional>, "sections": <{<node path>: [<section>]}>,
-  optional>, "title": <root title, optional — default "Values">,
-  "diag": <dict> }
+  <example values, optional>, "sections": <{<node path>: [<section>]},
+  optional>, "title": <root title, optional — default "Values">, "id":
+  <root `$id`, optional>, "diag": <dict> }
 - Returns: the JSON Schema as pretty-printed JSON text; `{}` when the
   schema fails crdkit.schema.check (its ERRORs are recorded).
 
@@ -1274,9 +1239,8 @@ Implementation notes:
 - Writes ctx: —
 - Reads ctx: —
 
-Walks the schema and the values one key at a time, following switches
-and tracking the values path and the per-target state: the one walker
-behind both the node lookup and the value resolution.
+Walks schema and values one key at a time (switches followed, values
+path and per-target state tracked) for the node lookup and resolution.
 
 Interface:
 - Params (dict): { "node": <starting node>, "value": <starting value>,
@@ -1510,9 +1474,8 @@ Implementation notes:
 - Writes ctx: —
 - Reads ctx: —
 
-Derives the text position of every block-style key of a schema written
-as YAML. Helm's fromYaml decodes into Go maps, so a parsed schema has no
-key order; the text keeps it.
+The text position of every block-style key of a YAML schema (a parsed
+schema has no key order). See CONTRIBUTING "Schema documentation".
 
 Interface:
 - Params (dict): { "text": <schema as YAML text> }
@@ -1655,9 +1618,8 @@ Implementation notes:
 - Writes ctx: —
 - Reads ctx: `ctx.target`
 
-Returns a subtree of the values with every per-target value resolved
-for one target — for library code that maps whole subtrees into the
-model.
+A values subtree with every per-target value resolved for one target,
+for library code mapping whole subtrees into the model.
 
 Interface:
 - Params (dict): { "ctx": <ctx>, "schema": <root node>, "values":
@@ -1705,7 +1667,7 @@ Interface:
   value as written: a token declaration, a plain value or a string with
   markers>, "tokens": <bool, the node is per-target>, "path": <values
   path>, "target": <string>, "seen": <dict>, "out": <dict, written in
-  place> }
+  place>, "token": <token name, optional — resolved instead of "def"> }
 - Returns: nothing; sets out.value to the resolved value — for an
   `int` / `number` / `bool` node, a resolved string that passes the node's
   "parses as" check (crdkit.schema.scalarReason.internal) converted to
@@ -1918,9 +1880,8 @@ Implementation notes:
 - Writes ctx: —
 - Reads ctx: `ctx.target`
 
-Resolves one field's value for a target and checks it against the
-field's node — for library code that needs a value for a target other
-than the render's own.
+Resolves one field for a target and checks it against its node — for a
+value of a target other than the render's own.
 
 Interface:
 - Params (dict): { "ctx": <ctx>, "node": <the field's node, see
@@ -1961,9 +1922,8 @@ Implementation notes:
 - Writes ctx: —
 - Reads ctx: `ctx.diag`
 
-Value pass over (normalized) values: finds every per-target value and
-checks it for one target; with "out", also builds the copy of the values
-with every per-target value resolved.
+Value pass: checks every per-target value for one target; with "out",
+also builds the resolved copy. See CONTRIBUTING "Values schema".
 
 Interface:
 - Params (dict): { "ctx": <ctx>, "node": <checked node>, "value":
@@ -2000,9 +1960,8 @@ Implementation notes:
 - Writes ctx: —
 - Reads ctx: —
 
-Builds a switch case's example: the matching example entries wrapped in
-their ancestor keys, else the case's generated example with its `by` set,
-wrapped in the key labels.
+A switch case's example: the matching example entries in their ancestor
+keys, else the generated example with its `by` set, in the key labels.
 
 Interface:
 - Params (dict): { "node": <case definition>, "switch": <the
@@ -2073,11 +2032,15 @@ in the viewer's walk order, plus one record per switch.
 Interface:
 - Params (dict): { "json": <JSON Schema as a dict>, "out": <dict;
   "items" and "switches" lists are appended in place> }
-- Returns: nothing (mutating helper).
+- Returns: nothing (mutating helper). Appends to `out.items` one
+  `{path, label, parent, type, perTarget, required, shared, summary,
+  doc, sections, keywords: {default, pattern, enum, keysPattern},
+  declarationKeys, examples, example: {has, value, generated}, case:
+  {by, value}}` per tree row, to `out.switches` one `{path, by, values,
+  title, unless?}` per switch.
 
 Implementation notes:
-- Values come from the defines the viewer mirrors no longer:
-  crdkit.schema.jsonType.internal, jsonPerTarget.internal,
+- Values come from crdkit.schema.jsonType.internal, jsonPerTarget.internal,
   jsonDeclaration.internal, generatedExample.internal, mdDoc.internal,
   path.internal.
 - Items are appended in pre-order: a node before its children, a switch
@@ -2219,9 +2182,8 @@ Implementation notes:
 - Writes ctx: —
 - Reads ctx: —
 
-Standard labels computed from Helm's own context — not called
-automatically by crdkit.render; a specific library merges the result
-into its own `ctx.model.metadata.labels` from within its chain.
+Standard labels from Helm's context, for a library's chain to merge into
+`ctx.model.metadata.labels` (crdkit.render never adds them).
 
 Interface:
 - Params (dict): { "context": <root $> }
@@ -2272,10 +2234,8 @@ Implementation notes:
 - Writes ctx: —
 - Reads ctx: `ctx.diag`
 
-Recursively walks "value": a string is substituted via
-crdkit.substituteText.internal; a map/list is walked entry-by-entry
-(same recursion, one level down); any other scalar passes through
-unchanged.
+Substitutes every string leaf of "value" (maps and lists walked, other
+scalars unchanged).
 
 Interface:
 - Params (dict): { "value": <any>, "tokens": <live tokens map>,
@@ -2487,9 +2447,8 @@ Implementation notes:
 - Writes ctx: —
 - Reads ctx: —
 
-Resolves a REAL token and coerces the result to text (see
-crdkit.stringify.internal) — for use outside the usual "@NAME@" marker
-mechanism, when the caller wants the value directly.
+Resolves a real token as text, for a caller that wants the value
+outside a marker. See CONTRIBUTING "Resolution model".
 
 Interface:
 - Params (list): [ctx, name, target?] — same as crdkit.token.value
@@ -2511,10 +2470,8 @@ Implementation notes:
 - Writes ctx: —
 - Reads ctx: —
 
-Registers a GENERATED value: the lowest-priority source for a token,
-consulted only after every consumer-declared source (exact target,
-match, parent walk, default) found nothing. Creates the token if it does
-not exist.
+Registers a generated value, a token's lowest-priority source; creates
+the token if missing. See CONTRIBUTING "Target escalation".
 
 Interface:
 - Params (list): [ctx, name, value, annotations?, target?]
@@ -2612,9 +2569,8 @@ Implementation notes:
 - Writes ctx: —
 - Reads ctx: —
 
-Resolves an arbitrary structure using the exact same target- escalation
-rules as a real token, without requiring it to be registered under a
-name in ctx.tokens.
+Resolves an arbitrary structure by the token rules, without registering
+it in ctx.tokens.
 
 Interface:
 - Params (list): [ctx, fieldId, def, target?]
@@ -2672,9 +2628,8 @@ Implementation notes:
 - Writes ctx: —
 - Reads ctx: `ctx.diag`
 
-Merges system/default/user token declarations; applies collision,
-internal-key and naming-convention diagnostics. Output becomes
-ctx.tokens.
+Merges system, default and consumer token declarations into ctx.tokens,
+with their diagnostics. See CONTRIBUTING "Token model".
 
 Interface:
 - Params (dict): { "tokens": <raw user tokens, may be nil>, "diag":
@@ -2735,9 +2690,8 @@ Implementation notes:
 - Writes ctx: —
 - Reads ctx: —
 
-Text substitution without the final "@AT@" pass: the final render pass
-scans the result for unresolved markers before "@AT@" becomes "@" (an
-escaped `@AT@example.com@` is never reported).
+Text substitution without the "@AT@" pass, so the final render pass can
+scan for typos first. See CONTRIBUTING "Render and the integration chain".
 
 Interface:
 - Params (list): [ctx, text, target?] — same as the public substitute.

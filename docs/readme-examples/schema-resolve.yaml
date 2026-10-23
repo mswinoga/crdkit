@@ -1,0 +1,16 @@
+target: prod-01
+ladder: {qa-01: qa, prod-01: prod, qa: NONPROD, prod: ALL, NONPROD: ALL}
+tokens:
+  START: "600"
+schema:
+  type: map
+  properties:
+    infra:
+      type: map
+      properties:
+        maxInstances: {type: int}
+        startTimeout: {type: int}
+input:
+  infra:
+    maxInstances: {ALL: 2, prod: 6}
+    startTimeout: "@START@"

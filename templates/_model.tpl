@@ -30,9 +30,8 @@ Implementation notes:
 {{/*
 crdkit.dictMerge (public)
 
-Walks a multi-level path from $model, creating an empty dict at each
-missing level, then merges "value" into the dict at the end of the path
-(incoming keys win on collision).
+Merges "value" into the dict at a path of $model, creating missing
+levels as empty dicts (incoming keys win on collision).
 
 Interface:
 - Params (list): [model, key1, ..., keyN, value] (N >= 0)
