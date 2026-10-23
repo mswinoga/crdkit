@@ -3,24 +3,59 @@ Internal helpers of templates/_tokens.tpl — see its file-level doc
 comment for the overview and dependency graph.
 */}}
 
-{{/*
-crdkit.markerPattern.internal (internal)
 
-The one definition of a "@NAME@" marker; every marker match in crdkit
-(substitution, unresolved-marker scan, schema checks, JSON Schema
-`markers` pattern) uses it.
+{{/*
+crdkit.annotationKey.internal (internal)
+
+Reports whether a key names a declared token annotation.
 
 Interface:
-- Params: none (pass an empty dict).
-- Returns: the regex as plain text — `@[A-Za-z0-9_.]+@`.
+- Params (dict): { "ctx": <ctx>, "key": <string> }
+- Returns: "true" when the key is a declared annotation, "" otherwise.
 
 Implementation notes:
-- "." is part of a name, so a dotted name (`@A.b@`) and a library's
-  relative form (`@.x@`) are markers too. Side effect: text like
-  `@example.com@` is a marker — escape it with "@AT@".
+- The annotation names are ctx.reservedKeys minus the built-in reserved
+  keys; a colliding declaration was dropped at merge time, so it is not
+  an annotation here either.
 */}}
-{{- define "crdkit.markerPattern.internal" -}}
-@[A-Za-z0-9_.]+@
+{{- define "crdkit.annotationKey.internal" -}}
+{{- $key := .key -}}
+{{- if not (has $key (list "_value" "_gen" "_generated" "match")) -}}
+  {{- if has $key (.ctx.reservedKeys | default (list)) -}}true{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+crdkit.markersWalk.internal (internal)
+
+Collects marker names from a value's string leaves into
+`state.names`/`state.seen`. Invoked by crdkit.markers.
+
+Interface:
+- Params (dict): { "value": <any structure>, "state": {"names": <list>,
+  "seen": <dict>} }
+- Returns: "" (mutates `state`).
+*/}}
+{{- define "crdkit.markersWalk.internal" -}}
+{{- $state := .state -}}
+{{- $v := .value -}}
+{{- if kindIs "string" $v -}}
+  {{- range $m := regexFindAll (include "crdkit.markerPattern" (dict)) $v -1 -}}
+    {{- $name := trimSuffix "@" (trimPrefix "@" $m) -}}
+    {{- if and (ne $name "AT") (not (hasKey $state.seen $name)) -}}
+      {{- $_ := set $state.seen $name true -}}
+      {{- $_ := set $state "names" (append $state.names $name) -}}
+    {{- end -}}
+  {{- end -}}
+{{- else if kindIs "map" $v -}}
+  {{- range $k := keys $v | sortAlpha -}}
+    {{- include "crdkit.markersWalk.internal" (dict "value" (index $v $k) "state" $state) -}}
+  {{- end -}}
+{{- else if kindIs "slice" $v -}}
+  {{- range $e := $v -}}
+    {{- include "crdkit.markersWalk.internal" (dict "value" $e "state" $state) -}}
+  {{- end -}}
+{{- end -}}
 {{- end -}}
 
 {{/*
@@ -305,7 +340,7 @@ value: {{ index $cache $target | toYaml | nindent 2 }}
     {{- if or (kindIs "map" $rawValue) (kindIs "slice" $rawValue) -}}
       {{- $rawText = toJson $rawValue -}}
     {{- end -}}
-    {{- $hasMarker := and (kindIs "string" $rawText) (regexMatch (include "crdkit.markerPattern.internal" (dict)) $rawText) -}}
+    {{- $hasMarker := and (kindIs "string" $rawText) (regexMatch (include "crdkit.markerPattern" (dict)) $rawText) -}}
     {{/* rungs are shared across targets: a generated value (per target) or a marker-holding entry (substituted per target) must not leak into rung caches. */}}
     {{- if or $fromGenerated $hasMarker -}}
       {{- $_ := set $cache $target $resolvedValue -}}
@@ -413,7 +448,7 @@ Implementation notes:
 {{- $resolving := .resolving -}}
 {{- $reservedKeys := .reservedKeys -}}
 {{- $gen := .gen -}}
-{{- $markers := regexFindAll (include "crdkit.markerPattern.internal" (dict)) $text -1 -}}
+{{- $markers := regexFindAll (include "crdkit.markerPattern" (dict)) $text -1 -}}
 {{- range $marker := $markers -}}
   {{- $refName := trimSuffix "@" (trimPrefix "@" $marker) -}}
   {{- if and (ne $refName "AT") (hasKey $tokens $refName) -}}
@@ -494,7 +529,7 @@ Implementation notes:
   {{- $target = index . 2 -}}
 {{- end -}}
 {{- $tokens := $ctx.tokens -}}
-{{- $markers := regexFindAll (include "crdkit.markerPattern.internal" (dict)) $text -1 -}}
+{{- $markers := regexFindAll (include "crdkit.markerPattern" (dict)) $text -1 -}}
 {{- range $marker := $markers -}}
   {{- $name := trimSuffix "@" (trimPrefix "@" $marker) -}}
   {{- if and (ne $name "AT") (hasKey $tokens $name) -}}

@@ -24,11 +24,7 @@ text: |
 {{- if eq $d.format "json" }}
 json: {{ $text | fromJson | toJson }}
 {{- end }}
-{{- range $level := list "error" "warning" "info" }}
-{{- range index $diag (printf "%ss" $level) }}
-# {{ upper $level }}: {{ . }}
-{{- end }}
-{{- end }}
+{{ include "crdkit.diag.lines" (dict "diag" $diag) }}
 {{- end -}}
 {{- end -}}
 {{ include "test.withDiagnostics" (include "stub.docs" .) }}

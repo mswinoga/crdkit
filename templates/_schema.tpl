@@ -351,7 +351,7 @@ Implementation notes:
 {{- $node := .node | default dict -}}
 {{- $out := dict "value" .def -}}
 {{- $tokens := include "crdkit.schema.perTarget.internal" (dict "node" $node "inTokens" false) -}}
-{{- if or $tokens (and (kindIs "string" .def) (regexMatch (include "crdkit.markerPattern.internal" (dict)) .def)) -}}
+{{- if or $tokens (and (kindIs "string" .def) (regexMatch (include "crdkit.markerPattern" (dict)) .def)) -}}
   {{- include "crdkit.schema.resolveAndCheck.internal" (dict "ctx" $ctx "node" $node "def" .def "tokens" (ne $tokens "") "path" .path "target" (.target | default $ctx.target) "seen" (ternary .seen (dict) (kindIs "map" .seen)) "out" $out) -}}
 {{- end -}}
 value: {{ $out.value | toYaml | nindent 2 }}
@@ -572,7 +572,7 @@ Implementation notes:
       {{- $_ := set $sections $sectionPath $valid -}}
     {{- end -}}
   {{- end -}}
-  {{- $acc := dict "definitions" (dict "tokenDeclaration" (dict "type" "object" "minProperties" 1) "markers" (dict "type" "string" "pattern" (include "crdkit.markerPattern.internal" (dict)))) "paths" (dict) -}}
+  {{- $acc := dict "definitions" (dict "tokenDeclaration" (dict "type" "object" "minProperties" 1) "markers" (dict "type" "string" "pattern" (include "crdkit.markerPattern" (dict)))) "paths" (dict) -}}
   {{- $out := dict -}}
   {{- include "crdkit.schema.jsonNode.internal" (dict "node" $schema "schemaPath" "" "nodePath" "" "inTokens" false "instances" (ternary (list $example) (list) (kindIs "map" $example)) "order" $order "sections" $sections "acc" $acc "out" $out) -}}
   {{- range $sectionPath := keys $sections | sortAlpha -}}

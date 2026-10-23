@@ -451,7 +451,7 @@ Implementation notes:
     {{- include $shapeDiag (list $diag (printf "'%s'%s must be a scalar%s" $path $suffix $tail)) -}}
     {{- $_ := set $out "keep" false -}}
   {{- else -}}
-    {{- $hasMarkers := and (not $resolved) (kindIs "string" $value) (regexMatch (include "crdkit.markerPattern.internal" (dict)) $value) -}}
+    {{- $hasMarkers := and (not $resolved) (kindIs "string" $value) (regexMatch (include "crdkit.markerPattern" (dict)) $value) -}}
     {{- if and $hasMarkers (eq (toString $node.static) "true") -}}
       {{- include "crdkit.diag.error" (list $diag (printf "'%s' must not contain '@NAME@' markers — ignored" $path)) -}}
       {{- $_ := set $out "keep" false -}}
@@ -575,7 +575,7 @@ Implementation notes:
   {{- $value = include "crdkit.tokens.substitute" (list $ctx .def $target) -}}
 {{- end -}}
 {{- $_ := set .out "value" $value -}}
-{{- $unresolved := and (kindIs "string" $value) (regexMatch (include "crdkit.markerPattern.internal" (dict)) $value) -}}
+{{- $unresolved := and (kindIs "string" $value) (regexMatch (include "crdkit.markerPattern" (dict)) $value) -}}
 {{- $type := $node.type | default "" | toString -}}
 {{/* converted on every call, not only the checked one: a repeated call (check skipped via "seen") must return the same value. */}}
 {{- if and (kindIs "string" $value) (not $unresolved) (has $type (list "int" "number" "bool")) -}}
@@ -651,7 +651,7 @@ Implementation notes:
   {{- end -}}
 {{- else if eq $shape "any" -}}
   {{- if $collect -}}{{- $_ := set $out "value" $value -}}{{- end -}}
-{{- else if or $tokens (and (eq $shape "scalar") (kindIs "string" $value) (regexMatch (include "crdkit.markerPattern.internal" (dict)) $value)) -}}
+{{- else if or $tokens (and (eq $shape "scalar") (kindIs "string" $value) (regexMatch (include "crdkit.markerPattern" (dict)) $value)) -}}
   {{- $leaf := dict -}}
   {{- $errorsBefore := len .ctx.diag.errors -}}
   {{- include "crdkit.schema.resolveAndCheck.internal" (merge (dict "node" $node "def" $value "tokens" (ne $tokens "") "path" $path "out" $leaf) $common) -}}

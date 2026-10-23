@@ -169,6 +169,26 @@ Interface:
     {{- $args := dict "subject" $op.subject "rules" $op.matchRules -}}
     {{- if $op.consumer -}}{{- $_ := set $args "diag" $ctx.diag -}}{{- $_ := set $args "label" "rules" -}}{{- end -}}
     {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (include "crdkit.matchRules" $args | fromYaml)) -}}
+  {{- else if hasKey $op "annotate" -}}
+    {{- include "crdkit.token.annotate" (list $ctx $op.annotate ($op.annotations | default dict)) -}}
+  {{- else if hasKey $op "info" -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (include "crdkit.token.info" (list $ctx $op.info) | fromYaml)) -}}
+  {{- else if hasKey $op "names" -}}
+    {{- $a := $op.names | default dict -}}
+    {{- $args := dict "ctx" $ctx -}}
+    {{- if hasKey $a "annotation" -}}{{- $_ := set $args "annotation" $a.annotation -}}{{- end -}}
+    {{- if hasKey $a "equals" -}}{{- $_ := set $args "equals" $a.equals -}}{{- end -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (include "crdkit.token.names" $args | fromYaml).value) -}}
+  {{- else if hasKey $op "markers" -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (include "crdkit.markers" (dict "value" $op.markers) | fromYaml).value) -}}
+  {{- else if hasKey $op "markerPattern" -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (include "crdkit.markerPattern" ($op.markerPattern | default dict))) -}}
+  {{- else if hasKey $op "diagLines" -}}
+    {{- $args := dict "diag" $ctx.diag -}}
+    {{- if $op.diagLines -}}{{- $_ := set $args "levels" $op.diagLines -}}{{- end -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (include "crdkit.diag.lines" $args)) -}}
+  {{- else if hasKey $op "diagCount" -}}
+    {{- include "stub.write" (dict "model" $ctx.model "at" $op.at "value" (include "crdkit.diag.count" (dict "diag" $ctx.diag "level" $op.diagCount))) -}}
   {{- else if hasKey $op "diag" -}}
     {{- include (printf "crdkit.diag.%s" $op.diag) (list $ctx.diag $op.msg) -}}
   {{- else if hasKey $op "state" -}}

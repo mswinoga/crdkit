@@ -20,7 +20,7 @@
 #                                regexReplaceAll|regexReplaceAllLiteral|
 #                                regexSplit whose pattern is not a string
 #                                literal, a `$<name>Re` local or
-#                                crdkit.markerPattern.internal
+#                                crdkit.markerPattern
 #
 # Output: `FAIL <rule> <file>:<line>: <text>`,
 # `PENDING (<reason>) <rule> <file>:<line>: <text>`,
@@ -109,7 +109,7 @@ find "$dir" -type f | LC_ALL=C sort | {
   function allowedPattern(s) {
     if (s ~ /^"/ || s ~ /^`/) return 1
     if (s ~ /^\$[A-Za-z0-9_]*Re([^A-Za-z0-9_]|$)/) return 1
-    if (s ~ /^\([[:space:]]*include[[:space:]]+"crdkit\.markerPattern\.internal"/) return 1
+    if (s ~ /^\([[:space:]]*include[[:space:]]+"crdkit\.markerPattern"/) return 1
     return 0
   }
 

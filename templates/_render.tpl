@@ -92,7 +92,7 @@ Implementation notes:
 {{- $substitutedText := include "crdkit.tokens.substituteMarkers.internal" (list $ctx ($model | toYaml) $target) -}}
 
 {{/* leftover "@word@" after substitution = possible typo; a genuine cycle is already reported elsewhere with a more specific message. Scanned before "@AT@" becomes "@", so an escaped marker is never reported. */}}
-{{- $unresolvedMarkers := regexFindAll (include "crdkit.markerPattern.internal" (dict)) $substitutedText -1 -}}
+{{- $unresolvedMarkers := regexFindAll (include "crdkit.markerPattern" (dict)) $substitutedText -1 -}}
 {{- $substitutedModel := $substitutedText | replace "@AT@" "@" | fromYaml -}}
 {{- range $marker := $unresolvedMarkers -}}
   {{- $name := trimSuffix "@" (trimPrefix "@" $marker) -}}
@@ -102,5 +102,8 @@ Implementation notes:
 {{- end -}}
 
 {{ $substitutedModel | toYaml }}
-{{- include "crdkit.renderDiagnostics.internal" (dict "diag" $diag) }}
+{{- $diagText := include "crdkit.diag.lines" (dict "diag" $diag) }}
+{{- if $diagText }}
+{{ $diagText }}
+{{- end }}
 {{- end -}}

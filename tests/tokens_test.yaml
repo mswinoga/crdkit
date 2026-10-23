@@ -1003,6 +1003,7 @@ tests:
   - it: "a second crdkit.token.add call with annotations overwrites existing annotation keys and adds new ones"
     set:
       target: prod-01
+      tokenAnnotations: [exposure, owner]
       tokenOps:
         - name: DERIVED_VAR
           value: "prod-value"
