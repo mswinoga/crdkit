@@ -1,15 +1,27 @@
 #!/bin/sh
-# lint.sh — text lint for Helm library templates (the Helm/Go template
-# facts of the workspace CLAUDE.md). Run by crdkit `make test` on its own
-# templates/ and by mdeploy `tests/run.sh lint` on mdeploy's.
+# lint.sh — template lint: text rules (the Helm/Go template facts of the
+# workspace CLAUDE.md) and the extractor rules of scripts/extract.py.
+# Run by crdkit `make test` on its own templates/ and by mdeploy
+# `tests/run.sh lint` on mdeploy's.
 #
-# Usage: lint.sh [--fail-define <define>] [--pending <file>] <templates dir>
-#   --fail-define  the one define allowed to call `fail` (default: none)
-#   --pending      lines `<rule> <file> <reason>`: a hit of <rule> in <file>
-#                  is reported PENDING instead of FAIL; an entry with no
-#                  hit is reported FIXED? and fails (a fix must delete it)
+# Usage: lint.sh [--fail-define <define>] [--pending <file>]
+#               [--regex-check-define <define>] [--library]
+#               [--scopes <list>] [--internal-suffix] [--peer <templates dir>]...
+#               <templates dir>
+#   --fail-define          the one define allowed to call `fail` (default: none)
+#   --pending              lines `<rule> <file> <reason>`: a hit of <rule> in
+#                          <file> is reported PENDING instead of FAIL; an entry
+#                          with no hit is reported FIXED? and fails (a fix must
+#                          delete it)
+#   --regex-check-define   the one define allowed a variable regex pattern (the
+#                          consumer-pattern validity probe)
+#   --library              turn on the boundary rules — for a library's
+#                          templates, which own no crdkit internals
+#   --scopes, --internal-suffix, --peer
+#                          forwarded to the extractor (see scripts/extract.py)
 #
-# Rules (every regular file under the dir; `{{/* … */}}` comments skipped):
+# Text rules (every regular file under the dir; `{{/* … */}}` comments
+# skipped):
 #   accumulator-default-dict     .diag/.seen/.acc/.out/.memo piped to
 #                                `default dict` (an empty dict is falsy)
 #   fail-outside-render          `fail` outside --fail-define
@@ -23,25 +35,48 @@
 #                                crdkit.markerPattern; allowed inside
 #                                --regex-check-define (the validity probe)
 #
+# Boundary rules (--library only):
+#   boundary-ctx-tokens          `ctx.tokens` (use token.annotate|info|names)
+#   boundary-token-keys          the reserved keys `"_value"`, `"_gen"`,
+#                                `"_generated"`
+#   boundary-diag-lists          `diag.errors|warnings|infos` (use
+#                                crdkit.diag.lines|count)
+#   boundary-marker-regex        the marker character class `[A-Za-z0-9_.]`
+#                                (use crdkit.markerPattern)
+#   boundary-internal-call       include/template of a `crdkit.*.internal`
+#                                define
+#
+# Extractor rules (`<script dir>/extract.py lint`, spec §8.2): define
+# naming, ctx writes of text/mutating defines, dead defines, doc-comment
+# define names; needs `python3` (missing → exit 2).
+#
 # Output: `FAIL <rule> <file>:<line>: <text>`,
 # `PENDING (<reason>) <rule> <file>:<line>: <text>`,
 # `FIXED? (<reason>) <rule> <file>`, then
-# `lint.sh: <n> hits, <f> failed, <p> pending`.
+# `lint.sh: <n> hits, <f> failed, <p> pending` (both groups counted).
 # Exit: 0 iff nothing failed; 1 on a failure; 2 on a usage error.
 
 usage() {
-  echo "usage: lint.sh [--fail-define <define>] [--pending <file>] [--regex-check-define <define>] <templates dir>" >&2
+  echo "usage: lint.sh [--fail-define <define>] [--pending <file>] [--regex-check-define <define>]" >&2
+  echo "               [--library] [--scopes <list>] [--internal-suffix] [--peer <templates dir>]..." >&2
+  echo "               <templates dir>" >&2
   exit 2
 }
 
 fail_define=
 pending=
 regex_define=
+library=0
+extras=
 while [ $# -gt 0 ]; do
   case $1 in
     --fail-define) [ $# -ge 2 ] || usage; fail_define=$2; shift 2 ;;
     --pending) [ $# -ge 2 ] || usage; pending=$2; shift 2 ;;
     --regex-check-define) [ $# -ge 2 ] || usage; regex_define=$2; shift 2 ;;
+    --library) library=1; shift ;;
+    --scopes) [ $# -ge 2 ] || usage; extras="$extras --scopes $2"; shift 2 ;;
+    --internal-suffix) extras="$extras --internal-suffix"; shift ;;
+    --peer) [ $# -ge 2 ] || usage; extras="$extras --peer $2"; shift 2 ;;
     -*) usage ;;
     *) break ;;
   esac
@@ -53,17 +88,34 @@ if [ -n "$pending" ] && [ ! -f "$pending" ]; then
   echo "lint.sh: no such pending file: $pending" >&2
   exit 2
 fi
+command -v python3 >/dev/null 2>&1 || {
+  echo "lint.sh: python3 not found — the extractor rules need it" >&2
+  exit 2
+}
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/lint.XXXXXX") || exit 2
+trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 
 # The pending file is read first (as awk's first input), "" when absent.
+# The trailing count line is internal: this script prints the combined one.
 find "$dir" -type f | LC_ALL=C sort | {
   set --
   while IFS= read -r f; do set -- "$@" "$f"; done
-  awk -v failDefine="$fail_define" -v pendingFile="$pending" -v regexDefine="$regex_define" '
+  awk -v failDefine="$fail_define" -v pendingFile="$pending" -v regexDefine="$regex_define" \
+      -v library="$library" '
   BEGIN {
+    split("accumulator-default-dict fail-outside-render unguarded-trailing-index non-must-regex-user-pattern", r, " ")
+    for (i in r) textrule[r[i]] = 1
+    if (library) {
+      split("boundary-ctx-tokens boundary-token-keys boundary-diag-lists boundary-marker-regex boundary-internal-call", b, " ")
+      for (i in b) textrule[b[i]] = 1
+    }
     if (pendingFile != "") {
       while ((getline l < pendingFile) > 0) {
         if (l ~ /^[[:space:]]*(#|$)/) continue
         n = split(l, w, /[[:space:]]+/)
+        if (!(w[1] in textrule)) continue
         key = w[1] " " w[2]
         reason = l
         sub(/^[[:space:]]*[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+/, "", reason)
@@ -150,6 +202,19 @@ find "$dir" -type f | LC_ALL=C sort | {
       if (!allowedPattern(rest)) { hit("non-must-regex-user-pattern", text); break }
     }
 
+    if (library) {
+      if (code ~ /(^|[^A-Za-z0-9_.])ctx\.tokens([^A-Za-z0-9_]|$)/)
+        hit("boundary-ctx-tokens", text)
+      if (code ~ /"_(value|gen|generated)"/)
+        hit("boundary-token-keys", text)
+      if (code ~ /(^|[^A-Za-z0-9_.])diag\.(errors|warnings|infos)([^A-Za-z0-9_]|$)/)
+        hit("boundary-diag-lists", text)
+      if (index(code, "[A-Za-z0-9_.]") > 0)
+        hit("boundary-marker-regex", text)
+      if (code ~ /(include|template)[[:space:]]+"crdkit\.[A-Za-z0-9_.]*\.internal"/)
+        hit("boundary-internal-call", text)
+    }
+
     if (code ~ /[^[:space:]]/) prev = code
   }
 
@@ -162,8 +227,29 @@ find "$dir" -type f | LC_ALL=C sort | {
         printf "FIXED? (%s) %s %s\n", pend[key], k[1], k[2]
       }
     }
-    printf "lint.sh: %d hits, %d failed, %d pending\n", hits, failed, pendingHits
+    printf "text-lint: %d hits, %d failed, %d pending\n", hits, failed, pendingHits
     exit (failed > 0 ? 1 : 0)
   }
   ' "$@"
+} > "$tmp/text"
+
+python3 -I "$script_dir/extract.py" lint $extras --pending "$pending" "$dir" > "$tmp/extract"
+extract_rc=$?
+
+counts() { # counts <file> <tool> -> "<hits> <failed> <pending>"
+  sed -n "s/^$2: \([0-9][0-9]*\) hits, \([0-9][0-9]*\) failed, \([0-9][0-9]*\) pending$/\1 \2 \3/p" "$1" | tail -1
 }
+t=$(counts "$tmp/text" text-lint)
+e=$(counts "$tmp/extract" extract.py)
+if [ -z "$t" ] || [ -z "$e" ]; then
+  echo "lint.sh: a lint group produced no summary" >&2
+  cat "$tmp/text" "$tmp/extract" >&2
+  exit 2
+fi
+# shellcheck disable=SC2086
+set -- $t $e
+grep -v '^text-lint: ' "$tmp/text"
+grep -v '^extract.py: ' "$tmp/extract"
+printf 'lint.sh: %d hits, %d failed, %d pending\n' $(($1 + $4)) $(($2 + $5)) $(($3 + $6))
+[ "$extract_rc" -le 1 ] || exit 2
+[ $(($2 + $5)) -eq 0 ]

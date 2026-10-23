@@ -352,7 +352,8 @@ Self-checks a schema once per distinct schema and render.
 
 Interface:
 - Params (dict): { "ctx": <ctx>, "schema": <root node> }
-- Returns: `true` or "" like crdkit.schema.check.
+- Returns: `true` or "" like crdkit.schema.check (writes the
+  `ctx.schemaChecks` memo).
 
 Implementation notes:
 - Keyed by `sha256sum (toJson schema)` in `ctx.schemaChecks`, created by
@@ -468,7 +469,7 @@ Implementation notes:
 {{- end -}}
 
 {{/*
-crdkit.schema.switchCase.internal
+crdkit.schema.switchCase.internal (internal)
 
 The case a switch selects for a map value, reduced on an `unless` hit.
 

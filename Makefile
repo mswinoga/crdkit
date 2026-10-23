@@ -7,4 +7,5 @@ deps:
 # Framework suites on tests/stub, text lint.
 test: deps
 	helm unittest tests/stub -f '../suites/*_test.yaml'
-	scripts/lint.sh --regex-check-define crdkit.regexValid.internal --pending tests/lint.pending templates
+	scripts/lint.sh --regex-check-define crdkit.regexValid.internal --pending tests/lint.pending \
+		--scopes public,internal --internal-suffix templates

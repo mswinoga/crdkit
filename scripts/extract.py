@@ -92,7 +92,7 @@ def returns_of(doc):
         return "yaml", []
     text = " ".join(m.group(2).split())
     kind = "nothing" if re.match(r'(nothing|""|`""`)', text) else "text"
-    declared = sorted({slot(s.split(".")) for s in CTX_DOC.findall(text)}) if kind == "nothing" else []
+    declared = sorted({slot(s.split(".")) for s in CTX_DOC.findall(text)})
     return kind, declared
 
 
@@ -109,10 +109,12 @@ def parse_file(path, rel):
     for i, m in enumerate(starts):
         end = starts[i + 1].start() if i + 1 < len(starts) else len(code)
         # Doc comment = the comment closing right before this define.
-        doc = next((c.group(0) for c in reversed(comments)
-                    if c.end() <= m.start() and not code[c.end():m.start()].strip()), "")
-        doc = re.sub(r'^\{\{-?\s*/\*\s*\n?|\s*\*/\s*-?\}\}$', "", doc)
+        doc_span = next((c for c in reversed(comments)
+                         if c.end() <= m.start() and not code[c.end():m.start()].strip()), None)
+        doc = re.sub(r'^\{\{-?\s*/\*\s*\n?|\s*\*/\s*-?\}\}$', "", doc_span.group(0) if doc_span else "")
         lines = doc.splitlines()
+        lead = re.match(r'^\{\{-?\s*/\*\s*\n?', raw[doc_span.start():]) if doc_span else None
+        doc_line = line_of(doc_span.start()) + (lead.group(0).count("\n") if lead else 0) if doc_span else line_of(m.start())
         hm = HEADER.match(lines[0]) if lines else None
         scope = hm.group(2) if hm and hm.group(1) == m.group(1) else ""
         body = "\n".join(lines[1:] if hm else lines).strip()
@@ -120,7 +122,7 @@ def parse_file(path, rel):
         returns, declared = returns_of(body)
         defines.append({
             "name": m.group(1), "file": rel, "line": line_of(m.start()),
-            "scope": scope, "summary": summary, "doc": body,
+            "scope": scope, "summary": summary, "doc": body, "docLine": doc_line,
             "returns": returns, "declared": declared,
             "_span": (m.end(), end),
         })
@@ -148,6 +150,7 @@ class Scope:
 
     def __init__(self):
         self.alias = {"$ctx": ["ctx"], "$diag": ["ctx", "diag"]}
+        self.local = set()  # aliases bound to a ctx the body builds itself
         self.producer = {}
         self.params = {}  # variable -> key of the define's own argument it holds ("*", "0", "<dict key>")
 
@@ -163,13 +166,11 @@ class Scope:
         rhs = rhs.strip()
         if rhs == "." and var == "$ctx":
             self.alias[var] = ["ctx"]
+            self.local.discard(var)
             return
         key = self.param_key(rhs)
         if key is not None:
             self.params[var] = key
-            if not EXPR_RE.search(rhs):
-                # Bound from the define's own argument, not from a ctx slot.
-                self.alias.pop(var, None)
         else:
             self.params.pop(var, None)
         m = re.fullmatch(EXPR, rhs.split("|")[0].strip())
@@ -177,20 +178,30 @@ class Scope:
         d = DIG.search(rhs) if rhs.startswith("dig") else None
         if m and self.path(m.group(0)):
             self.alias[var] = self.path(m.group(0))
+            self.local.discard(var)
         elif g and self.path(g.group(1)):
             self.alias[var] = self.path(g.group(1)) + [g.group(2) or "*"]
+            self.local.discard(var)
         elif d and self.path(d.group(2)):
             self.alias[var] = self.path(d.group(2)) + re.findall(r'"([^"]+)"', d.group(1))
+            self.local.discard(var)
         elif includes:
             self.producer[var] = includes[:1]
+            self.alias.pop(var, None)
+            self.local.discard(var)
         else:
             # `$input = $fields.input`: inherit the producer of the source variable.
             src = [self.producer[v] for v in re.findall(r'\$[A-Za-z_]\w*', rhs) if v in self.producer]
             if src:
                 self.producer[var] = src[0]
-            elif var != "$diag":  # `$diag` is the diagnostics accumulator wherever it is built
-                self.alias.pop(var, None)
+            else:
                 self.producer.pop(var, None)
+            if var == "$ctx" and key is None:
+                # A ctx built in the body (`$ctx := dict …`) is no ctx slot.
+                self.local.add(var)
+            else:
+                self.alias.pop(var, None)
+                self.local.discard(var)
 
     def param_key(self, expr):
         """Which part of the define's argument an expression reaches: `.out` -> out, `index . 0` -> 0."""
@@ -279,7 +290,7 @@ def analyze(d, body, base, line_of, names):
     """Walk one define's actions in order: calls with their args, refs, writes, reads, feeds."""
     sc = Scope()
     calls, writes, reads, feeds = [], set(), set(), []
-    mutated = set()
+    mutated, local_writes = set(), set()
     for a in ACTION.finditer(body):
         text = a.group(1)
         line = line_of(base + a.start())
@@ -315,6 +326,8 @@ def analyze(d, body, base, line_of, names):
             p = sc.path(m.group(1))
             if p:
                 writes.add(slot(p + ([m.group(2)] if m.group(2) else [])))
+                if m.group(1) in sc.local:
+                    local_writes.add(slot(p + ([m.group(2)] if m.group(2) else [])))
             else:
                 k = sc.param_key(m.group(1))
                 if k is not None:
@@ -326,6 +339,7 @@ def analyze(d, body, base, line_of, names):
             sc.assign(am.group(1), am.group(2), [n for s in sites for n in s[2]])
     reads.discard("ctx")
     d["writes"] = sorted(writes)
+    d["localWrites"] = sorted(local_writes)
     d["mutatesArgs"] = sorted(mutated)
     d["reads"] = sorted(reads - writes)
     d["feeds"] = sorted((dict(t) for t in {tuple(sorted(f.items())) for f in feeds}),
@@ -340,20 +354,25 @@ def chart_templates(chart):
     return chart_meta(chart), [(p,) + parse_file(p, str(p.relative_to(tdir))) for p in sorted(tdir.rglob("*.tpl"))]
 
 
+def analyze_chart(parsed):
+    """(defines, call edges) of parsed template files (see chart_templates)."""
+    defines = [d for _, _, ds, _ in parsed for d in ds]
+    names = {d["name"] for d in defines}
+    calls = []
+    for _, code, ds, line_of in parsed:
+        for d in ds:
+            s, e = d.pop("_span")
+            calls += analyze(d, code[s:e], s, line_of, names)
+    return defines, calls
+
+
 def graph(argv):
     if len(argv) != 2:
         return usage("graph takes <chart dir> <out.js>")
     chart_dir, out = argv
     chart = Path(chart_dir)
     meta, parsed = chart_templates(chart)
-    defines = [d for _, _, ds, _ in parsed for d in ds]
-    names = {d["name"] for d in defines}
-
-    calls = []
-    for _, code, ds, line_of in parsed:
-        for d in ds:
-            s, e = d.pop("_span")
-            calls += analyze(d, code[s:e], s, line_of, names)
+    defines, calls = analyze_chart(parsed)
 
     # One edge per (from, to, kind); keep every call-site line and union the args.
     merged = {}
@@ -386,9 +405,166 @@ def graph(argv):
           f"{len(merged)} edges {kinds}", file=sys.stderr)
 
 
+LINT_RULES = ("define-naming", "output-writes-ctx", "mutator-undeclared-write",
+              "dead-define", "doc-unknown-define")
+
+
+def read_pending(path):
+    """({(rule, file): reason}, [keys in file order]) from a lint.pending file."""
+    pending, order = {}, []
+    if not path:
+        return pending, order
+    for line in Path(path).read_text().splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        parts = line.split(None, 2)
+        if len(parts) < 2:
+            continue
+        key = (parts[0], parts[1])
+        pending[key] = parts[2] if len(parts) > 2 else ""
+        order.append(key)
+    return pending, order
+
+
+def name_mentions(doc, prefixes):
+    """`<prefix>.<name>` mentions in a doc comment: [(name, 0-based line index)].
+
+    A trailing dot (family form `x.<t>`, `x.*`, a cut-off `x.…`) is dropped;
+    a following `|` list (`x.a|b`) leaves only the first name checked.
+    """
+    rx = re.compile(r'(?<![\w.])(?:' + "|".join(re.escape(p) for p in prefixes) + r')\.[A-Za-z0-9_.]*')
+    return [(m.group(0).rstrip("."), i) for i, line in enumerate(doc.splitlines()) for m in rx.finditer(line)]
+
+
+def known_name(name, names):
+    """A define, or a family prefix (a family form needs a define starting `name.`)."""
+    return name in names or any(n.startswith(name + ".") for n in names)
+
+
+def lint_options(argv):
+    """(options, error): `lint` flags and the one templates dir."""
+    opts = {"pending": "", "scopes": [], "internal_suffix": False, "peers": [], "dir": "", "help": False}
+    args = list(argv)
+    while args:
+        a = args.pop(0)
+        if a in ("-h", "--help"):
+            opts["help"] = True
+        elif a in ("--pending", "--scopes", "--peer"):
+            if not args:
+                return opts, f"{a} needs a value"
+            v = args.pop(0)
+            if a == "--pending":
+                opts["pending"] = v
+            elif a == "--scopes":
+                opts["scopes"] = [s for s in v.split(",") if s]
+            else:
+                opts["peers"].append(v)
+        elif a == "--internal-suffix":
+            opts["internal_suffix"] = True
+        elif a.startswith("-"):
+            return opts, f"unknown flag: {a}"
+        elif not opts["dir"]:
+            opts["dir"] = a.rstrip("/")
+        else:
+            return opts, "lint takes one <templates dir>"
+    return opts, "" if (opts["dir"] or opts["help"]) else "lint takes <templates dir>"
+
+
+def lint(argv):
+    """The extractor rules (spec §8.2): naming, state effects, dead defines, doc prose."""
+    opts, error = lint_options(argv)
+    if error:
+        return usage(error)
+    if opts["help"]:
+        print(__doc__.strip())
+        return 0
+
+    meta, parsed = chart_templates(Path(opts["dir"]).parent)
+    defines, edges = analyze_chart(parsed)
+    prefix = meta.get("name") or Path(opts["dir"]).parent.name
+    names = {d["name"] for d in defines}
+    prefixes = [prefix]
+    for peer in opts["peers"]:
+        pmeta, pparsed = chart_templates(Path(peer.rstrip("/")).parent)
+        pdefines, _ = analyze_chart(pparsed)
+        names |= {d["name"] for d in pdefines}
+        prefixes.append(pmeta.get("name") or Path(peer).parent.name)
+
+    reachable = {c["to"] for c in edges if c["kind"] in ("call", "dispatch", "ref")}
+
+    hits = []
+
+    def hit(rule, d, text, line=None):
+        hits.append((rule, f"{opts['dir']}/{d['file']}", d["line"] if line is None else line, text))
+
+    for d in defines:
+        name, scope = d["name"], d["scope"]
+        if not name.startswith(prefix + "."):
+            hit("define-naming", d, f"{name} has no chart prefix '{prefix}.'")
+        if not scope:
+            hit("define-naming", d, f"{name} has no doc header '{name} (<scope>)'")
+        elif opts["scopes"] and scope not in opts["scopes"]:
+            hit("define-naming", d, f"{name} has scope '{scope}', none of --scopes")
+        stem = Path(d["file"]).name[:-len(".tpl")] if d["file"].endswith(".tpl") else Path(d["file"]).name
+        parts = stem.split(".")
+        if len(parts) > 1 and parts[-1] in opts["scopes"] and scope != parts[-1]:
+            hit("define-naming", d, f"{name} has scope '{scope}' in '*.{parts[-1]}.tpl'")
+        suffix = name.endswith(".internal")
+        in_file = d["file"].endswith(".internal.tpl")
+        if opts["internal_suffix"]:
+            if suffix and scope != "internal":
+                hit("define-naming", d, f"{name} ends '.internal' but its scope is '{scope}'")
+            if scope == "internal" and not suffix:
+                hit("define-naming", d, f"{name} has scope 'internal' but no '.internal' suffix")
+            if suffix and not in_file:
+                hit("define-naming", d, f"{name} ends '.internal' but is not in '*.internal.tpl'")
+            if in_file and not suffix:
+                hit("define-naming", d, f"{name} is in '*.internal.tpl' but does not end '.internal'")
+        elif suffix:
+            hit("define-naming", d, f"{name} ends '.internal'")
+
+        if d["returns"] in ("text", "yaml"):
+            for w in [w for w in d["writes"] if w not in d["localWrites"]]:
+                if not any(w == s or w.startswith(s + ".") for s in d["declared"]):
+                    hit("output-writes-ctx", d, f"{name} returns {d['returns']} and writes {w}")
+                    break
+        if d["returns"] == "nothing":
+            for w in d["writes"]:
+                if not any(w == s or w.startswith(s + ".") for s in d["declared"]):
+                    hit("mutator-undeclared-write", d, f"{name} writes {w}, not named in its Returns")
+                    break
+        if scope != "public" and name not in reachable:
+            hit("dead-define", d, f"{name} has no caller")
+        for mention, i in name_mentions(d["doc"], prefixes):
+            if not known_name(mention, names):
+                hit("doc-unknown-define", d, f"{mention} is not a define", d["docLine"] + i)
+
+    pending, order = read_pending(opts["pending"])
+    seen, hits_n, failed, pending_n = set(), 0, 0, 0
+    for rule, file, line, text in sorted(hits, key=lambda h: (h[1], h[2], h[0])):
+        if rule not in LINT_RULES:
+            continue
+        hits_n += 1
+        key = (rule, file)
+        if key in pending:
+            seen.add(key)
+            pending_n += 1
+            print(f"PENDING ({pending[key]}) {rule} {file}:{line}: {text}")
+        else:
+            failed += 1
+            print(f"FAIL {rule} {file}:{line}: {text}")
+    for key in order:
+        if key[0] in LINT_RULES and key not in seen:
+            failed += 1
+            print(f"FIXED? ({pending[key]}) {key[0]} {key[1]}")
+    print(f"extract.py: {hits_n} hits, {failed} failed, {pending_n} pending")
+    return 1 if failed else 0
+
+
 def usage(reason):
     print(f"extract.py: {reason}", file=sys.stderr)
-    print("usage: extract.py graph <chart dir> <out.js> | extract.py -h", file=sys.stderr)
+    print("usage: extract.py {graph <chart dir> <out.js> | lint [flags] <templates dir>} | extract.py -h",
+          file=sys.stderr)
     return 2
 
 
@@ -401,6 +577,8 @@ def main(argv):
     cmd, rest = argv[0], argv[1:]
     if cmd == "graph":
         return graph(rest)
+    if cmd == "lint":
+        return lint(rest)
     return usage(f"unknown subcommand: {cmd}")
 
 
