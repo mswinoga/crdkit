@@ -406,7 +406,7 @@ def graph(argv):
 
 
 LINT_RULES = ("define-naming", "output-writes-ctx", "mutator-undeclared-write",
-              "dead-define", "doc-unknown-define")
+              "dead-define", "doc-unknown-define", "doc-names-caller")
 
 
 def read_pending(path):
@@ -491,6 +491,10 @@ def lint(argv):
         prefixes.append(pmeta.get("name") or Path(peer).parent.name)
 
     reachable = {c["to"] for c in edges if c["kind"] in ("call", "dispatch", "ref")}
+    callers = {}
+    for c in edges:
+        if c["kind"] in ("call", "dispatch"):
+            callers.setdefault(c["to"], set()).add(c["from"])
 
     hits = []
 
@@ -538,6 +542,8 @@ def lint(argv):
         for mention, i in name_mentions(d["doc"], prefixes):
             if not known_name(mention, names):
                 hit("doc-unknown-define", d, f"{mention} is not a define", d["docLine"] + i)
+            elif scope != "callback" and mention in callers.get(name, ()):
+                hit("doc-names-caller", d, f"{mention} calls {name}", d["docLine"] + i)
 
     pending, order = read_pending(opts["pending"])
     seen, hits_n, failed, pending_n = set(), 0, 0, 0

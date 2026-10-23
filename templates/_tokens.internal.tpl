@@ -29,7 +29,7 @@ Implementation notes:
 crdkit.markersWalk.internal (internal)
 
 Collects marker names from a value's string leaves into
-`state.names`/`state.seen`. Invoked by crdkit.markers.
+`state.names`/`state.seen` — the one walk behind the marker listing.
 
 Interface:
 - Params (dict): { "value": <any structure>, "state": {"names": <list>,
@@ -78,12 +78,12 @@ Implementation notes:
 {{/*
 crdkit.tokenPrologue.internal (internal)
 
-Shared prologue of crdkit.token.add and crdkit.token.underlay.
+Shared prologue of the token-writing entry points.
 
 Interface:
 - Params (dict): { "ctx": <ctx>, "args": <the public call's list>,
-  "verb": "crdkit.token.add" | "crdkit.token.underlay", "holder":
-  <dict, written in place> }
+  "verb": <the public define's name, for the message>, "holder": <dict,
+  written in place> }
 - Returns: ""; sets holder's name, value, target, rawAnnotations,
   declaration (copy without `_value`/`_gen`) and annotationsValid.
 
@@ -133,8 +133,8 @@ Interface:
 Implementation notes:
 - A token annotation named like a built-in key OR "default" collides:
   "default" stays a target entry, so it can't also be an annotation.
-- The list is computed once per render (crdkit.render) and handed to
-  every resolution helper through ctx.reservedKeys.
+- The list is computed once per render and handed to every resolution
+  helper through ctx.reservedKeys.
 */}}
 {{- define "crdkit.reservedKeys.internal" -}}
 {{- $annotations := .tokenAnnotations | default (list) -}}
@@ -227,11 +227,9 @@ Implementation notes:
 crdkit.resolveEntry.internal (internal)
 
 Runs the target-escalation ladder against "def", selects one entry, then
-recursively substitutes "@ref@" markers throughout it
-(crdkit.substituteStructure.internal). The engine behind both
-crdkit.token.value (a real, named token) and crdkit.tokenDef.value (an
-arbitrary structure, resolved by the same rules without being registered
-in ctx.tokens). "fieldId" labels diagnostics only. Memoized onto "def"
+recursively substitutes "@ref@" markers throughout it. The engine
+behind both a real, named token and an arbitrary structure (resolved by
+the same rules without being registered in ctx.tokens). "fieldId" labels diagnostics only. Memoized onto "def"
 itself under "_value", keyed by target, valid for one generation
 ("_gen").
 
@@ -284,8 +282,8 @@ Implementation notes:
 - Annotations are never inspected here beyond being excluded from the
   target entries via "reservedKeys".
 - Guards one author mistake: no value found for the target — ERROR.
-  "Unknown token referenced" is the caller's concern (see
-  crdkit.token.value) — "def" is handed over already resolved-to-exist.
+  "Unknown token referenced" is the caller's concern; "def" is handed
+  over already resolved-to-exist.
 */}}
 {{- define "crdkit.resolveEntry.internal" -}}
 {{- $fieldId := .fieldId -}}
@@ -436,7 +434,7 @@ Implementation notes:
 - This is what lets a token's (or crdkit.tokenDef.value's "def") value
   be an arbitrary structure, not just a scalar — reserved keys
   (internal keys, "match", annotations) only mean anything at the OUTER
-  declaration level inspected by crdkit.resolveEntry.internal; once a
+  declaration level inspected when an entry is selected; once a
   value is selected and handed here, every key is ordinary data.
 - No cycle risk from the structural recursion itself — it's finite
   literal YAML/JSON, not a graph with back-edges. Cycle detection
@@ -538,10 +536,7 @@ Implementation notes:
 - string → as-is; bool/int/float → `toString`; list → every element
   stringified (a scalar as above, a nil as an empty string, a dict/list
   element as JSON), joined by "," (no space); dict → JSON (`toJson`).
-- Shared by crdkit.token.string, crdkit.tokenDef.string,
-  crdkit.tokens.substituteMarkers.internal and
-  crdkit.substituteText.internal — one place decides what "give me this
-  as text" means.
+- The one place deciding what "give me this as text" means.
 */}}
 {{- define "crdkit.stringify.internal" -}}
 {{- $v := .resolved.value -}}
@@ -569,12 +564,12 @@ text: {{ $v | toString | quote }}
 {{/*
 crdkit.tokens.substituteMarkers.internal (internal)
 
-crdkit.tokens.substitute without the final "@AT@" pass — for
-crdkit.render, which scans the result for unresolved markers before
-"@AT@" becomes "@" (an escaped `@AT@example.com@` is never reported).
+Text substitution without the final "@AT@" pass: the final render pass
+scans the result for unresolved markers before "@AT@" becomes "@" (an
+escaped `@AT@example.com@` is never reported).
 
 Interface:
-- Params (list): [ctx, text, target?] — same as crdkit.tokens.substitute
+- Params (list): [ctx, text, target?] — same as the public substitute.
 - Returns: text with every "@NAME@" marker of a known token resolved;
   "@AT@" untouched.
 
@@ -605,7 +600,7 @@ Implementation notes:
 crdkit.substituteValue.internal (internal)
 
 Builds a copy of a value with every string leaf substituted; map keys
-are data. Invoked by crdkit.render's final pass.
+are data. One walk per final pass.
 
 Interface:
 - Params (dict): { "ctx": <ctx>, "value": <any>, "holder": <dict>,

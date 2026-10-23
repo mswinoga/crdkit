@@ -5,8 +5,8 @@ Internal helpers of templates/_render.tpl and templates/_chain.tpl.
 {{/*
 crdkit.snapshotCtx.internal (internal)
 
-Builds a deep copy of ctx for the context trace. Invoked by
-crdkit.integrations.chain when a `trace` dict is given.
+Builds a deep copy of ctx for the context trace: one stage of the
+chain's `trace` dict.
 
 Interface:
 - Params (dict): { "ctx": <ctx>, "out": <dict, written in place> }

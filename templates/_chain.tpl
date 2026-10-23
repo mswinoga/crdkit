@@ -6,7 +6,7 @@ dispatcher for a specific library's "integration" templates.
 
 Interface:
 - Params (dict): { "chain": <list of fully-qualified template names>,
-  "ctx": <the ctx crdkit.render builds — see its doc comment>,
+  "ctx": <the ctx dict>,
   "trace": <optional
   caller-owned dict> }
 - Returns: nothing (each integration mutates `ctx` in place).

@@ -47,48 +47,6 @@ Schema node (a dict):
 
 Diagnostics paths are dotted values paths: a key containing "." goes in
 brackets (`a["b.c"]`), list elements are indexed (`a.b[0]`).
-
-Dependency graph (who calls whom):
-
-  crdkit.schema.validate (public)
-    -> crdkit.schema.check (public) -> crdkit.schema.checkNode.internal
-    -> crdkit.schema.walk.internal          (mode "structural")
-         -> crdkit.schema.scalarReason.internal
-  crdkit.schema.validateValues (public)
-    -> crdkit.schema.check (public)
-    -> crdkit.schema.valuesWalk.internal
-         -> crdkit.schema.resolveAndCheck.internal
-              -> crdkit.tokenDef.value / crdkit.tokens.substitute
-              -> crdkit.schema.walk.internal (mode "resolved")
-  crdkit.schema.resolve (public)
-    -> crdkit.schema.check (public)
-    -> crdkit.schema.path (public)
-    -> crdkit.schema.valuesWalk.internal
-  crdkit.schema.value (public) -> crdkit.schema.resolveAndCheck.internal
-  crdkit.schema.node (public)
-  crdkit.schema.path (public) -> crdkit.schema.path.internal
-  crdkit.schema.docs (public)
-    -> crdkit.schema.mdSkeleton.internal    (recursive)
-    -> crdkit.schema.mdNode.internal        (recursive)
-         -> crdkit.schema.mdRow.internal -> mdType.internal, mdDoc.internal
-         -> crdkit.schema.mdTable.internal
-         -> crdkit.schema.mdCaseExample.internal
-              -> crdkit.schema.generatedExample.internal (recursive)
-         -> crdkit.schema.sectionMarkdown.internal
-  crdkit.schema.order.internal (internal) -> crdkit.schema.path.internal
-  crdkit.schema.document (public)
-    -> crdkit.schema.jsonSchema (public)
-    -> crdkit.schema.html (public, templates/_viewer.tpl)
-    -> crdkit.schema.docs (public)
-  crdkit.schema.jsonSchema (public)
-    -> crdkit.schema.check (public)
-    -> crdkit.schema.order.internal
-    -> crdkit.schema.sectionProblem.internal
-    -> crdkit.schema.jsonNode.internal      (recursive)
-         -> crdkit.schema.orderedKeys.internal
-         -> crdkit.schema.examples.internal
-         -> crdkit.schema.sectionMarkdown.internal
-         -> crdkit.schema.ref.internal
 */}}
 
 {{/*
@@ -461,8 +419,9 @@ Implementation notes:
 - A non-empty `id` becomes the root `$id` (the viewer and the Markdown
   show it as the editor modeline); empty or absent → no `$id`; a
   non-string records an ERROR and is ignored.
-- Output is encoded by toPrettyJson: `<`, `>` and `&` appear as
-  `<`, `>` and `&` (valid JSON).
+- Output is encoded by toPrettyJson: `<` becomes `\u003c`, `>` becomes
+  `\u003e` and `&` becomes `\u0026` (valid JSON, safe inside a script
+  tag).
 */}}
 {{- define "crdkit.schema.jsonSchema" -}}
 {{- $diag := .diag -}}

@@ -61,7 +61,7 @@ Interface:
 Implementation notes:
 - Only scalar-type and list nodes, never below a per-target ancestor,
   never `static`.
-- A node carrying `perTarget:` (set by crdkit.schema.node, which knows
+- A node carrying `perTarget:` (written by the walker, which knows
   the ancestors) is decided by it alone.
 */}}
 {{- define "crdkit.schema.perTarget.internal" -}}
@@ -379,8 +379,8 @@ Implementation notes:
 crdkit.schema.locate.internal (internal)
 
 Walks the schema and the values one key at a time, following switches
-and tracking the values path and the per-target state. Shared by
-crdkit.schema.node and crdkit.schema.resolve.
+and tracking the values path and the per-target state: the one walker
+behind both the node lookup and the value resolution.
 
 Interface:
 - Params (dict): { "node": <starting node>, "value": <starting value>,
@@ -1640,7 +1640,7 @@ Interface:
 crdkit.schema.jsonNode.internal (internal)
 
 Converts one schema node (and, recursively, its descendants) to a JSON
-Schema node, see crdkit.schema.jsonSchema.
+Schema node.
 
 Interface:
 - Params (dict): { "node": <checked node>, "schemaPath": <YAML key
@@ -1928,8 +1928,8 @@ for one key set, creating the definition on first use.
 
 Interface:
 - Params (dict): { "targetKeys": <list of target keys>, "annotations":
-  <list of annotation keys>, "acc": <crdkit.schema.jsonNode.internal's
-  acc: "definitions" written, "declarations" registry created> }
+  <list of annotation keys>, "acc": <the converter's acc:
+  "definitions" written, "declarations" registry created> }
 - Returns: plain text `#/definitions/<name>`.
 
 Implementation notes:
