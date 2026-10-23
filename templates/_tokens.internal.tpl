@@ -122,9 +122,8 @@ Implementation notes:
 {{/*
 crdkit.reservedKeys.internal (internal)
 
-Computes the complete list of reserved (non-entry) keys: built-in crdkit
-keys (_value, _gen, _generated, match) plus every token annotation name
-that does NOT collide; colliding names are dropped with an ERROR.
+The reserved (non-entry) declaration keys: crdkit's own plus every
+non-colliding annotation name. See CONTRIBUTING "Token model".
 
 Interface:
 - Params (dict): { "tokenAnnotations": <list of strings>, "diag": <dict> }
@@ -154,9 +153,8 @@ value: {{ $result | toYaml | nindent 2 }}
 {{/*
 crdkit.tokens.merge.internal (internal)
 
-Merges system/default/user token declarations; applies collision,
-internal-key and naming-convention diagnostics. Output becomes
-ctx.tokens.
+Merges system, default and consumer token declarations into ctx.tokens,
+with their diagnostics. See CONTRIBUTING "Token model".
 
 Interface:
 - Params (dict): { "tokens": <raw user tokens, may be nil>, "diag":
@@ -226,12 +224,8 @@ Implementation notes:
 {{/*
 crdkit.resolveEntry.internal (internal)
 
-Runs the target-escalation ladder against "def", selects one entry, then
-recursively substitutes "@ref@" markers throughout it. The engine
-behind both a real, named token and an arbitrary structure (resolved by
-the same rules without being registered in ctx.tokens). "fieldId" names the entry in cycle detection; diagnostics name "label". Memoized onto "def"
-itself under "_value", keyed by target, valid for one generation
-("_gen").
+Selects the entry of "def" for a target and substitutes its markers —
+for tokens and token-like structures. See CONTRIBUTING "Target escalation".
 
 Interface:
 - Params (dict): { "fieldId": <string>, "label": <string in
@@ -247,36 +241,11 @@ Interface:
   string leaf's markers resolved> }
 
 Implementation notes:
-- Resolution order:
-  1. exact-target `_value` cache hit — valid only when the declaration's
-     `_gen` equals "gen" (compared via `toString`, robust to int/int64/
-     float64 after a YAML round-trip); on a mismatch `_value` is reset
-     to an empty dict and `_gen` set to "gen" first.
-  2. dedicated attribute — a literal key (other than a reserved key)
-     equal to the target string exactly.
-  3. `match:` — regex rules tried once, against the exact target only
-     (never retried at an escalated rung).
-  4. walk `parentTargetTemplate` one rung at a time, checking a literal
-     key (or cache) at each rung. `match:` must be checked before any
-     cache-tier hit from the walk, or a broader cached rung could steal
-     precedence from a target-specific `match:` rule.
-  5. `default` fallback, checked directly, after the walk is
-     exhausted — regardless of taxonomy. Must run after the walk (not
-     before), since "def" can have both a `default` entry and a
-     taxonomy-reachable one, and the more specific value must win.
-  6. `_generated[<exact target>]` — values registered by
-     crdkit.token.underlay; lowest priority, so a consumer always wins,
-     even with its own `default`. Applies to the exact target only (never
-     to a rung) and is cached ONLY under `_value[<target>]`: rungs are
-     shared across targets, `_generated` is per target.
-  7. none of the above: the "no value found" ERROR.
-- Caching: the result is cached under the exact target always, and
-  under every rung walked only when the selected entry holds no marker
-  (a map/list: checked on its `toJson`) — a marker-free entry
-  substitutes to the same value for every target reaching that rung. A
-  marker-holding entry (`_generated` too) is cached under the exact
-  target only: its substitution depends on the target, so another
-  target re-walks the ladder.
+- Order, caching and generations: CONTRIBUTING "Target escalation",
+  "Resolution model". The result is memoized onto "def" itself
+  (`_value[<target>]`, stamped `_gen`).
+- "fieldId" names the entry in cycle detection; diagnostics name
+  "label".
 - A "def" that's a bare scalar (not a dict) has nowhere to attach a
   `_value` cache, so it's resolved fresh every call — cheap, since
   there's no ladder to walk.
@@ -418,10 +387,8 @@ value: {{ $resolvedValue | toYaml | nindent 2 }}
 {{/*
 crdkit.substituteStructure.internal (internal)
 
-Recursively walks "value": a string is substituted via
-crdkit.substituteText.internal; a map/list is walked entry-by-entry
-(same recursion, one level down); any other scalar passes through
-unchanged.
+Substitutes every string leaf of "value" (maps and lists walked, other
+scalars unchanged).
 
 Interface:
 - Params (dict): { "value": <any>, "tokens": <live tokens map>,
@@ -566,9 +533,8 @@ text: {{ $v | toString | quote }}
 {{/*
 crdkit.tokens.substituteMarkers.internal (internal)
 
-Text substitution without the final "@AT@" pass: the final render pass
-scans the result for unresolved markers before "@AT@" becomes "@" (an
-escaped `@AT@example.com@` is never reported).
+Text substitution without the "@AT@" pass, so the final render pass can
+scan for typos first. See CONTRIBUTING "Render and the integration chain".
 
 Interface:
 - Params (list): [ctx, text, target?] — same as the public substitute.

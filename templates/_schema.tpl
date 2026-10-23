@@ -191,9 +191,8 @@ Implementation notes:
 {{/*
 crdkit.schema.resolve (public)
 
-Returns a subtree of the values with every per-target value resolved
-for one target — for library code that maps whole subtrees into the
-model.
+A values subtree with every per-target value resolved for one target,
+for library code mapping whole subtrees into the model.
 
 Interface:
 - Params (dict): { "ctx": <ctx>, "schema": <root node>, "values":
@@ -240,9 +239,8 @@ value: {{ $out.value | toYaml | nindent 2 }}
 {{/*
 crdkit.schema.value (public)
 
-Resolves one field's value for a target and checks it against the
-field's node — for library code that needs a value for a target other
-than the render's own.
+Resolves one field for a target and checks it against its node — for a
+value of a target other than the render's own.
 
 Interface:
 - Params (dict): { "ctx": <ctx>, "node": <the field's node, see
@@ -485,9 +483,8 @@ Implementation notes:
 {{/*
 crdkit.schema.document (public)
 
-Generates one rendering of a values schema's documentation: the JSON
-Schema, the HTML viewer or the Markdown reference. A library calls it
-once per format, from its own documentation templates.
+One format of a values schema's documentation: JSON Schema, HTML viewer
+or Markdown reference. See CONTRIBUTING "Schema documentation".
 
 Interface:
 - Params (dict): { "format": "json" | "html" | "md", "schemaText":

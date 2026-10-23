@@ -1,10 +1,1 @@
 # <rule> <file> <F-id or step> (<feature>): a matching lint hit is PENDING.
-doc-shape templates/_diagnostics.tpl C7 (doc-reduction)
-doc-shape templates/_helpers.tpl C7 (doc-reduction)
-doc-shape templates/_labels.tpl C7 (doc-reduction)
-doc-shape templates/_model.tpl C7 (doc-reduction)
-doc-shape templates/_schema.internal.tpl C7 (doc-reduction)
-doc-shape templates/_schema.tpl C7 (doc-reduction)
-doc-shape templates/_tokens.internal.tpl C7 (doc-reduction)
-doc-shape templates/_tokens.tpl C7 (doc-reduction)
-doc-shape templates/_viewer.internal.tpl C7 (doc-reduction)

@@ -12,11 +12,15 @@ in the viewer's walk order, plus one record per switch.
 Interface:
 - Params (dict): { "json": <JSON Schema as a dict>, "out": <dict;
   "items" and "switches" lists are appended in place> }
-- Returns: nothing (mutating helper).
+- Returns: nothing (mutating helper). Appends to `out.items` one
+  `{path, label, parent, type, perTarget, required, shared, summary,
+  doc, sections, keywords: {default, pattern, enum, keysPattern},
+  declarationKeys, examples, example: {has, value, generated}, case:
+  {by, value}}` per tree row, to `out.switches` one `{path, by, values,
+  title, unless?}` per switch.
 
 Implementation notes:
-- Values come from the defines the viewer mirrors no longer:
-  crdkit.schema.jsonType.internal, jsonPerTarget.internal,
+- Values come from crdkit.schema.jsonType.internal, jsonPerTarget.internal,
   jsonDeclaration.internal, generatedExample.internal, mdDoc.internal,
   path.internal.
 - Items are appended in pre-order: a node before its children, a switch
@@ -272,9 +276,8 @@ Interface:
 {{/*
 crdkit.schema.viewCaseExample.internal (internal)
 
-Builds a switch case's example: the matching example entries wrapped in
-their ancestor keys, else the case's generated example with its `by` set,
-wrapped in the key labels.
+A switch case's example: the matching example entries in their ancestor
+keys, else the generated example with its `by` set, in the key labels.
 
 Interface:
 - Params (dict): { "node": <case definition>, "switch": <the

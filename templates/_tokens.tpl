@@ -1,78 +1,10 @@
 {{/*
-All token resolution logic — scope (public/internal) is declared per
-template below, not uniformly for the file. Product-specific token
-content (locked/default keys, values) is never referenced by name —
-callers pass "system"/"defaults" dicts explicitly
-(crdkit.tokens.merge.internal).
-
-Diagnostics: every helper that can fail takes a "diag" dict
-(`{errors, warnings, infos}`, any subset) and appends to it instead of
-calling `fail` — a single author mistake must never hard-abort a render.
-
-Resolution is lazy, per-target, and memoized:
-- A token resolves (and is diagnosed, if malformed) only when
-  something needs it — a "@NAME@" marker referencing it.
-- A declared-but-never-used broken token produces no diagnostic.
-- Resolving the same token for a target OTHER than the one driving the
-  current render is a first-class, cheap operation (not a re-render).
-  Each target gets its own value, also within one render: a rung cache
-  holds only marker-free entries, so a marker-holding entry
-  (`@LOGICAL_ENV@`, a per-target token) is substituted per target
-  (crdkit.resolveEntry.internal).
-
-Token declaration shape (what a consumer/integration writes/reads on
-`ctx.tokens[NAME]`):
-- A bare scalar (same value for every target) — crdkit.tokens.merge.internal
-  normalizes it into `{default: <that>}` right after merging, so
-  `ctx.tokens[NAME]` is ALWAYS a dict.
-- Reserved dict keys (never target entries): the crdkit-internal keys
-  "_value" (memoization cache), "_gen" (generation the cache belongs to)
-  and "_generated" (values registered by crdkit.token.underlay), "match"
-  (regex rules), and every TOKEN ANNOTATION name the calling library
-  passes to crdkit.render as `tokenAnnotations`
-  (crdkit.reservedKeys.internal). "default" is NOT
-  reserved — it's an ordinary target entry that crdkit ALSO treats as a
-  hardcoded fallback (see crdkit.resolveEntry.internal). Every other key
-  IS a target entry.
-- Token annotations are static metadata on a declaration (e.g. an owner or an
-  exposure marker). crdkit never interprets their names or values and
-  never resolves them. Libraries read and write them only through
-  crdkit.token.annotate / crdkit.token.info / crdkit.token.names, never
-  by reading or writing a declaration dict.
-- Internal keys written into a declaration by a consumer, defaults or
-  system are stripped at merge time with a WARNING
-  (crdkit.tokens.merge.internal).
-
-Cache generations: `ctx.gen` is a counter bumped by every
-crdkit.token.add / crdkit.token.underlay. A declaration's "_gen" records
-the generation its "_value" cache was written under; on a mismatch the
-cache is discarded wholesale before use (crdkit.resolveEntry.internal).
-The current generation travels as the "gen" param through every
-internal resolution template, like "reservedKeys".
-
-A resolved VALUE can itself be structural, not just a scalar: once the
-target-escalation ladder selects an entry, every STRING LEAF within it
-is recursively substituted for "@ref@" markers
-(crdkit.substituteStructure.internal) — a dict/list value comes back
-with the same shape, markers replaced throughout. Non-string scalars
-(bool/int/float) pass through unchanged.
-
-Resolution RESULT shape: every public entry point below returns YAML
-`{value: <resolved thing>}` — a single-key wrapper that exists ONLY
-because Helm's `fromYaml`/`fromJson` cannot decode a bare top-level
-scalar or list (verified empirically: it silently returns an error
-dict instead of erroring loudly). Never read `ctx.tokens[NAME].value`
-directly — that key doesn't exist on the declaration; always go
-through crdkit.token.value.
-
-Target model: "target" is an opaque string — could be a sequenced
-instance, env, family, or tier; crdkit never inspects its shape.
-Escalating to a broader target is delegated to a caller-supplied
-"parentTarget" template (see crdkit.resolveEntry.internal) — crdkit
-only walks it, never defines the taxonomy. crdkit.matchRules is
-available for such a template to build pattern-based hops on. No
-proactive "target is required" check — an unset target is only
-diagnosed if something actually tries to resolve against it.
+Token resolution: the merge, lookup and substitution engine and the token
+API; scope is per define.
+- See CONTRIBUTING "Resolution model".
+- See CONTRIBUTING "Target escalation".
+- See CONTRIBUTING "Token model".
+- Never read `ctx.tokens[NAME].value`: resolve through crdkit.token.value.
 */}}
 
 {{/*
@@ -152,9 +84,8 @@ Interface:
 {{/*
 crdkit.markerPattern (public)
 
-The one definition of a "@NAME@" marker; every marker match in crdkit
-(substitution, unresolved-marker scan, schema checks, JSON Schema
-`markers` pattern) uses it.
+The one definition of a "@NAME@" marker; every marker match uses it.
+See CONTRIBUTING "Token model".
 
 Interface:
 - Params: an empty dict, or `{group: true}`.
@@ -342,9 +273,8 @@ value: ""
 {{/*
 crdkit.token.string (public)
 
-Resolves a REAL token and coerces the result to text (see
-crdkit.stringify.internal) — for use outside the usual "@NAME@" marker
-mechanism, when the caller wants the value directly.
+Resolves a real token as text, for a caller that wants the value
+outside a marker. See CONTRIBUTING "Resolution model".
 
 Interface:
 - Params (list): [ctx, name, target?] — same as crdkit.token.value
@@ -368,9 +298,8 @@ Implementation notes:
 {{/*
 crdkit.tokenDef.value (public)
 
-Resolves an arbitrary structure using the exact same target- escalation
-rules as a real token, without requiring it to be registered under a
-name in ctx.tokens.
+Resolves an arbitrary structure by the token rules, without registering
+it in ctx.tokens.
 
 Interface:
 - Params (list): [ctx, fieldId, def, target?]
@@ -534,10 +463,8 @@ Implementation notes:
 {{/*
 crdkit.token.underlay (public)
 
-Registers a GENERATED value: the lowest-priority source for a token,
-consulted only after every consumer-declared source (exact target,
-match, parent walk, default) found nothing. Creates the token if it does
-not exist.
+Registers a generated value, a token's lowest-priority source; creates
+the token if missing. See CONTRIBUTING "Target escalation".
 
 Interface:
 - Params (list): [ctx, name, value, annotations?, target?]

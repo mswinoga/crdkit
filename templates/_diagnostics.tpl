@@ -20,8 +20,7 @@ Interface:
 crdkit.diag.warning (public)
 
 Records a warning diagnostic: appends `message` to `diag.warnings` in
-place. Libraries and crdkit itself record every warning through this
-template.
+place; every warning goes through this define.
 
 Interface:
 - Params (list): [diag, message]

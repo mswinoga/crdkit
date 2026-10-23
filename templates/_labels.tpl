@@ -1,9 +1,8 @@
 {{/*
 crdkit.standardLabels (public)
 
-Standard labels computed from Helm's own context — not called
-automatically by crdkit.render; a specific library merges the result
-into its own `ctx.model.metadata.labels` from within its chain.
+Standard labels from Helm's context, for a library's chain to merge into
+`ctx.model.metadata.labels` (crdkit.render never adds them).
 
 Interface:
 - Params (dict): { "context": <root $> }

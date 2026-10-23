@@ -290,8 +290,7 @@ value: {{ concat .targetKeys (list "default" "match") (.node.annotations | defau
 crdkit.schema.checkDeclaration.internal (internal)
 
 Checks the keys of one consumer token declaration against the keys in
-effect (crdkit.schema.declarationKeys.internal); part of the structural
-pass.
+effect (structural pass).
 
 Interface:
 - Params (dict): { "node": <checked node>, "value": <the declaration, a
@@ -378,9 +377,8 @@ Implementation notes:
 {{/*
 crdkit.schema.locate.internal (internal)
 
-Walks the schema and the values one key at a time, following switches
-and tracking the values path and the per-target state: the one walker
-behind both the node lookup and the value resolution.
+Walks schema and values one key at a time (switches followed, values
+path and per-target state tracked) for the node lookup and resolution.
 
 Interface:
 - Params (dict): { "node": <starting node>, "value": <starting value>,
@@ -768,9 +766,8 @@ Implementation notes:
 {{/*
 crdkit.schema.valuesWalk.internal (internal)
 
-Value pass over (normalized) values: finds every per-target value and
-checks it for one target; with "out", also builds the copy of the values
-with every per-target value resolved.
+Value pass: checks every per-target value for one target; with "out",
+also builds the resolved copy. See CONTRIBUTING "Values schema".
 
 Interface:
 - Params (dict): { "ctx": <ctx>, "node": <checked node>, "value":
@@ -1380,9 +1377,8 @@ Implementation notes:
 {{/*
 crdkit.schema.order.internal (internal)
 
-Derives the text position of every block-style key of a schema written
-as YAML. Helm's fromYaml decodes into Go maps, so a parsed schema has no
-key order; the text keeps it.
+The text position of every block-style key of a YAML schema (a parsed
+schema has no key order). See CONTRIBUTING "Schema documentation".
 
 Interface:
 - Params (dict): { "text": <schema as YAML text> }
@@ -1900,9 +1896,8 @@ Implementation notes:
 {{/*
 crdkit.schema.jsonDeclaration.internal (internal)
 
-Reads the closed declaration keys of a per-target JSON Schema node from
-the shared definition its declaration branch references (see
-crdkit.schema.declarationRef.internal).
+The closed declaration keys of a per-target JSON Schema node, read from
+the shared definition its declaration branch references.
 
 Interface:
 - Params (dict): { "node": <JSON Schema node>, "defs": <JSON Schema
