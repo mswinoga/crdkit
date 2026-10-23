@@ -729,17 +729,19 @@ page: no external request, system fonts, light and dark through
 - Per target: `yes` (may be a token declaration), `markers` (may hold
   `@NAME@` markers), `no` (static).
 
-## Local testing
+## Testing
 
-```sh
-make test   # helm unittest harness -f '../tests/*_test.yaml'
-            # install the plugin first if needed:
-            #   helm plugin install https://github.com/helm-unittest/helm-unittest
-```
+`command make test` (needs the helm-unittest plugin:
+`helm plugin install https://github.com/helm-unittest/helm-unittest`).
+Layout and assert rules: `CONTRIBUTING.md` "Testing".
 
-`harness/` + `tests/` exercise crdkit's own helpers directly,
-independent of any specific library's token content or CRD shape — see
-`CLAUDE.md`'s "Testing" section for sharp edges.
+- `tests/suites/` — helm-unittest suites through `tests/stub`, a
+  minimal library on crdkit's public API.
+- `scripts/lint.sh` — text lint of `templates/` (mdeploy runs it on its
+  own templates).
+- `tests/requirements.md` — the requirement catalogue (C- ids) the
+  tests cite.
+- `harness/` + `tests/*_test.yaml` — legacy suites, being migrated.
 
-crdkit is also exercised end-to-end through `../mdeploy/harness` — see
-`../mdeploy/README.md`.
+End to end, crdkit runs under mdeploy's tests
+(`../mdeploy/README.md` "Testing").
