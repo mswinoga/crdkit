@@ -17,7 +17,7 @@ Test names cite these ids: every `it:` starts with the ids it covers
   committed with `skip:` / `# pending:`. Ids refer to
   `../docs/architecture-review/` (workspace) (F- findings, Q- decisions).
 
-## Used by mdeploy
+## Contracts
 
 - **C-1** · contract — `crdkit.render {context, tokens, target, system,
   defaults, parentTargetTemplate, chain, tokenAnnotations, diag, state,
@@ -116,8 +116,20 @@ Test names cite these ids: every `it:` starts with the ids it covers
   json|html|md, schemaText, example?, sections?, title?, htmlLink?, id?,
   diag}`; unknown format → E; key order from the schema text; sections
   by node path, malformed → E, dropped; HTML self-contained. Callable
-  from a library's templates (mdeploy generates its docs through it).
-
+  from a library's templates (a library generates its docs through it).
+- **C-29** · contract — `defaults` param of `crdkit.render` (a library
+  may pass `{}` and put its library tokens in `system`).
+- **C-30** · contract — `crdkit.listExtend`, `crdkit.ensureDictKey`,
+  `crdkit.model.hasPath`.
+- **C-31** · incidental — `crdkit.tokenDef.value|string` (used internally
+  by the schema value pass), `crdkit.token.value` called directly.
+- **C-32** · contract — `crdkit.name`, `crdkit.noParentTarget` (default
+  `parentTargetTemplate`), `crdkit.integrations.chain {chain, ctx,
+  trace?}` (with `trace`, one snapshot per stage).
+- **C-33** · contract — Exact-target literal keys in token declarations
+  (libraries closing keys via `targetKeys` leave them to library code).
+- **C-34** · incidental — `crdkit/values.schema.json` is `{}`: the
+  crdkit chart constrains no values.
 - **C-35** · contract — `crdkit.token.annotate [ctx, name,
   annotations]`: sets each declared annotation key (overwrite), no
   resolution effect; unknown token / non-dict / undeclared key → E,
@@ -133,21 +145,5 @@ Test names cite these ids: every `it:` starts with the ids it covers
 - **C-39** · contract — `crdkit.diag.lines {diag, levels?}` (ERROR →
   WARNING → INFO, de-duplicated, no leading/trailing newline) and
   `crdkit.diag.count {diag, level}` (distinct count).
-
-## Not used by mdeploy templates
-
-- **C-29** · contract — `defaults` param of `crdkit.render` (mdeploy
-  passes `{}`; its library tokens go in `system`).
-- **C-30** · contract — `crdkit.listExtend`, `crdkit.ensureDictKey`,
-  `crdkit.model.hasPath`.
-- **C-31** · incidental — `crdkit.tokenDef.value|string` (used internally
-  by the schema value pass), `crdkit.token.value` called directly.
-- **C-32** · contract — `crdkit.name`, `crdkit.noParentTarget` (default
-  `parentTargetTemplate`), `crdkit.integrations.chain {chain, ctx,
-  trace?}` (with `trace`, one snapshot per stage).
-- **C-33** · contract — Exact-target literal keys in token declarations
-  (libraries closing keys via `targetKeys` leave them to library code).
-- **C-34** · incidental — `crdkit/values.schema.json` is `{}`: the
-  crdkit chart constrains no values.
 - **C-40** · incidental — `crdkit.render` `trace` and
   `scripts/trace.sh`: developer tooling, untested by rule.

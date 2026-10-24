@@ -7,7 +7,7 @@ accumulator (it never `fail()`s; problems are `# ERROR:` / `# WARNING:`
 schema engine with generated documentation.
 
 crdkit knows no CRD and no "environment"/"family"/"tier": `target` is an
-opaque string. A specific library (e.g. `mdeploy`) supplies all of that
+opaque string. A specific library (e.g. `mycrd`) supplies all of that
 and wraps `crdkit.render`.
 
 <!-- toc depth=3 -->
@@ -31,12 +31,12 @@ and wraps `crdkit.render`.
 
 ## Who should depend on this
 
-A CRD-rendering library chart (`mdeploy` in this workspace), never an
-app repo directly; app repos depend on the library (`mdeploy/README.md`).
+A CRD-rendering library chart (e.g. `mycrd`), never an
+app repo directly; app repos depend on the library (`mycrd/README.md`).
 
 <!-- example: docs/readme-examples/usage render=none -->
 ```yaml
-# mdeploy's Chart.yaml
+# mycrd's Chart.yaml
 dependencies:
   - name: crdkit
     version: "0.2.1"
@@ -64,9 +64,8 @@ Everything product-specific arrives as a param; exact shape in
   per stage; `scripts/trace.sh` prints the changed leaves.
 - crdkit never reads `.Values` and sets nothing of the CR's shape: the
   chain builds `ctx.model`, and the output is that model, substituted.
-- Exact rules: [contract](docs/requirements.md#used-by-mdeploy) — C-1,
-  C-2, C-3; [not used by mdeploy](docs/requirements.md#not-used-by-mdeploy-templates)
-  — C-29, C-32, C-40.
+- Exact rules: [contract](docs/requirements.md#contracts) — C-1,
+  C-2, C-3, C-29, C-32, C-40.
 
 ## Integration chain and the model
 
@@ -97,9 +96,8 @@ Everything product-specific arrives as a param; exact shape in
   integration never prints YAML itself.
 - Order is precedence: in the sketch, consumer labels first, standard
   labels win on collision, later integrations can override anything.
-- Exact rules: [contract](docs/requirements.md#used-by-mdeploy) — C-4,
-  C-5, C-6, C-27, C-39; [not used by mdeploy](docs/requirements.md#not-used-by-mdeploy-templates)
-  — C-30.
+- Exact rules: [contract](docs/requirements.md#contracts) — C-4,
+  C-5, C-6, C-27, C-39, C-30.
 
 ## Substitution
 
@@ -128,7 +126,7 @@ db.acme.com is up; mail ops@acme.com
 - `@AT@` is a literal `@`, replaced after every other marker:
   `ops@AT@acme.com` stays text even though `@acme.com@` would be a
   marker.
-- Exact rules: [contract](docs/requirements.md#used-by-mdeploy) — C-7,
+- Exact rules: [contract](docs/requirements.md#contracts) — C-7,
   C-17, C-38.
 
 ## Resolving tokens
@@ -206,9 +204,8 @@ value: special-db.acme.com
 - Order: exact-target key → `match:` rules (exact target only) →
   the library's parent walk → `default` → a generated value → ERROR
   "no value found".
-- Exact rules: [contract](docs/requirements.md#used-by-mdeploy) — C-11,
-  C-13, C-16; [not used by mdeploy](docs/requirements.md#not-used-by-mdeploy-templates)
-  — C-31.
+- Exact rules: [contract](docs/requirements.md#contracts) — C-11,
+  C-13, C-16, C-31.
 
 ## Target escalation
 
@@ -228,9 +225,8 @@ value: special-db.acme.com
 - Every rung is a plain key of the declaration; `match:` applies to the
   exact target only, before the walk.
 - A rung that comes back to an earlier one is an ERROR.
-- Exact rules: [contract](docs/requirements.md#used-by-mdeploy) — C-11,
-  C-12, C-18; [not used by mdeploy](docs/requirements.md#not-used-by-mdeploy-templates)
-  — C-33.
+- Exact rules: [contract](docs/requirements.md#contracts) — C-11,
+  C-12, C-18, C-33.
 
 ## Token model
 
@@ -255,7 +251,7 @@ tokens:
   like a reserved key is an ERROR, ignored.
 - crdkit checks no token names: a library sets its naming policy in its
   values schema (`keys.pattern`).
-- Exact rules: [contract](docs/requirements.md#used-by-mdeploy) — C-8,
+- Exact rules: [contract](docs/requirements.md#contracts) — C-8,
   C-9, C-10, C-35, C-36, C-37.
 
 ### Adding tokens from an integration
@@ -296,7 +292,7 @@ value: jdbc:db.acme.com
   exact target, sets only missing annotations and creates a missing
   token.
 - Non-dict annotations or an undeclared annotation key: ERROR, ignored.
-- Exact rules: [contract](docs/requirements.md#used-by-mdeploy) — C-14,
+- Exact rules: [contract](docs/requirements.md#contracts) — C-14,
   C-15.
 
 ## Values schema
@@ -371,7 +367,7 @@ properties:
   the render (library-owned); an invalid consumer `match:` regex is an
   ERROR, rule skipped.
 - Messages: [`docs/diagnostics.md`](docs/diagnostics.md). Exact rules:
-  [contract](docs/requirements.md#used-by-mdeploy) — C-19, C-20, C-21,
+  [contract](docs/requirements.md#contracts) — C-19, C-20, C-21,
   C-22.
 
 ### Passes
@@ -431,7 +427,7 @@ crdkit.schema.resolve         a values subtree, per-target values resolved (from
   value → key omitted (ERROR), a failing value kept unconverted.
 - Share one `seen` dict across the value-pass calls: each
   `<path>|<target>` is checked and reported once.
-- Exact rules: [contract](docs/requirements.md#used-by-mdeploy) — C-23,
+- Exact rules: [contract](docs/requirements.md#contracts) — C-23,
   C-24, C-25, C-26.
 
 ### Templates
@@ -518,7 +514,7 @@ Example values.
   the JSON Schema `$id`.
 - Problems go to `diag`, never into the text; an unknown format is an
   ERROR and renders nothing.
-- Exact rules: [contract](docs/requirements.md#used-by-mdeploy) — C-28.
+- Exact rules: [contract](docs/requirements.md#contracts) — C-28.
 
 <!-- sketch -->
 ```gotemplate

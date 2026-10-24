@@ -1,4 +1,4 @@
-# mdeploy's Chart.yaml
+# mycrd's Chart.yaml
 dependencies:
   - name: crdkit
     version: "@CHART_VERSION@"
