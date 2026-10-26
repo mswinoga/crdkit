@@ -21,7 +21,7 @@ Test names cite these ids: every `it:` starts with the ids it covers
 
 - **C-1** · contract — `crdkit.render {context, tokens, target, system,
   defaults, parentTargetTemplate, chain, tokenAnnotations, diag, state,
-  trace?}` → CR YAML + diagnostics; never reads `.Values`; `ctx.model`
+  trace?, schemaChecks?}` → CR YAML + diagnostics; never reads `.Values`; `ctx.model`
   is built only by the chain.
 - **C-2** · contract — `state` keys are copied into ctx; a key colliding
   with a crdkit ctx key → E naming the key, "collides with a crdkit ctx

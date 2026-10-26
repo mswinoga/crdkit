@@ -250,7 +250,9 @@ Implementation notes:
 ## Target escalation
 
 - One caller hook, `parentTargetTemplate`: `{target, context}` → the
-  next rung or nothing; default `crdkit.noParentTarget`.
+  next rung or nothing; default `crdkit.noParentTarget`. Asked once per
+  rung per render (`ctx.parents`), so the answer depends only on
+  `target` (and the constant `context`).
   Implementations guard map lookups with `hasKey` (see "Helm / Go
   template facts").
 - Order per token and target: `_value[<exact target>]` (current
@@ -281,8 +283,8 @@ Implementation notes:
   stamps its `_value`; on a mismatch `resolveEntry.internal` resets
   `_value` (compared via `toString`: int/int64/float64). Applies to
   `crdkit.tokenDef.*` structures. Every internal resolution helper
-  forwards `gen` and `reservedKeys`; one that forgets silently resolves
-  with defaults.
+  forwards `gen`, `reservedKeys` and `parents`; one that forgets
+  silently resolves with defaults (`parents`: an unshared cache).
 - `crdkit.token.add` stores the exact target's entry unresolved (it may
   reference a token a later integration adds); repeat calls merge.
   `crdkit.token.underlay` stores `_generated[<target>]`. Both check only

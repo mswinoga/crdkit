@@ -236,7 +236,8 @@ Interface:
   <caller's root context>, "resolving": <list, internal cycle
   detection>, "reservedKeys": <list of non-entry key names, optional —
   defaults to the built-in crdkit keys>, "gen": <current cache
-  generation, optional — defaults to 0> }
+  generation, optional — defaults to 0>, "parents": <dict, optional —
+  ctx.parents, the hook answers per rung; filled> }
 - Returns YAML: { "value": <resolved string, or a dict/list with every
   string leaf's markers resolved> }
 
@@ -267,6 +268,7 @@ Implementation notes:
 {{- $resolving := .resolving | default (list) -}}
 {{- $reservedKeys := .reservedKeys | default (list "_value" "_gen" "_generated" "match") -}}
 {{- $gen := .gen | default 0 -}}
+{{- $parents := ternary .parents (dict) (kindIs "map" .parents) -}}
 
 {{- $isDict := kindIs "map" $raw -}}
 
@@ -315,31 +317,34 @@ value: {{ index $cache $target | toYaml | nindent 2 }}
       {{- $stop := false -}}
       {{- $cycleDetected := false -}}
       {{- range $i := until 1000 -}}
-        {{- if not $stop -}}
-          {{- $next := "" -}}
-          {{- if $parentTargetTemplate -}}
-            {{- $next = include $parentTargetTemplate (dict "target" $current "context" $root) -}}
+        {{- if $stop -}}{{- break -}}{{- end -}}
+        {{- $next := "" -}}
+        {{- if $parentTargetTemplate -}}
+          {{/* the hook answers per rung, never per token: asked once per render (ctx.parents). */}}
+          {{- if not (hasKey $parents $current) -}}
+            {{- $_ := set $parents $current (include $parentTargetTemplate (dict "target" $current "context" $root)) -}}
           {{- end -}}
-          {{- if not $next -}}
+          {{- $next = index $parents $current -}}
+        {{- end -}}
+        {{- if not $next -}}
+          {{- $stop = true -}}
+        {{- else if has $next $visited -}}
+          {{- include "crdkit.diag.error" (list $diag (printf "target escalation chain for '%s' cycles back to '%s' while resolving from '%s'" $label $next $target)) -}}
+          {{- $stop = true -}}
+          {{- $cycleDetected = true -}}
+        {{- else -}}
+          {{- $visited = append $visited $next -}}
+          {{- $rungsWalked = append $rungsWalked $next -}}
+          {{- if and $cacheable (hasKey $cache $next) -}}
+            {{- $rawValue = index $cache $next -}}
+            {{- $found = true -}}
             {{- $stop = true -}}
-          {{- else if has $next $visited -}}
-            {{- include "crdkit.diag.error" (list $diag (printf "target escalation chain for '%s' cycles back to '%s' while resolving from '%s'" $label $next $target)) -}}
+          {{- else if and (not (has $next $reservedKeys)) (hasKey $raw $next) -}}
+            {{- $rawValue = index $raw $next -}}
+            {{- $found = true -}}
             {{- $stop = true -}}
-            {{- $cycleDetected = true -}}
           {{- else -}}
-            {{- $visited = append $visited $next -}}
-            {{- $rungsWalked = append $rungsWalked $next -}}
-            {{- if and $cacheable (hasKey $cache $next) -}}
-              {{- $rawValue = index $cache $next -}}
-              {{- $found = true -}}
-              {{- $stop = true -}}
-            {{- else if and (not (has $next $reservedKeys)) (hasKey $raw $next) -}}
-              {{- $rawValue = index $raw $next -}}
-              {{- $found = true -}}
-              {{- $stop = true -}}
-            {{- else -}}
-              {{- $current = $next -}}
-            {{- end -}}
+            {{- $current = $next -}}
           {{- end -}}
         {{- end -}}
       {{- end -}}
@@ -363,7 +368,7 @@ value: {{ index $cache $target | toYaml | nindent 2 }}
     {{- end -}}
   {{- end -}}
 
-  {{- $substituted := include "crdkit.substituteStructure.internal" (dict "value" $rawValue "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" (append $resolving $fieldId) "reservedKeys" $reservedKeys "gen" $gen) | fromYaml -}}
+  {{- $substituted := include "crdkit.substituteStructure.internal" (dict "value" $rawValue "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" (append $resolving $fieldId) "reservedKeys" $reservedKeys "gen" $gen "parents" $parents) | fromYaml -}}
   {{- $resolvedValue := $substituted.value -}}
   {{- if $cacheable -}}
     {{- $rawText := $rawValue -}}
@@ -395,7 +400,7 @@ Interface:
   "target": <string>, "diag": <dict>, "parentTargetTemplate":
   <fully-qualified template name>, "root": <caller's root context>,
   "resolving": <list of names in progress>, "reservedKeys": <list>,
-  "gen": <int> }
+  "gen": <int>, "parents": <dict, optional> }
 - Returns YAML: { "value": <"value", with every string leaf's "@ref@"
   markers substituted> }
 
@@ -420,20 +425,21 @@ Implementation notes:
 {{- $resolving := .resolving -}}
 {{- $reservedKeys := .reservedKeys -}}
 {{- $gen := .gen -}}
+{{- $parents := .parents -}}
 {{- if kindIs "string" $value -}}
-  {{- $substituted := include "crdkit.substituteText.internal" (dict "text" $value "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" $resolving "reservedKeys" $reservedKeys "gen" $gen) -}}
+  {{- $substituted := include "crdkit.substituteText.internal" (dict "text" $value "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" $resolving "reservedKeys" $reservedKeys "gen" $gen "parents" $parents) -}}
 value: {{ $substituted | toYaml | nindent 2 }}
 {{- else if kindIs "map" $value -}}
   {{- $result := dict -}}
   {{- range $k, $v := $value -}}
-    {{- $sub := include "crdkit.substituteStructure.internal" (dict "value" $v "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" $resolving "reservedKeys" $reservedKeys "gen" $gen) | fromYaml -}}
+    {{- $sub := include "crdkit.substituteStructure.internal" (dict "value" $v "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" $resolving "reservedKeys" $reservedKeys "gen" $gen "parents" $parents) | fromYaml -}}
     {{- $_ := set $result $k $sub.value -}}
   {{- end -}}
 value: {{ $result | toYaml | nindent 2 }}
 {{- else if kindIs "slice" $value -}}
   {{- $result := list -}}
   {{- range $item := $value -}}
-    {{- $sub := include "crdkit.substituteStructure.internal" (dict "value" $item "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" $resolving "reservedKeys" $reservedKeys "gen" $gen) | fromYaml -}}
+    {{- $sub := include "crdkit.substituteStructure.internal" (dict "value" $item "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" $resolving "reservedKeys" $reservedKeys "gen" $gen "parents" $parents) | fromYaml -}}
     {{- $result = append $result $sub.value -}}
   {{- end -}}
 value: {{ $result | toYaml | nindent 2 }}
@@ -453,7 +459,7 @@ Interface:
   "target": <string>, "diag": <dict>, "parentTargetTemplate":
   <fully-qualified template name>, "root": <caller's root context>,
   "resolving": <list of names in progress, non-empty>,
-  "reservedKeys": <list>, "gen": <int> }
+  "reservedKeys": <list>, "gen": <int>, "parents": <dict, optional> }
 - Returns: text with every "@NAME@" reference substituted.
 
 Implementation notes:
@@ -476,6 +482,7 @@ Implementation notes:
 {{- $resolving := .resolving -}}
 {{- $reservedKeys := .reservedKeys -}}
 {{- $gen := .gen -}}
+{{- $parents := .parents -}}
 {{- $markers := regexFindAll (include "crdkit.markerPattern" (dict)) $text -1 -}}
 {{- range $marker := $markers -}}
   {{- $refName := trimSuffix "@" (trimPrefix "@" $marker) -}}
@@ -483,7 +490,7 @@ Implementation notes:
     {{- if has $refName $resolving -}}
       {{- include "crdkit.diag.error" (list $diag (printf "token '%s' references '@%s@', which is already being resolved — cycle (direct or indirect self-reference)" (last $resolving) $refName)) -}}
     {{- else -}}
-      {{- $refResolved := include "crdkit.resolveEntry.internal" (dict "fieldId" $refName "def" (index $tokens $refName) "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" $resolving "reservedKeys" $reservedKeys "gen" $gen) | fromYaml -}}
+      {{- $refResolved := include "crdkit.resolveEntry.internal" (dict "fieldId" $refName "def" (index $tokens $refName) "tokens" $tokens "target" $target "diag" $diag "parentTargetTemplate" $parentTargetTemplate "root" $root "resolving" $resolving "reservedKeys" $reservedKeys "gen" $gen "parents" $parents) | fromYaml -}}
       {{- $text = $text | replace $marker (include "crdkit.stringify.internal" (dict "resolved" $refResolved) | fromYaml).text -}}
     {{- end -}}
   {{- end -}}

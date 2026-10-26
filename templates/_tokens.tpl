@@ -237,7 +237,7 @@ Resolves a REAL token, registered under "name" in ctx.tokens.
 Interface:
 - Params (list): [ctx, name, target?]
   - ctx: dict with "tokens"/"diag"/"parentTargetTemplate"/"target"
-    keys, plus "reservedKeys" and "gen" (both optional)
+    keys, plus "reservedKeys", "gen" and "parents" (all optional)
   - name: token name to resolve
   - target: optional — defaults to ctx.target; pass explicitly only to
     resolve for a target OTHER than the render's own
@@ -268,7 +268,7 @@ Implementation notes:
 {{- include "crdkit.diag.error" (list $ctx.diag (printf "unknown token '%s' referenced" $name)) -}}
 value: ""
 {{- else -}}
-{{- include "crdkit.resolveEntry.internal" (dict "fieldId" $name "def" (index $ctx.tokens $name) "tokens" $ctx.tokens "target" $target "diag" $ctx.diag "parentTargetTemplate" $ctx.parentTargetTemplate "root" $ctx.root "reservedKeys" $ctx.reservedKeys "gen" $ctx.gen) -}}
+{{- include "crdkit.resolveEntry.internal" (dict "fieldId" $name "def" (index $ctx.tokens $name) "tokens" $ctx.tokens "target" $target "diag" $ctx.diag "parentTargetTemplate" $ctx.parentTargetTemplate "root" $ctx.root "reservedKeys" $ctx.reservedKeys "gen" $ctx.gen "parents" $ctx.parents) -}}
 {{- end -}}
 {{- end -}}
 
@@ -306,7 +306,7 @@ it in ctx.tokens.
 Interface:
 - Params (list): [ctx, fieldId, def, target?]
   - ctx: dict with "tokens"/"diag"/"parentTargetTemplate"/"target"
-    keys, plus "reservedKeys" and "gen" (both optional)
+    keys, plus "reservedKeys", "gen" and "parents" (all optional)
   - fieldId: label used in diagnostics — required, since "def" has no
     name of its own
   - def: a structure sourced from consumer Values, shaped like a token
@@ -328,7 +328,7 @@ Implementation notes:
 {{- if and (gt (len .) 3) (index . 3) -}}
   {{- $target = index . 3 -}}
 {{- end -}}
-{{- include "crdkit.resolveEntry.internal" (dict "fieldId" $fieldId "def" $def "tokens" $ctx.tokens "target" $target "diag" $ctx.diag "parentTargetTemplate" $ctx.parentTargetTemplate "root" $ctx.root "reservedKeys" $ctx.reservedKeys "gen" $ctx.gen) -}}
+{{- include "crdkit.resolveEntry.internal" (dict "fieldId" $fieldId "def" $def "tokens" $ctx.tokens "target" $target "diag" $ctx.diag "parentTargetTemplate" $ctx.parentTargetTemplate "root" $ctx.root "reservedKeys" $ctx.reservedKeys "gen" $ctx.gen "parents" $ctx.parents) -}}
 {{- end -}}
 
 {{/*

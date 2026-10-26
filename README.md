@@ -43,6 +43,9 @@ Everything product-specific arrives as a param; exact shape in
   colliding with a crdkit `ctx` key is an ERROR, ignored.
 - `trace`: an optional caller-owned dict collecting one `ctx` snapshot
   per stage; `scripts/trace.sh` prints the changed leaves.
+- `schemaChecks`: an optional dict also passed to
+  `crdkit.schema.validate`, so the schema self-check runs once per
+  render.
 - crdkit never reads `.Values` and sets nothing of the CR's shape: the
   chain builds `ctx.model`, and the output is that model, substituted.
 - Exact rules: [contract](docs/requirements.md#used-by-mdeploy) — C-1,
