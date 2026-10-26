@@ -124,7 +124,8 @@ normalized.
 
 Interface:
 - Params (dict): { "schema": <root node>, "values": <any>, "diag":
-  <dict>, "path": <values path prefix, optional — "" at the root> }
+  <dict>, "path": <values path prefix, optional — "" at the root>,
+  "schemaChecks": <dict, optional — the self-check memo; filled> }
 - Returns YAML: { "value": <normalized values> } — defaults applied,
   every failing node dropped; the values unchanged when the schema
   itself is invalid (crdkit.schema.check, validation skipped).
@@ -135,10 +136,16 @@ Implementation notes:
   checked by crdkit.schema.validateValues / crdkit.schema.value.
 - A root value that fails its node comes back as an empty value of the
   node's shape ({} for a map).
+- "schemaChecks" handed on to crdkit.render (its param of that name)
+  makes the chain's passes reuse this self-check.
 */}}
 {{- define "crdkit.schema.validate" -}}
 {{- $values := .values -}}
-{{- if include "crdkit.schema.check" (dict "schema" .schema "diag" .diag) -}}
+{{- $memoCtx := dict "diag" .diag -}}
+{{- if kindIs "map" .schemaChecks -}}
+  {{- $_ := set $memoCtx "schemaChecks" .schemaChecks -}}
+{{- end -}}
+{{- if include "crdkit.schema.checkMemo.internal" (dict "ctx" $memoCtx "schema" .schema) -}}
   {{- $out := dict -}}
   {{- if kindIs "invalid" .values -}}
     {{- $values = dict -}}

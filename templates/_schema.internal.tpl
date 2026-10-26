@@ -350,15 +350,16 @@ crdkit.schema.checkMemo.internal (internal)
 Self-checks a schema once per distinct schema and render.
 
 Interface:
-- Params (dict): { "ctx": <ctx>, "schema": <root node> }
+- Params (dict): { "ctx": <ctx, or any dict with "diag" and an optional
+  "schemaChecks">, "schema": <root node> }
 - Returns: `true` or "" like crdkit.schema.check (writes the
   `ctx.schemaChecks` memo).
 
 Implementation notes:
 - Keyed by `sha256sum (toJson schema)` in `ctx.schemaChecks`, created by
-  crdkit.render; a caller ctx without it falls back to a plain check.
-- Only the ctx-taking passes memoize; `crdkit.schema.check` itself stays
-  unmemoized (no ctx).
+  crdkit.render (or seeded through its `schemaChecks` param); a caller
+  ctx without it falls back to a plain check.
+- `crdkit.schema.check` itself stays unmemoized.
 */}}
 {{- define "crdkit.schema.checkMemo.internal" -}}
 {{- $ctx := .ctx -}}
@@ -734,7 +735,7 @@ Implementation notes:
 {{- if and .token (not (hasKey $ctx.tokens .token)) -}}
   {{- include "crdkit.diag.error" (list $ctx.diag (printf "unknown token '%s' referenced" .token)) -}}
 {{- else if .token -}}
-  {{- $value = (include "crdkit.resolveEntry.internal" (dict "fieldId" .token "label" (.path | default .token) "def" (index $ctx.tokens .token) "tokens" $ctx.tokens "target" $target "diag" $ctx.diag "parentTargetTemplate" $ctx.parentTargetTemplate "root" $ctx.root "reservedKeys" $ctx.reservedKeys "gen" $ctx.gen) | fromYaml).value -}}
+  {{- $value = (include "crdkit.resolveEntry.internal" (dict "fieldId" .token "label" (.path | default .token) "def" (index $ctx.tokens .token) "tokens" $ctx.tokens "target" $target "diag" $ctx.diag "parentTargetTemplate" $ctx.parentTargetTemplate "root" $ctx.root "reservedKeys" $ctx.reservedKeys "gen" $ctx.gen "parents" $ctx.parents) | fromYaml).value -}}
 {{- else if .tokens -}}
   {{- $value = (include "crdkit.tokenDef.value" (list $ctx .path .def $target) | fromYaml).value -}}
 {{- else -}}

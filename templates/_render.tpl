@@ -32,6 +32,9 @@ Interface:
     runs — library-owned data for its integrations (e.g. normalized
     input); crdkit never reads it. A key equal to a crdkit ctx key
     records an ERROR and is ignored.
+  - schemaChecks: optional self-check memo seed, the dict passed as
+    crdkit.schema.validate's `schemaChecks` (shared with the same
+    `diag`), so a schema checked before the chain is not checked again
 - Returns: the rendered CR as YAML text, followed by its diagnostics as
   `# ERROR:`/`# WARNING:`/`# INFO:` comment lines.
 
@@ -41,9 +44,12 @@ Implementation notes:
   whole model -> scan for unresolved "@word@" markers (possible typos)
   -> replace "@AT@" with "@" -> emit `{{ model | toYaml }}`, then the diagnostics.
 - ctx carries: root, diag, model, tokens, target, parentTargetTemplate,
-  reservedKeys (list) and gen (int, starts at 0; bumped by
+  reservedKeys (list), schemaChecks (the self-check memo, seeded or
+  empty) and gen (int, starts at 0; bumped by
   crdkit.token.add / crdkit.token.underlay to invalidate resolution
-  caches), plus every accepted "state" key.
+  caches) and parents (dict, `{<rung>: <next rung>}`: the
+  parentTargetTemplate answers, filled during resolution), plus every
+  accepted "state" key.
 - Never reads `context.Values` itself, and has no opinion on
   apiVersion/kind/labels/spec — entirely the chain's responsibility via
   crdkit.dictMerge/listExtend/ensureDictKey.
@@ -77,7 +83,7 @@ Implementation notes:
 {{- $tokens := $tokensYaml | fromYaml -}}
 
 {{- $model := dict -}}
-{{- $ctx := dict "root" $root "diag" $diag "model" $model "tokens" $tokens "target" $target "parentTargetTemplate" $parentTargetTemplate "reservedKeys" $reservedKeys "gen" 0 "schemaChecks" (dict) -}}
+{{- $ctx := dict "root" $root "diag" $diag "model" $model "tokens" $tokens "target" $target "parentTargetTemplate" $parentTargetTemplate "reservedKeys" $reservedKeys "gen" 0 "schemaChecks" (ternary .schemaChecks (dict) (kindIs "map" .schemaChecks)) "parents" (dict) -}}
 {{- range $key, $value := .state | default dict -}}
   {{- if hasKey $ctx $key -}}
     {{- include "crdkit.diag.error" (list $diag (printf "state key '%s' collides with a crdkit ctx key and was ignored" $key)) -}}
