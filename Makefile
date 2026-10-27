@@ -4,12 +4,13 @@
 deps:
 	cd tests/stub && helm dependency update
 
-# Regenerates the define reference, the diagnostics list and the README
-# example blocks; `test` fails when a committed copy is stale.
+# Regenerates the define reference, the diagnostics list, the README
+# example blocks and its toc; `test` fails when a committed copy is stale.
 docs: deps
 	python3 -I scripts/extract.py reference . docs/defines.md
 	python3 -I scripts/extract.py diagnostics . docs/diagnostics.md
 	python3 -I scripts/examples.py render README.md --chart tests/stub --kind stub
+	python3 -I scripts/toc.py render README.md
 
 # Framework suites on tests/stub, text and extractor lint, docs freshness.
 test: deps
@@ -19,6 +20,7 @@ test: deps
 		--md docs/requirements.md --requirements docs/requirements.md --tests tests --readme README.md \
 		templates
 	python3 -I scripts/examples.py check README.md --chart tests/stub --kind stub
+	python3 -I scripts/toc.py check README.md
 	@set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
 		python3 -I scripts/extract.py reference . "$$tmp/defines.md"; \
 		python3 -I scripts/extract.py diagnostics . "$$tmp/diagnostics.md"; \
